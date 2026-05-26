@@ -15,6 +15,10 @@ run = "make build-poster-gen"
 description = "在 Docker 中编译 seek-preview Linux 二进制（含 FFmpeg 7 dev 库）"
 run = "make build-seek-preview"
 
+[tasks.build-frame-forge]
+description = "在 Docker 中编译 frame-forge Linux 二进制（含 OpenCV + FFmpeg 7 dev 库）"
+run = "make build-frame-forge"
+
 [tasks.update]
 description = "构建并部署到本地 Jellyfin 开发容器"
 run = "make update"
