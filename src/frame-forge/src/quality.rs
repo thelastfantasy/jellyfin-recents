@@ -99,7 +99,84 @@ fn compute_laplacian_variance(gray: &image::GrayImage) -> f64 {
     if count == 0 { 0.0 } else { sum / count as f64 }
 }
 
-fn compute_frame_diff(a: &image::GrayImage, b: &image::GrayImage) -> f64 {
+/// Detect and return a crop rectangle that removes black/static borders.
+/// Scans edges from outside in, stopping when pixel variance exceeds threshold.
+pub fn detect_border_crop(img: &image::DynamicImage, threshold: f64) -> (u32, u32, u32, u32) {
+    let gray = img.to_luma8();
+    let (w, h) = gray.dimensions();
+    let w_i = w as i32;
+    let h_i = h as i32;
+
+    let mut left = 0u32;
+    let mut right = w - 1;
+    let mut top = 0u32;
+    let mut bottom = h - 1;
+
+    // Scan from left
+    for x in 0..(w / 4) {
+        if column_variance(&gray, x, h) > threshold { left = x; break; }
+    }
+    // Scan from right
+    for x in (0..(w / 4)).rev() {
+        let rx = w - 1 - x;
+        if column_variance(&gray, rx, h) > threshold { right = rx; break; }
+    }
+    // Scan from top
+    for y in 0..(h / 4) {
+        if row_variance(&gray, y, w) > threshold { top = y; break; }
+    }
+    // Scan from bottom
+    for y in (0..(h / 4)).rev() {
+        let by = h - 1 - y;
+        if row_variance(&gray, by, w) > threshold { bottom = by; break; }
+    }
+
+    // Ensure at least 80% of image remains
+    let crop_w = right.saturating_sub(left).max(w * 8 / 10);
+    let crop_h = bottom.saturating_sub(top).max(h * 8 / 10);
+
+    // Re-center if we cropped too much
+    let right = (left + crop_w).min(w - 1);
+    let bottom = (top + crop_h).min(h - 1);
+
+    (left, top, right, bottom)
+}
+
+/// Crop an image to the given rectangle.
+pub fn crop_image(img: &image::DynamicImage, rect: (u32, u32, u32, u32)) -> image::DynamicImage {
+    let (left, top, right, bottom) = rect;
+    let w = right.saturating_sub(left).max(1);
+    let h = bottom.saturating_sub(top).max(1);
+    img.crop_imm(left, top, w, h)
+}
+
+fn column_variance(gray: &image::GrayImage, x: u32, height: u32) -> f64 {
+    let mut sum = 0f64;
+    for y in 0..height {
+        sum += gray.get_pixel(x, y)[0] as f64;
+    }
+    let mean = sum / height as f64;
+    let mut var = 0f64;
+    for y in 0..height {
+        let diff = gray.get_pixel(x, y)[0] as f64 - mean;
+        var += diff * diff;
+    }
+    var / height as f64
+}
+
+fn row_variance(gray: &image::GrayImage, y: u32, width: u32) -> f64 {
+    let mut sum = 0f64;
+    for x in 0..width {
+        sum += gray.get_pixel(x, y)[0] as f64;
+    }
+    let mean = sum / width as f64;
+    let mut var = 0f64;
+    for x in 0..width {
+        let diff = gray.get_pixel(x, y)[0] as f64 - mean;
+        var += diff * diff;
+    }
+    var / width as f64
+}
     let (aw, ah) = a.dimensions();
     let (bw, bh) = b.dimensions();
     if aw != bw || ah != bh {

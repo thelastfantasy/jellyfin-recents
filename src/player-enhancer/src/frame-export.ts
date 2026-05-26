@@ -540,6 +540,14 @@ export function showResultPage(resultUrl: string, fileSize: number): void {
 
   const fullUrl = resultUrl.startsWith('http') ? resultUrl : `${getBaseUrl()}${resultUrl}?api_key=${encodeURIComponent(getToken())}`
   const sizeStr = fileSize > 1024 * 1024 ? `${(fileSize / 1024 / 1024).toFixed(1)} MB` : `${(fileSize / 1024).toFixed(0)} KB`
+  let _rotation = 0
+
+  function updatePreview(): void {
+    const img = document.getElementById('jfs-fe-result-img') as HTMLImageElement
+    if (img) img.style.transform = `rotate(${_rotation}deg)`
+    const deg = document.getElementById('jfs-fe-rot-val')
+    if (deg) deg.textContent = `${_rotation}°`
+  }
 
   _modalRoot.innerHTML = `
     <div class="alive-card d3 alive-enter-scale max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col overflow-hidden">
@@ -548,11 +556,21 @@ export function showResultPage(resultUrl: string, fileSize: number): void {
         <h2 class="text-lg font-semibold text-slate-900">预览</h2>
         <button id="jfs-fe-close2" class="alive-button alive-button-ghost alive-button-sm">✕</button>
       </div>
-      <div class="flex-1 flex items-center justify-center p-4 bg-slate-50 overflow-auto">
-        <img src="${fullUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-lg" alt="result" />
+      <div class="flex-1 flex items-center justify-center p-4 bg-slate-50 overflow-auto" id="jfs-fe-result-wrap">
+        <img id="jfs-fe-result-img" src="${fullUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-lg transition-transform" alt="result" style="transform:rotate(0deg)" />
+      </div>
+      <div class="alive-stack alive-stack-h items-center gap-2 p-2 border-t border-slate-200 bg-slate-100 flex-wrap">
+        <span class="text-xs text-slate-500 font-medium">旋转:</span>
+        <button id="jfs-fe-rot-l5" class="alive-button alive-button-ghost alive-button-xs">-5°</button>
+        <button id="jfs-fe-rot-l1" class="alive-button alive-button-ghost alive-button-xs">-1°</button>
+        <span id="jfs-fe-rot-val" class="text-xs font-bold text-slate-700 w-8 text-center">0°</span>
+        <button id="jfs-fe-rot-r1" class="alive-button alive-button-ghost alive-button-xs">+1°</button>
+        <button id="jfs-fe-rot-r5" class="alive-button alive-button-ghost alive-button-xs">+5°</button>
+        <span class="alive-separator-v mx-1"></span>
+        <span class="text-xs text-slate-500">${sizeStr}</span>
       </div>
       <div class="alive-stack alive-stack-h items-center justify-between p-4 border-t border-slate-200">
-        <span class="text-sm text-slate-500">${sizeStr}</span>
+        <span class="text-xs text-slate-400">调整旋转后截图保存</span>
         <div class="flex gap-2">
           <button id="jfs-fe-download" class="alive-button alive-button-primary alive-button-sm">下载</button>
           <button id="jfs-fe-delete" class="alive-button alive-button-secondary alive-button-sm">删除</button>
@@ -575,4 +593,8 @@ export function showResultPage(resultUrl: string, fileSize: number): void {
   document.getElementById('jfs-fe-download')?.addEventListener('click', () => {
     window.open(fullUrl, '_blank')
   })
+  document.getElementById('jfs-fe-rot-l5')?.addEventListener('click', () => { _rotation -= 5; updatePreview() })
+  document.getElementById('jfs-fe-rot-l1')?.addEventListener('click', () => { _rotation -= 1; updatePreview() })
+  document.getElementById('jfs-fe-rot-r1')?.addEventListener('click', () => { _rotation += 1; updatePreview() })
+  document.getElementById('jfs-fe-rot-r5')?.addEventListener('click', () => { _rotation += 5; updatePreview() })
 }

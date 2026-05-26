@@ -256,6 +256,15 @@ async fn handle_stitch(
     send_progress(stream, "running", "classifying", 0, 1, 30.0).await?;
     let _hashes: Vec<u64> = images.iter().map(|img| scene_classifier::phash(img)).collect();
 
+    // Auto-crop borders from all frames (detect player chrome / black bars)
+    let crop_rect = quality::detect_border_crop(&images[0], 5.0);
+    let images: Vec<image::DynamicImage> = images.iter()
+        .map(|img| quality::crop_image(img, crop_rect))
+        .collect();
+    eprintln!("[frame-forge] auto-crop: ({},{})→({},{}) → {}x{}",
+        crop_rect.0, crop_rect.1, crop_rect.2, crop_rect.3,
+        images[0].width(), images[0].height());
+
     // Scene classification
     let class = scene_classifier::classify(&images);
     eprintln!("[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1}",

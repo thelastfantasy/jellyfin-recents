@@ -41,7 +41,7 @@ pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32) {
         *v = Complex { re: v.re / (w * h) as f64, im: v.im / (w * h) as f64 };
     }
 
-    // Find peak
+    // Find peak with sub-pixel refinement via parabola interpolation
     let mut max_val = 0.0f64;
     let mut peak_x = 0i32;
     let mut peak_y = 0i32;
@@ -56,11 +56,36 @@ pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32) {
         }
     }
 
-    // Convert wrapped offset to real offset
-    let dx = if peak_x as usize > w / 2 { peak_x as i32 - w as i32 } else { peak_x as i32 };
-    let dy = if peak_y as usize > h / 2 { peak_y as i32 - h as i32 } else { peak_y as i32 };
+    // Sub-pixel refinement: fit 1D parabola to peak + neighbors
+    let sub_x = parabola_refine(
+        r[(peak_y as usize * w + ((peak_x - 1 + w as i32) as usize % w))].re,
+        max_val,
+        r[(peak_y as usize * w + ((peak_x + 1) as usize % w))].re,
+    );
+    let sub_y = parabola_refine(
+        r[(((peak_y - 1 + h as i32) as usize % h) * w + peak_x as usize)].re,
+        max_val,
+        r[(((peak_y + 1) as usize % h) * w + peak_x as usize)].re,
+    );
 
-    (dx, dy)
+    let dx_f = peak_x as f64 + sub_x;
+    let dy_f = peak_y as f64 + sub_y;
+
+    // Convert wrapped offset to real offset (sub-pixel)
+    let half_w = w as f64 / 2.0;
+    let half_h = h as f64 / 2.0;
+    let dx = if dx_f > half_w { dx_f - w as f64 } else { dx_f };
+    let dy = if dy_f > half_h { dy_f - h as f64 } else { dy_f };
+
+    (dx.round() as i32, dy.round() as i32)
+}
+
+/// Parabolic interpolation for sub-pixel refinement.
+/// Given values at x-1, x, x+1, returns the sub-pixel offset from the peak.
+fn parabola_refine(left: f64, center: f64, right: f64) -> f64 {
+    let denom = 2.0 * (2.0 * center - left - right);
+    if denom.abs() < 1e-10 { return 0.0; }
+    (right - left) / denom
 }
 
 fn apply_hamming(gray: &image::GrayImage) -> Vec<f64> {
