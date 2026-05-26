@@ -5,14 +5,14 @@
 
 ## Summary
 
-�?player-enhancer 播放�?OSD 中新�?帧导�?按钮，点击后弹出 AliveUI 驱动的多页面 Modal（网格页/进度�?成果页）。用户浏览并勾选关键帧缩略图，配置导出参数（格式、分辨率约束、帧率、循环次数），通过 SSE 实时接收后端生成进度，最终下�?GIF/WebP 动画或全景拼接图�?
+�?player-enhancer 播放�?OSD 中新�?帧导�?按钮，点击后弹出 @alivecss/aliveui 驱动的多页面 Modal（网格页/进度�?成果页）。用户浏览并勾选关键帧缩略图，配置导出参数（格式、分辨率约束、帧率、循环次数），通过 SSE 实时接收后端生成进度，最终下�?GIF/WebP 动画或全景拼接图�?
 后端新增 Rust `frame-forge` daemon（扩�?seek-preview 架构），负责：ffmpeg-next 帧解码、帧质量检测（亮度/Laplacian 方差/pHash）、GIF/WebP 动画编码、三场景全景拼接（动漫→Phase Correlation + rustfft / 风景→AKAZE + OpenCV / 真人→帧差掩�?+ AKAZE）。C# 端新�?FrameExportController 提供帧缩略图 API、异步生成任务管理、SSE 进度推送、结果文件下�?删除�?
 ## Technical Context
 
 **Language/Version**: Rust 1.88 (frame-forge daemon) + TypeScript 5.x (player-enhancer) + C# .NET 8 (plugin 端点)
 **Primary Dependencies**:
 - Rust: `tokio`（async runtime）、`ffmpeg-next`（内存帧解码）、`image` + `imageproc`（图像处理）、`opencv`（AKAZE/BFMatcher/RANSAC，场�?B/C）、`rustfft`（Phase Correlation，场�?A）、`gif`（GIF 编码）、`webp`（WebP 编码）、`lru`（缓存）、`anyhow`
-- C#: .NET 8 内置（UnixDomainSocket, SSE, SemaphoreSlim）；`System.Text.Json` 序列�?- TypeScript: **AliveUI** CSS 框架（新�?npm 依赖，替�?`styles.ts` 全量 CSS）；`EventSource` API（SSE 客户端，内置�?
+- C#: .NET 8 内置（UnixDomainSocket, SSE, SemaphoreSlim）；`System.Text.Json` 序列�?- TypeScript: **@alivecss/aliveui** CSS 框架（新�?npm 依赖，替�?`styles.ts` 全量 CSS）；`EventSource` API（SSE 客户端，内置�?
 **Storage**: Rust LruCache�?00 条原始帧）；C# 任务内存字典（ConcurrentDictionary）；服务端临时文件目�?`{DataPath}/temp/frame-forge/{taskId}/`（定�?5min 清理�?**Testing**: `make test` �?`cargo test`（frame-export�? TypeScript 编译 + C# 编译；手动端到端验证
 **Target Platform**: Jellyfin Docker 容器（Linux x64）；前端桌面 + 移动�?Chrome/Safari；GPU 加速可选（OpenCL，需 Docker 透传 `/dev/dri` + `intel-compute-runtime`�?**Project Type**: Monorepo �?Rust daemon + C# plugin + TypeScript frontend module
 **Performance Goals**: 缩略�?11 帧加�?�?2s；动画导�?10帧�?80p �?8s；全景拼�?5帧�?20p �?15s；SSE 推送延�?< 500ms
@@ -66,7 +66,7 @@ src/player-enhancer/src/
 ├── frame-result.ts          # 成果页：预览/下载/删除/返回
 ├── icons.ts                 # 修改：新增帧导出按钮 SVG 图标
 ├── injector.ts              # 修改：注入帧导出按钮�?OSD
-└── styles.ts                # 重写：全量迁移到 AliveUI
+└── styles.ts                # 重写：全量迁移到 @alivecss/aliveui
 ```
 
 ### Source Code �?Modified Files
@@ -75,8 +75,8 @@ src/player-enhancer/src/
 Makefile                              # 新增 build-frame-forge target；test-rust/update 追加
 .github/workflows/build.yml           # opencv dev libs + frame-forge cargo test
 .github/workflows/release.yml         # frame-forge Linux 二进制构�?+ zip 打包
-src/player-enhancer/package.json      # 新增 aliveui 依赖
-src/player-enhancer/vite.config.ts    # 可能需调整（若 aliveui 需要特�?CSS 处理�?```
+src/player-enhancer/package.json      # 新增 @alivecss/aliveui 依赖
+src/player-enhancer/vite.config.ts    # 可能需调整（若 @alivecss/aliveui 需要特�?CSS 处理�?```
 
 ---
 
@@ -150,7 +150,7 @@ src/player-enhancer/vite.config.ts    # 可能需调整（若 aliveui 需要特�
 
 ```
 Phase 1: Setup（crate 骨架 + 构建�?  �?Phase 2: Foundational（Rust 核心 �?解码 + 质量检�?+ 协议�?  �?Phase 3: 动画导出（GIF/WebP 编码 �?可并�?Phase 4�?  �?Phase 4: 全景拼接（场景分�?+ 三条算法路径 + Blender�?  �?Phase 5: C# 端点（FrameExportController + Service + TaskManager�? �?可与 Phase 6 并行
-  �?Phase 6: 前端（Modal 多页�?+ AliveUI 迁移 + 参数/SSE/成果�?  �?Phase 7: 集成与部署验�?```
+  �?Phase 6: 前端（Modal 多页�?+ @alivecss/aliveui 迁移 + 参数/SSE/成果�?  �?Phase 7: 集成与部署验�?```
 
 ---
 
@@ -169,7 +169,7 @@ Phase 1: Setup（crate 骨架 + 构建�?  �?Phase 2: Foundational（Rust 核�
 | 动画编码 | `gif` crate + `webp` crate，内存编�?|
 | IPC | Unix domain socket（复�?seek-preview 二进制协议帧格式�?|
 | 取消机制 | 强制 kill 子进�?+ 清理临时目录（无需优雅取消�?|
-| CSS 框架 | AliveUI 全量迁移 player-enhancer（替�?styles.ts�?|
+| CSS 框架 | @alivecss/aliveui 全量迁移 player-enhancer（替�?styles.ts�?|
 
 ## Phase 1: Design
 

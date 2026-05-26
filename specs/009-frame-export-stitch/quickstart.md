@@ -27,7 +27,7 @@ make update   # builds frontend + enhancer + plugin + Rust binaries â†?cp to con
 ## Build Individual Components
 
 ```bash
-# Frontend (player-enhancer with AliveUI)
+# Frontend (player-enhancer with @alivecss/aliveui)
 cd src/player-enhancer && npm install && npm run build
 
 # C# plugin
@@ -85,7 +85,7 @@ curl "http://localhost:8600/JellyfinSuite/FrameExport/Result/{taskId}/output.gif
 - Unix socket path: `{DataPath}/jfs-frame-forge.sock` (separate from seek-preview's `jfs-seek-preview.sock`)
 - Frame decoding reuses `ffmpeg-next` with same config as seek-preview (slice threading, 4 workers max)
 - Progress events flow: Rust â†?mpsc channel â†?C# `ChannelReader` â†?`Response.Body.WriteAsync` SSE
-- AliveUI CSS is imported in `src/player-enhancer/src/styles.ts` â†?injected via existing `injectStyles()` pattern
+- @alivecss/aliveui CSS is imported in `src/player-enhancer/src/styles.ts` â†?injected via existing `injectStyles()` pattern
 - Temporary files at `{DataPath}/temp/frame-forge/{taskId}/` auto-cleaned after 5 min idle
 
 ## File Locations
@@ -97,6 +97,6 @@ curl "http://localhost:8600/JellyfinSuite/FrameExport/Result/{taskId}/output.gif
 | C# service | `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` |
 | C# controller | `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` |
 | Frontend modal | `src/player-enhancer/src/frame-forge.ts` |
-| Frontend styles (AliveUI) | `src/player-enhancer/src/styles.ts` |
+| Frontend styles (@alivecss/aliveui) | `src/player-enhancer/src/styles.ts` |
 | Temp directory | `{DataPath}/temp/frame-forge/` |
 | Socket file | `{DataPath}/jfs-frame-forge.sock` |

@@ -12,7 +12,7 @@
 - Q: 多个用户同时触发生成任务时，服务器如何控制并发生成任务数�?�?A: 基于可用资源动态调节（CPU/内存使用率阈值），优先保障视频播放流畅度（seek-preview daemon 及流媒体传输不受影响）；当资源紧张时自动降速或排队，不设硬编码并发上限
 - Q: 用户点击"取消"后，Rust daemon 中的解码/编码操作如何处理�?�?A: 强制终止子进程（直接 kill Rust 处理进程），立即清理该任务的临时文件目录；不实现优雅取消逻辑，靠进程隔离保证资源释放
 - Q: 全景图输出格式是否也提供多选（类似动画�?GIF/WebP）？ �?A: 提供 PNG �?WebP（无损）两个选项，默�?PNG；WebP 无损模式可保持画质同时减小文件体�?- Q: 帧数是否需要硬上限（仅保留 50 帧警告）�?�?A: 不设硬上限，仅保�?>50 帧时的用户警告；若资源紧张则�?FR-042 的动态资源调度降�?排队兜底
-- Q: AliveUI CSS 框架的使用范围是�?Modal 还是整个 player-enhancer�?�?A: 全量迁移——整�?player-enhancer 前端（OSD 按钮、亮�?音量指示器、速度 OSD、截�?UI、帧选择�?Modal 等所有组件）统一使用 AliveUI 样式体系，替�?`styles.ts` 中的自定�?CSS
+- Q: @alivecss/aliveui CSS 框架的使用范围是�?Modal 还是整个 player-enhancer�?�?A: 全量迁移——整�?player-enhancer 前端（OSD 按钮、亮�?音量指示器、速度 OSD、截�?UI、帧选择�?Modal 等所有组件）统一使用 @alivecss/aliveui 样式体系，替�?`styles.ts` 中的自定�?CSS
 - Q: 类似 QQ �?IM 软件按高度限制动图尺寸的需求如何满足？ �?A: 参数面板提供"按宽�?�?按高�?两个互斥的分辨率约束模式；用户设置一个值时另一输入框自动计算（保持原始宽高比）并置灰不可编辑；默认模式�?按宽�?
 - Q: 动漫/风景/真人三场景分类能否覆盖全场景？GPU（如 Intel Arc A310）对拼接任务是否有加速价值？ �?A: 三场�?+ Phase Correlation 兜底覆盖�?95% 场景（屏幕录�?CGI 均可归入现有路径，极暗场�?鱼眼镜头不在 v1 范围）；GPU 策略�?默认�?CPU，可�?OpenCL 加�?——若 Docker 容器检测到 OpenCL 可用则自动启�?GPU 路径处理 Warp/Blending，未透传 GPU 时静�?CPU fallback；不强制要求 GPU 依赖
 
@@ -350,7 +350,7 @@ GIF/WebP 动画生成相对简单，核心为：
 **通用**
 
 - **FR-049**: 所有新�?UI 文字 MUST 支持中文、日语、英语三�?- **FR-050**: 帧导出功�?MUST 不破�?Jellyfin 原有播放器的任何现有功能
-- **FR-051**: DRM 内容 MUST 禁用帧导出按�?- **FR-052**: 整个 player-enhancer 前端 MUST 使用 **AliveUI** CSS 框架（`aliveui`）进行样式开发，替换 `styles.ts` 中所有自定义 CSS（OSD 按钮、亮�?音量指示器、速度 OSD、seek OSD、截�?UI、帧选择�?Modal 等全部组件统一使用 AliveUI 语义类名和内联工具类�?
+- **FR-051**: DRM 内容 MUST 禁用帧导出按�?- **FR-052**: 整个 player-enhancer 前端 MUST 使用 **@alivecss/aliveui** CSS 框架（`aliveui`）进行样式开发，替换 `styles.ts` 中所有自定义 CSS（OSD 按钮、亮�?音量指示器、速度 OSD、seek OSD、截�?UI、帧选择�?Modal 等全部组件统一使用 @alivecss/aliveui 语义类名和内联工具类�?
 ### Key Entities
 
 - **帧选择�?Modal**: 多页�?SPA 前端组件（网格页 / 进度�?/ 成果页），管理帧选择、参数配置、SSE 进度监听、成果预览全流程
@@ -375,7 +375,7 @@ GIF/WebP 动画生成相对简单，核心为：
 - 视频文件存在�?Jellyfin 服务器本地文件系统（远程 URL / IPTV 流不支持帧导出）
 - Rust daemon 部署�?Linux 二进制（�?seek-preview），�?Linux 环境功能静默降级
 - 全景拼接 v1 仅支持静态镜头场景（摄像机无明显运动），水平拼接受限
-- GIF 输出色彩使用调色板量化（最�?256 色），WebP 支持全色�?- 全景拼接 Homography 退化时回退为简单堆叠（并排拼接），不做全局优化（如 Bundle Adjustment�?- 本功能与 seek-preview 共享 ffmpeg-next 框架�?LRU 缓存设计模式，可在同一 Rust binary 中实�?- 前端 Modal 及整�?player-enhancer 样式体系统一迁移�?AliveUI CSS 框架（安装为 npm 依赖）；`styles.ts` 中现有自定义 CSS 全部替换�?AliveUI 语义类名和工具类，仅保留 CSS 注入入口函数
+- GIF 输出色彩使用调色板量化（最�?256 色），WebP 支持全色�?- 全景拼接 Homography 退化时回退为简单堆叠（并排拼接），不做全局优化（如 Bundle Adjustment�?- 本功能与 seek-preview 共享 ffmpeg-next 框架�?LRU 缓存设计模式，可在同一 Rust binary 中实�?- 前端 Modal 及整�?player-enhancer 样式体系统一迁移�?@alivecss/aliveui CSS 框架（安装为 npm 依赖）；`styles.ts` 中现有自定义 CSS 全部替换�?@alivecss/aliveui 语义类名和工具类，仅保留 CSS 注入入口函数
 - poster-gen 已有�?SSE 进度模式、成果下�?删除 UI 模式可作为参考直接复�?- 临时文件目录 `{DataPath}/temp/frame-forge/` 在服务启动时自动创建，由 C# 后台定时器每 5 分钟扫描清理过期任务
 - 生成任务为服务端异步执行（不阻塞 HTTP 请求），C# 通过 mpsc channel 接收 Rust 进度事件并桥接到 SSE
 

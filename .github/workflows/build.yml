@@ -22,12 +22,13 @@ jobs:
           workspaces: |
             src/poster-gen
             src/seek-preview
+            src/frame-forge
 
-      - name: Install FFmpeg 7.x dev libs
+      - name: Install FFmpeg 7.x and OpenCV dev libs
         run: |
           sudo add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
           sudo apt-get update
-          sudo apt-get install -y pkg-config clang libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y pkg-config clang libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libopencv-dev
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

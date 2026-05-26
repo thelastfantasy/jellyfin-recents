@@ -13,16 +13,16 @@
 
 ---
 
-## Phase 1: Setup — crate 骨架 + 构建 + AliveUI 引入
+## Phase 1: Setup — crate 骨架 + 构建 + @alivecss/aliveui 引入
 
-**Purpose**: 建立 frame-forge Rust crate、C# 服务骨架、AliveUI npm 依赖、Makefile/CI 更新。
+**Purpose**: 建立 frame-forge Rust crate、C# 服务骨架、@alivecss/aliveui npm 依赖、Makefile/CI 更新。
 
 - [ ] T001 创建 `src/frame-forge/Cargo.toml`：package `frame-forge` edition 2021；依赖 tokio(full)、ffmpeg-next(codec+format+software-scaling)、image、imageproc、lru、anyhow、gif、webp、serde、serde_json、opencv、rustfft
 - [ ] T002 创建 `src/frame-forge/src/main.rs` 占位骨架（空 `tokio::main`，`cargo check` 通过）
 - [ ] T003 [P] 创建 `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` 占位骨架：类声明 + IDisposable + Unix socket 路径常量 + StartAsync/StopAsync stub
 - [ ] T004 [P] 创建 `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` 占位骨架：ApiController + Route("JellyfinSuite/FrameExport") + AllowAnonymous + 构造函数 DI
 - [ ] T005 [P] 创建 `src/JellyfinSuite.Plugin/Models/FrameExportDto.cs`：定义 GenerateRequest、GenerateResponse、TaskProgress、FrameQualityMeta 等 DTO 类
-- [ ] T006 [P] 安装 AliveUI：`cd src/player-enhancer && npm install aliveui`，确认 `package.json` 有依赖记录
+- [ ] T006 [P] 安装 @alivecss/aliveui：`cd src/player-enhancer && npm install @alivecss/aliveui`，确认 `package.json` 有依赖记录
 - [ ] T007 更新 `Makefile`：新增 build-frame-forge target（Docker ubuntu:24.04 + libopencv-dev + ffmpeg dev libs + cargo build --release → cp 到 Plugin 目录）、build 依赖加 build-frame-forge、update 追加 docker cp、test-rust 追加 cd src/frame-forge && cargo test
 - [ ] T008 [P] 更新 `.github/workflows/build.yml`：Cache Rust build workspaces 加 src/frame-forge、新增 apt install libopencv-dev libavcodec-dev... 步骤、test-rust 由 Makefile 自动覆盖
 - [ ] T009 [P] 更新 `.github/workflows/release.yml`：Cache Rust build workspaces 加 src/frame-forge、新增 apt install libopencv-dev、新增 Build frame-forge (Linux x64) 步骤（cargo build --release）、Copy binaries 步骤加 frame-forge-linux-x64、zip 打包加 frame-forge-linux-x64
@@ -58,9 +58,9 @@
 
 - [ ] T020 在 `src/player-enhancer/src/icons.ts` 新增帧导出按钮 SVG 图标 `ICON_FRAME_EXPORT`（建议用胶片格或网格图标）
 - [ ] T021 修改 `src/player-enhancer/src/injector.ts`：在 `injectPlayerButtons` 中新增帧导出按钮（附在截图按钮后方），绑定 click → 打开帧导出 Modal（预留 `openFrameExportModal()` stub，具体实现在 US1 任务）
-- [ ] T022 修改 `src/player-enhancer/src/styles.ts`：全量迁移到 AliveUI CSS 框架——删除所有自定义 CSS，改为 `import 'aliveui/css'` + 引入 AliveUI 主题变量；保留 CSS 注入入口函数 `injectStyles()`
+- [ ] T022 修改 `src/player-enhancer/src/styles.ts`：全量迁移到 @alivecss/aliveui CSS 框架——删除所有自定义 CSS，改为 `import '@alivecss/aliveui/css'` + 引入 @alivecss/aliveui 主题变量；保留 CSS 注入入口函数 `injectStyles()`
 
-**Checkpoint**: `GET /JellyfinSuite/FrameExport/{itemId}?positionMs=5000&width=320` 返回 JPEG 缩略图；OSD 栏出现新按钮；`styles.ts` 使用 AliveUI
+**Checkpoint**: `GET /JellyfinSuite/FrameExport/{itemId}?positionMs=5000&width=320` 返回 JPEG 缩略图；OSD 栏出现新按钮；`styles.ts` 使用 @alivecss/aliveui
 
 ---
 
@@ -72,10 +72,10 @@
 
 ### Implementation
 
-- [ ] T023 [P] [US1] 在 `src/player-enhancer/src/frame-forge.ts` 创建 Modal 容器壳：body-level 固定定位 + 遮罩 + AliveUI modal 样式 + 打开/关闭函数 `openFrameExportModal()` / `closeFrameExportModal()` + 关闭时暂停视频（可切换为不暂停）
+- [ ] T023 [P] [US1] 在 `src/player-enhancer/src/frame-forge.ts` 创建 Modal 容器壳：body-level 固定定位 + 遮罩 + @alivecss/aliveui modal 样式 + 打开/关闭函数 `openFrameExportModal()` / `closeFrameExportModal()` + 关闭时暂停视频（可切换为不暂停）
 - [ ] T024 [P] [US1] 在 `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` 实现单帧缩略图端点：`GET /FrameExport/{itemId}?positionMs=N&width=320` → 调 `_service.GetFrameAsync()` → `File(jpeg, "image/jpeg")` + `Response.Headers["X-Frame-Quality"]` 返回质量元数据 JSON
 - [ ] T025 [US1] 在 `src/player-enhancer/src/frame-forge.ts` 实现初始帧加载：计算当前播放进度前后 5 帧的时间戳列表 → Promise.all fetch 缩略图 → 渲染网格
-- [ ] T026 [P] [US1] 在 `src/player-enhancer/src/frame-forge.ts` 实现网格渲染函数：活用 AliveUI grid 类 (`grid grid-cols-4 gap-2` 等) + 每格内含 `<img>` + 时间戳标签文字
+- [ ] T026 [P] [US1] 在 `src/player-enhancer/src/frame-forge.ts` 实现网格渲染函数：活用 @alivecss/aliveui grid 类 (`grid grid-cols-4 gap-2` 等) + 每格内含 `<img>` + 时间戳标签文字
 - [ ] T027 [US1] 在 `src/player-enhancer/src/injector.ts` 的帧导出按钮 click handler 调用 `openFrameExportModal()`：传入 videoEl、getItemId()、getServerAddress()、getRawToken()
 - [ ] T028 [US1] 在 `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` 实现边界处理：itemId 不存在/无本地文件 → 404；daemon 不可用 → 503
 - [ ] T029 [US1] 修改 `src/player-enhancer/src/i18n.ts`：新增 US1 相关 i18n key（zh/ja/en）：`frameExport.title`、`frameExport.close`、`frameExport.loading`
@@ -92,7 +92,7 @@
 
 ### Implementation
 
-- [ ] T030 [P] [US2] 在 `src/player-enhancer/src/frame-forge.ts` 实现"向前"/"向后"两个扩展按钮（AliveUI btn 样式 + 箭头图标），加载中显示 spinner + disabled
+- [ ] T030 [P] [US2] 在 `src/player-enhancer/src/frame-forge.ts` 实现"向前"/"向后"两个扩展按钮（@alivecss/aliveui btn 样式 + 箭头图标），加载中显示 spinner + disabled
 - [ ] T031 [US2] 在 `src/player-enhancer/src/frame-forge.ts` 实现扩展逻辑：维护当前显示帧范围 `[minPosMs, maxPosMs]` → 点击扩展时计算新范围（偏移 N×M 帧间隔）→ fetch 新帧 → append 到网格头部或尾部 + 滚动到新增位置
 - [ ] T032 [US2] 实现请求合并（debounce 300ms）：快速连续点击扩展时只发送最后一次请求，避免 DDOS 后端
 - [ ] T033 [US2] 实现边界检测：videoTime=0 时禁用"向前"按钮；videoTime≥duration 时禁用"向后"按钮；按钮文字变灰 + 提示文字（如"已到达视频开头"）
@@ -155,7 +155,7 @@
 ### 前端 — SSE + 进度页 + 成果页
 
 - [ ] T050 [P] [US7] 在 `src/player-enhancer/src/frame-progress.ts` 实现 SSE 进度连接：`new EventSource(url)` → `onmessage` 解析 JSON → 更新进度状态；`onerror` 自动重连(最多3次, 间隔1s)
-- [ ] T051 [US7] 在 `src/player-enhancer/src/frame-progress.ts` 实现进度 UI：顶部进度条(AliveUI progress) + 百分比文字 + 当前步骤描述文字(phase→i18n 映射："decoding"→"解码中"、"encoding"→"编码中"、"matching"→"特征匹配中"等)
+- [ ] T051 [US7] 在 `src/player-enhancer/src/frame-progress.ts` 实现进度 UI：顶部进度条(@alivecss/aliveui progress) + 百分比文字 + 当前步骤描述文字(phase→i18n 映射："decoding"→"解码中"、"encoding"→"编码中"、"matching"→"特征匹配中"等)
 - [ ] T052 [P] [US7] 在 `src/player-enhancer/src/frame-result.ts` 实现成果预览页：动画 `<img>` 元素加载 resultUrl 循环播放；全景图 `<img>` 适配容器 + 拖动/缩放；显示 fileSize（格式化为 KB/MB）
 - [ ] T053 [P] [US7] 在 `src/player-enhancer/src/frame-result.ts` 实现"下载"按钮：`window.open(resultUrl)` 触发浏览器下载；"删除"按钮：`DELETE /FrameExport/Result/{taskId}` → 清理成功 → 返回网格页；"返回"按钮：调 delete + 返回网格页
 - [ ] T054 [US7] 在 `src/player-enhancer/src/frame-forge.ts` 实现页面切换逻辑：网格页 → 提交 Generate → 切换到进度页(T050+T051) → status=complete → 切换到成果页(T052+T053)
@@ -174,8 +174,8 @@
 ### Implementation
 
 - [ ] T056 [P] [US6] 在 `src/player-enhancer/src/frame-params.ts` 实现 `LocalExportSettings` 类型 + `loadSettings(): LocalExportSettings` / `saveSettings(s: LocalExportSettings)` 函数（localStorage key: `jfs-frameexport-settings`，默认值：GIF/PNG、width、original、5fps、infinite loop）
-- [ ] T057 [US6] 在 `src/player-enhancer/src/frame-forge.ts` 底部工具栏实现格式下拉菜单（AliveUI dropdown）：动画模式下 GIF/WebP 选项、全景图模式下 PNG/WebP-lossless 选项；默认值从 localStorage 读取
-- [ ] T058 [P] [US6] 在 `src/player-enhancer/src/frame-params.ts` 实现参数面板组件（折叠式 AliveUI details/summary）：分辨率约束模式切换（"按宽度"/"按高度" radio）+ 自定义像素输入（一个可编辑，另一个自动计算并置灰）+ 预设档位下拉（选择后自动切回"按宽度"）+ 帧率滑块(1-30) + 循环次数输入(0-99)
+- [ ] T057 [US6] 在 `src/player-enhancer/src/frame-forge.ts` 底部工具栏实现格式下拉菜单（@alivecss/aliveui dropdown）：动画模式下 GIF/WebP 选项、全景图模式下 PNG/WebP-lossless 选项；默认值从 localStorage 读取
+- [ ] T058 [P] [US6] 在 `src/player-enhancer/src/frame-params.ts` 实现参数面板组件（折叠式 @alivecss/aliveui details/summary）：分辨率约束模式切换（"按宽度"/"按高度" radio）+ 自定义像素输入（一个可编辑，另一个自动计算并置灰）+ 预设档位下拉（选择后自动切回"按宽度"）+ 帧率滑块(1-30) + 循环次数输入(0-99)
 - [ ] T059 [US6] 实现参数联动逻辑：`resizeMode` 切换 → 另一输入框自动计算(保持宽高比) + 置灰 disabled；预设档位选择 → 自动切 resizeMode="width" + 填预设值；动画模式下隐藏帧率/循环次数外的拼接相关参数
 - [ ] T060 [US6] 实现参数变更 → 自动 `saveSettings()` + `Generate` 请求 body 读取当前 params
 
@@ -243,7 +243,7 @@
 ### 前端 — 全景导出 UI
 
 - [ ] T081 [US5] 在 `src/player-enhancer/src/frame-forge.ts` 底部工具栏添加"导出全景图"按钮（与"导出动画"并列或在模式下切换）
-- [ ] T082 [US5] 在 `src/player-enhancer/src/frame-result.ts` 全景图成果展示：`<img>` 大图适配容器 + `object-fit: contain` + 可拖动/缩放（如果 AliveUI 不提供，用简单的 CSS `overflow: auto` 容器）
+- [ ] T082 [US5] 在 `src/player-enhancer/src/frame-result.ts` 全景图成果展示：`<img>` 大图适配容器 + `object-fit: contain` + 可拖动/缩放（如果 @alivecss/aliveui 不提供，用简单的 CSS `overflow: auto` 容器）
 
 **Checkpoint**: 全景拼接端到端——动漫走 PhaseCorr、风景走 AKAZE+PhaseCorr 兜底、真人走帧差+AKAZE；SSE 报告各阶段进度
 
@@ -266,9 +266,9 @@
   - 取消任务 → 子进程被杀 + 临时文件清理
   - 关闭 Modal → 临时文件清理
   - 无本地路径视频 → 按钮禁用/404
-  - CSS 验证：所有 UI 使用 AliveUI 类，无自定义 CSS 残留
+  - CSS 验证：所有 UI 使用 @alivecss/aliveui 类，无自定义 CSS 残留
 - [ ] T090 [P] 检查 `README.md` / `README.zh-CN.md` 是否需要更新（新功能：帧导出与全景拼接）
-- [ ] T091 [P] 更新 `src/player-enhancer/package.json` 的 `dependencies`（aliveui 版本固定）并检查无多余依赖
+- [ ] T091 [P] 更新 `src/player-enhancer/package.json` 的 `dependencies`（@alivecss/aliveui 版本固定）并检查无多余依赖
 - [ ] T091b [P] 在 `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` 暴露质量检测阈值配置端点：`GET /FrameExport/QualityThresholds` 返回当前阈值 JSON、`PUT /FrameExport/QualityThresholds` 接收 `{ blackBrightnessVarMin, whiteBrightnessVarMax, blurLaplacianVarMin }` → 存于 C# 静态字段（服务重启恢复默认值）；阈值传递到 Rust 端每次 SINGLE_FRAME 请求时作为 header 参数
 - [ ] T091c 手动性能达标验证：缩略图 11 帧 ≤2s(SC-002)、动画 10f×480p ≤8s(SC-003)、全景 5f×720p ≤15s(SC-004)、黑/白帧检测率 >95% + 模糊帧检测率 >85%(SC-005)、拼接成功率 >80%(SC-006)、SSE 延迟 <500ms(SC-007)、参数持久化恢复 100%(SC-008)；记录对比数据写入 `specs/009-frame-forge-stitch/perf-validation.md`
 

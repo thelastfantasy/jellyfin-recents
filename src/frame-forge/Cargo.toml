@@ -1,0 +1,22 @@
+[package]
+name = "frame-forge"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "frame-forge"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"] }
+image = "0.25"
+imageproc = "0.25"
+lru = "0.18"
+anyhow = "1"
+gif = "0.13"
+webp = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+opencv = "0.93"
+rustfft = "6"

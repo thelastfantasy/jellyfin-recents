@@ -85,7 +85,21 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             return new PosterSheetJobService(appPaths, logger, fontSvc);
         });
 
-        // UserSettingsService: 存储每用户的播放器设置（跨设备）
+        // FrameExportService: 单例，管理 frame-forge Rust daemon 进程和 Unix socket 连接
+        serviceCollection.AddSingleton<FrameExportService>(sp =>
+        {
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var logger = sp.GetRequiredService<ILogger<FrameExportService>>();
+            return new FrameExportService(appPaths, logger);
+        });
+
+        // FrameExportTaskManager: 单例，管理生成任务生命周期 + 定时清理
+        serviceCollection.AddSingleton<FrameExportTaskManager>(sp =>
+        {
+            var logger = sp.GetRequiredService<ILogger<FrameExportTaskManager>>();
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            return new FrameExportTaskManager(logger, appPaths);
+        });
         serviceCollection.AddSingleton<UserSettingsService>(sp =>
         {
             var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();

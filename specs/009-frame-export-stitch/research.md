@@ -85,18 +85,18 @@
 
 ## Decision 8: 前端 CSS 框架
 
-**Decision**: 使用 AliveUI（`aliveui` npm package）全量替�?player-enhancer �?`styles.ts` 自定�?CSS。所有组件（OSD 按钮、亮�?音量指示器、速度 OSD、seek OSD、截�?UI、帧选择�?Modal）统一使用 AliveUI 语义类名和内联工具类�?
+**Decision**: 使用 AliveUI（`aliveui` npm package）全量替�?player-enhancer �?`styles.ts` 自定�?CSS。所有组件（OSD 按钮、亮�?音量指示器、速度 OSD、seek OSD、截�?UI、帧选择�?Modal）统一使用 @alivecss/aliveui 语义类名和内联工具类�?
 **Rationale**:
-- 统一样式体系降低维护成本（无需同时维护两套 CSS 范式�?- AliveUI 提供响应式网格、Modal、表单控件、进度条等开箱即用组�?- �?Preact 兼容（AliveUI 是纯 CSS 框架，无 JS 运行时依赖）
+- 统一样式体系降低维护成本（无需同时维护两套 CSS 范式�?- @alivecss/aliveui 提供响应式网格、Modal、表单控件、进度条等开箱即用组�?- �?Preact 兼容（AliveUI 是纯 CSS 框架，无 JS 运行时依赖）
 
 **Alternatives considered**: �?Modal 使用 AliveUI（风格不一致，两套 CSS 混用增加认知负担），继续手写 CSS（需处理大量新组件样式，工作量更大）�?
 ---
 
-## Decision 9: AliveUI 初步调研
+## Decision 9: @alivecss/aliveui 初步调研
 
-**信息�?*: `aliveui` npm 包，GitHub repo [swlkr/aliveui](https://github.com/swlkr/aliveui)
+**信息�?*: `@alivecss/@alivecss/aliveui` npm 包，GitHub repo [swlkr/@alivecss/aliveui](https://github.com/swlkr/@alivecss/aliveui)
 
 **初步评估**:
-- �?CSS 框架（无 JS 运行时），文件大�?< 50KB（gzip），适合嵌入式场�?- 提供 utility classes + 语义组件（card, modal, progress, form controls�?- 基于自定义属性（CSS custom properties）的主题系统，暗色模式开箱即�?- TypeScript/Preact 项目通过 `npm install aliveui` 引入
+- �?CSS 框架（无 JS 运行时），文件大�?< 50KB（gzip），适合嵌入式场�?- 提供 utility classes + 语义组件（card, modal, progress, form controls�?- 基于自定义属性（CSS custom properties）的主题系统，暗色模式开箱即�?- TypeScript/Preact 项目通过 `npm install @alivecss/aliveui` 引入
 - �?Vite 特殊配置要求（标�?CSS import 即可�?
 **风险**: 框架较新，社区生态小，可能需要自定义扩展部分组件（如视频播放�?OSD 特定样式）�?
