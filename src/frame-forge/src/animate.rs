@@ -21,32 +21,33 @@ pub fn encode_gif(_frames: &[DynamicImage], _fps: u16, _loop_count: u16) -> anyh
 
 pub fn encode_webp_anim(frames: &[DynamicImage], fps: u16, _loop_count: u16) -> anyhow::Result<Vec<u8>> {
     if frames.is_empty() { anyhow::bail!("no frames to encode"); }
-    let first = frames[0].to_rgba8();
-    let (w, h) = first.dimensions();
-    let delay_ms = (1000u32).saturating_div(fps.max(1) as u32).max(10) as i32;
-
-    // Ensure all frames have identical dimensions (required by WebP AnimEncoder)
     let w = frames.iter().map(|f| f.width()).max().unwrap_or(1);
     let h = frames.iter().map(|f| f.height()).max().unwrap_or(1);
-    let rgba_data: Vec<Vec<u8>> = frames.iter().map(|img| {
-        if img.width() == w && img.height() == h {
-            img.to_rgba8().into_raw()
+    let delay_ms = (1000u32).saturating_div(fps.max(1) as u32).max(10) as i32;
+
+    // Per-frame config so WebPAnimEncoderAdd gets valid config, not zeroed
+    let cfg: webp::WebPConfig = webp::WebPConfig {
+        lossless: 1, quality: 75.0, method: 4,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let dummy_cfg: webp::WebPConfig = unsafe { std::mem::zeroed() }; // only needed for AnimEncoder ctor
+    let mut encoder = webp::AnimEncoder::new(w, h, &dummy_cfg);
+    // Pad all frames to identical canvas so WebPAnimEncoderAdd accepts them
+    let rgba_data: Vec<(Vec<u8>, u32, u32)> = frames.iter().map(|img| {
+        let (iw, ih) = (img.width(), img.height());
+        if iw == w && ih == h {
+            (img.to_rgba8().into_raw(), iw, ih)
         } else {
-            let padded = image::DynamicImage::new_rgba8(w, h)
-                .to_rgba8();
-            let mut padded = padded;
+            let mut padded = image::RgbaImage::new(w, h);
             image::imageops::overlay(&mut padded, &img.to_rgba8(), 0, 0);
-            padded.into_raw()
+            (padded.into_raw(), w, h)
         }
     }).collect();
-
-    let config = unsafe { std::mem::zeroed::<webp::WebPConfig>() };
-    let mut encoder = webp::AnimEncoder::new(w, h, &config);
-    for rgba in &rgba_data {
-        let frame = webp::AnimFrame::from_rgba(rgba, w, h, delay_ms);
+    for (rgba, _, _) in &rgba_data {
+        let frame = webp::AnimFrame::new(rgba, webp::PixelLayout::Rgba, w, h, delay_ms, Some(&cfg));
         encoder.add_frame(frame);
     }
-    let anim = encoder.try_encode().map_err(|e| anyhow::anyhow!("WebP encode: {:?}", e))?;
+    let anim = encoder.try_encode().map_err(|e| anyhow::anyhow!("WebP: {:?}", e))?;
     Ok(anim.to_vec())
 }
 
