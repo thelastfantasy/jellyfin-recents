@@ -422,7 +422,12 @@ function updateCount(): void {
   const el = document.getElementById('jfs-fe-count')
   if (!el) return
   const selected = _frames.filter((f) => f.selected).length
-  el.textContent = `已选 ${selected} / 总数 ${_frames.length} 帧`
+  el.innerHTML = `已选 ${selected} / 总数 ${_frames.length} 帧  <button id="jfs-fe-select-all" class="alive-button alive-button-ghost alive-button-xs" style="margin-left:8px">${selected === _frames.length ? '全不选' : '全选'}</button>`
+  document.getElementById('jfs-fe-select-all')?.addEventListener('click', () => {
+    const allSelected = _frames.every(f => f.selected)
+    _frames.forEach(f => { f.selected = !allSelected })
+    renderGrid()
+  })
 }
 
 function updateExpandButtons(): void {
