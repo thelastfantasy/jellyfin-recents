@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/008-trickplay-seek-preview/plan.md
+at specs/009-frame-export-stitch/plan.md
 <!-- SPECKIT END -->
 
 ## 部署工作流程（必须遵守）
