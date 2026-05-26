@@ -74,9 +74,12 @@ fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
     let output = kv.iter().find(|(k,_)| *k == "output").and_then(|(_,v)| v.first()).map(|s| *s).unwrap_or("output.webp");
     let target_h: u32 = kv.iter().find(|(k,_)| *k == "height").and_then(|(_,v)| v.first()?.parse().ok()).unwrap_or(200);
     let fps: u16 = kv.iter().find(|(k,_)| *k == "fps").and_then(|(_,v)| v.first()?.parse().ok()).unwrap_or(5);
+    let timestamps: Vec<u64> = kv.iter().find(|(k,_)| *k == "timestamps")
+        .map(|(_,v)| v.iter().filter_map(|s| s.parse().ok()).collect())
+        .unwrap_or_default();
 
     let images = load_images(&input)?;
-    eprintln!("Scaling to {target_h}px height, {fps}fps...");
+    eprintln!("Scaling to {target_h}px height...");
     let scaled: Vec<DynamicImage> = images.iter().map(|img| {
         let ratio = target_h as f64 / img.height() as f64;
         let w = (img.width() as f64 * ratio).max(1.0) as u32;
@@ -84,9 +87,17 @@ fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
     }).collect();
 
     let encoded = if output.ends_with(".gif") {
-        animate::encode_gif(&scaled, fps, 0)?
+        if !timestamps.is_empty() {
+            animate::encode_gif_timed(&scaled, &timestamps, 0)?
+        } else {
+            animate::encode_gif(&scaled, fps, 0)?
+        }
     } else {
-        animate::encode_webp_anim(&scaled, fps, 0)?
+        if !timestamps.is_empty() {
+            animate::encode_webp_timed(&scaled, &timestamps, 0)?
+        } else {
+            animate::encode_webp_anim(&scaled, fps, 0)?
+        }
     };
     std::fs::write(output, &encoded)?;
     eprintln!("Saved: {output} ({} bytes)", encoded.len());
