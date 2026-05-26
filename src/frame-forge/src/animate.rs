@@ -1,4 +1,4 @@
-use image::DynamicImage;
+﻿use image::DynamicImage;
 use std::io::Cursor;
 
 //! Animated GIF and WebP encoding from decoded video frames.
@@ -11,12 +11,12 @@ use std::io::Cursor;
 //!
 //! # WebP encoding (`webp` crate)
 //! Uses `AnimEncoder` with per-frame RGBA input. Delay in milliseconds.
-//! Lossy compression is NOT used — frames are encoded as-is (lossless).
+//! Lossy compression is NOT used 鈥?frames are encoded as-is (lossless).
 //!
 //! # Caveats
-//! - GIF max 256 colors per frame — severe banding on gradients
+//! - GIF max 256 colors per frame 鈥?severe banding on gradients
 //! - WebP animation support in browsers is good but not universal (Edge <18 fails)
-//! - No inter-frame compression delta — each frame is a full image
+//! - No inter-frame compression delta 鈥?each frame is a full image
 pub fn encode_gif(frames: &[DynamicImage], fps: u16, loop_count: u16) -> anyhow::Result<Vec<u8>> {
     use gif::{Encoder, Frame, Repeat};
     use image::RgbaImage;

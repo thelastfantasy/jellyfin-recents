@@ -1,4 +1,4 @@
-use anyhow::Context;
+﻿use anyhow::Context;
 use std::path::Path;
 use std::time::Instant;
 
@@ -102,7 +102,7 @@ pub fn decode_and_encode(
     let elapsed = _t.elapsed();
     let bytes = jpeg_buf.into_inner();
     eprintln!(
-        "[frame-forge] decode {path} @{pos_ms}ms w={width} → {:.0}ms ({} B)",
+        "[frame-forge] decode {path} @{pos_ms}ms w={width} 鈫?{:.0}ms ({} B)",
         path.display(),
         elapsed.as_secs_f64() * 1000.0,
         bytes.len()

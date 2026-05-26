@@ -1,4 +1,4 @@
-// Laplacian pyramid multi-band blending for seamless panorama seams.
+﻿// Laplacian pyramid multi-band blending for seamless panorama seams.
 //
 // Current status: stub. The stitch algorithms use simple 50% alpha blending
 // in overlap regions via stitch_landscape::blend_pair().

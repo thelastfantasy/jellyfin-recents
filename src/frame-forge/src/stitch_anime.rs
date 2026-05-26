@@ -1,4 +1,4 @@
-//! Phase Correlation based panorama stitching for anime/line-art content.
+﻿// Phase Correlation based panorama stitching for anime/line-art content.
 //!
 //! Unlike feature-based methods (ORB/SIFT/AKAZE), Phase Correlation works in
 //! the frequency domain via FFT and does not require texture keypoints. This
@@ -8,9 +8,9 @@
 //! # Algorithm (per frame pair)
 //! 1. Grayscale + Hamming window (suppress FFT boundary artifacts)
 //! 2. Forward 2D FFT on both images
-//! 3. Normalized cross-power spectrum: R = F1·conj(F2) / |F1·conj(F2)|
-//! 4. Inverse FFT → correlation surface
-//! 5. Peak detection with parabola sub-pixel refinement (±0.1px)
+//! 3. Normalized cross-power spectrum: R = F1路conj(F2) / |F1路conj(F2)|
+//! 4. Inverse FFT 鈫?correlation surface
+//! 5. Peak detection with parabola sub-pixel refinement (卤0.1px)
 //! 6. Wrapped-to-real offset conversion
 //!
 //! # Caveats
@@ -47,7 +47,7 @@ pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32) {
     fft.process(&mut fa);
     fft.process(&mut fb);
 
-    // Normalized cross-power spectrum: R = F1 · conj(F2) / |F1 · conj(F2)|
+    // Normalized cross-power spectrum: R = F1 路 conj(F2) / |F1 路 conj(F2)|
     let mut r = vec![Complex { re: 0.0, im: 0.0 }; w * h];
     let mut max_mag = 0.0f64;
     for i in 0..(w * h) {

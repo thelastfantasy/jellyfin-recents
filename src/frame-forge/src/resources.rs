@@ -1,4 +1,4 @@
-/// CPU and memory resource monitoring for dynamic task scheduling (FR-042).
+﻿// CPU and memory resource monitoring for dynamic task scheduling (FR-042).
 /// Reads /proc/stat and /proc/meminfo on Linux systems.
 
 use std::fs;
@@ -21,7 +21,7 @@ impl ResourceMonitor {
     }
 
     /// Returns a pressure value 0.0 (idle) to 1.0 (saturated).
-    /// Threshold: CPU > 80% or free memory < 512 MB → pressure > 0.8.
+    /// Threshold: CPU > 80% or free memory < 512 MB 鈫?pressure > 0.8.
     pub fn pressure(&mut self) -> f64 {
         let cpu = self.cpu_usage();
         let mem = self.mem_pressure();
@@ -52,7 +52,7 @@ impl ResourceMonitor {
                     self.last_idle = idle;
                     self.last_total = total;
                     self.last_cpu = now;
-                    return (usage / 0.8).min(1.0); // normalize: >80% → pressure >1.0
+                    return (usage / 0.8).min(1.0); // normalize: >80% 鈫?pressure >1.0
                 }
             }
         }
@@ -72,7 +72,7 @@ impl ResourceMonitor {
             }
             if total > 0 {
                 let free_mb = available / 1024;
-                // >512MB free → pressure 0; <512MB → rising pressure
+                // >512MB free 鈫?pressure 0; <512MB 鈫?rising pressure
                 return if free_mb > 512 {
                     0.0
                 } else {

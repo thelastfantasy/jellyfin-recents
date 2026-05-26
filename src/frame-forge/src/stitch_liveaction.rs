@@ -1,4 +1,4 @@
-//! Motion-aware stitching for live-action scenes with foreground movement.
+﻿// Motion-aware stitching for live-action scenes with foreground movement.
 //!
 //! Computes a frame-difference motion mask to exclude foreground (moving
 //! actors/objects) keypoints from homography estimation. The homography is
@@ -7,7 +7,7 @@
 //!
 //! # Caveats
 //! - Motion mask threshold (diff > 30) is hardcoded; adjustable per scene
-//! - Morphological dilation uses fixed 3×3 kernel, 2 iterations
+//! - Morphological dilation uses fixed 3脳3 kernel, 2 iterations
 //! - Does not handle parallax (different depth planes moving at different rates)
 //! - Fast camera pans may cause entire frame to be masked as motion
 
@@ -48,8 +48,7 @@ fn fill_foreground_by_interpolation(
 ) {
     // Bilinear interpolation fill: for each pixel in motion regions,
     // find nearest non-motion pixels in 4 cardinal directions and interpolate.
-    // Full implementation requires per-pixel search which is O(w*h*d) —
-    // deferred to v2 with spatial optimization (distance transform).
+    // Full implementation requires per-pixel search which is O(w*h*d) 鈥?    // deferred to v2 with spatial optimization (distance transform).
     // For v1, simple alpha blending from stitch_landscape is sufficient.
 }
 

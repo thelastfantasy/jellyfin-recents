@@ -1,4 +1,4 @@
-/// Frame quality metadata computed from a decoded image.
+﻿// Frame quality metadata computed from a decoded image.
 #[derive(Debug, Clone)]
 pub struct QualityFlags {
     pub is_junk: bool,
@@ -40,7 +40,7 @@ pub fn detect_quality(
     }
     brightness_var /= pixel_count;
 
-    // Laplacian variance (blur detection) — simplified 3x3 kernel
+    // Laplacian variance (blur detection) 鈥?simplified 3x3 kernel
     let laplacian = compute_laplacian_variance(&gray);
 
     // Frame diff against previous frame
@@ -109,9 +109,6 @@ fn compute_laplacian_variance(gray: &image::GrayImage) -> f64 {
 pub fn detect_border_crop(img: &image::DynamicImage, threshold: f64) -> (u32, u32, u32, u32) {
     let gray = img.to_luma8();
     let (w, h) = gray.dimensions();
-    let w_i = w as i32;
-    let h_i = h as i32;
-
     let mut left = 0u32;
     let mut right = w - 1;
     let mut top = 0u32;
@@ -182,10 +179,12 @@ fn row_variance(gray: &image::GrayImage, y: u32, width: u32) -> f64 {
     }
     var / width as f64
 }
+
+fn compute_frame_diff(a: &image::GrayImage, b: &image::GrayImage) -> f64 {
     let (aw, ah) = a.dimensions();
     let (bw, bh) = b.dimensions();
     if aw != bw || ah != bh {
-        return 1.0; // different sizes → treat as scene cut
+        return 1.0; // different sizes 鈫?treat as scene cut
     }
     let mut diff_sum = 0u64;
     let total = (aw * ah) as f64;

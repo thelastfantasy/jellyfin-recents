@@ -1,11 +1,11 @@
-use image::{DynamicImage, GrayImage, Luma};
+﻿use image::{DynamicImage, GrayImage, Luma};
 
 //! Heuristic scene classifier for panorama stitching algorithm routing.
 //!
 //! Three signals determine the category:
-//!   edge_density > 0.15 && color_entropy < 3.5 → Anime (Phase Correlation)
-//!   edge_density < 0.08                      → Landscape (AKAZE + fallback)
-//!   otherwise                                → LiveAction (motion-masked AKAZE)
+//!   edge_density > 0.15 && color_entropy < 3.5 鈫?Anime (Phase Correlation)
+//!   edge_density < 0.08                      鈫?Landscape (AKAZE + fallback)
+//!   otherwise                                鈫?LiveAction (motion-masked AKAZE)
 //!
 //! # Why these thresholds
 //! Anime frames have dense ink lines (high Canny edge density) but large flat
@@ -14,11 +14,11 @@ use image::{DynamicImage, GrayImage, Luma};
 //! from skin textures, clothing patterns, etc.
 //!
 //! # Caveats
-//! - Edge density uses Sobel magnitude > 30 threshold — may miss soft-edged anime
-//! - Color entropy is computed on grayscale histogram, not RGB — faster but
+//! - Edge density uses Sobel magnitude > 30 threshold 鈥?may miss soft-edged anime
+//! - Color entropy is computed on grayscale histogram, not RGB 鈥?faster but
 //!   cannot distinguish colorful anime from desaturated live-action
 //! - Motion classification only uses first two frames; long pans may start slow
-//! - pHash uses 8×8 thumbnail — collisions possible for very similar frames
+//! - pHash uses 8脳8 thumbnail 鈥?collisions possible for very similar frames
 #[derive(Debug, Clone, PartialEq)]
 pub enum SceneCategory { Anime, Landscape, LiveAction }
 

@@ -1,11 +1,11 @@
-//! frame-forge: video frame decoding, quality analysis, animation, and stitching daemon.
+﻿// frame-forge: video frame decoding, quality analysis, animation, and stitching daemon.
 //!
 //! Architecture: tokio-based Unix socket server with per-connection task spawning.
 //! Three message types:
 //!   0x10 (SINGLE_FRAME): decode + quality check, return JPEG + quality flags
-//!   0x11 (ANIMATE): decode batch → scale → GIF/WebP encode → progress events → output
-//!   0x12 (STITCH): decode batch → auto-crop → pHash dedup → scene classify → route
-//!                   to algorithm → encode PNG/WebP-lossless → progress events → output
+//!   0x11 (ANIMATE): decode batch 鈫?scale 鈫?GIF/WebP encode 鈫?progress events 鈫?output
+//!   0x12 (STITCH): decode batch 鈫?auto-crop 鈫?pHash dedup 鈫?scene classify 鈫?route
+//!                   to algorithm 鈫?encode PNG/WebP-lossless 鈫?progress events 鈫?output
 //!
 //! FrameCache (LRU 100): keyed by (canonical_path, pos_ms/500*500), shared across
 //! all connection handlers via Arc<State>. Avoids re-decoding the same frame for
@@ -14,6 +14,17 @@
 //! Resource monitoring: resources.rs reads /proc/stat and /proc/meminfo to compute
 //! a pressure value (0=idle, 1=saturated). Callers should check before spawning
 //! expensive operations to protect seek-preview and streaming latency.
+
+mod animate;
+mod blender;
+mod decoder;
+mod protocol;
+mod quality;
+mod resources;
+mod scene_classifier;
+mod stitch_anime;
+mod stitch_landscape;
+mod stitch_liveaction;
 
 use anyhow::Context;
 use lru::LruCache;
@@ -170,7 +181,7 @@ async fn handle_animate(
     // NOTE: frames are re-decoded at original resolution even if a thumbnail
     // (width=320) version exists in cache. The cache stores compressed JPEG
     // bytes for the requested width, so a thumbnail fetch at width=320 does
-    // not prepopulate the cache for the animate path (width=0 → original).
+    // not prepopulate the cache for the animate path (width=0 鈫?original).
 
     let req = protocol::read_animate_req(stream).await?;
     eprintln!("[frame-forge] ANIMATE task={} frames={} fmt={} fps={}", req.task_id, req.paths.len(), req.format, req.fps);
@@ -272,7 +283,7 @@ async fn handle_stitch(
     let images: Vec<image::DynamicImage> = images.iter()
         .map(|img| quality::crop_image(img, crop_rect))
         .collect();
-    eprintln!("[frame-forge] auto-crop: ({},{})→({},{}) → {}x{}",
+    eprintln!("[frame-forge] auto-crop: ({},{})鈫?{},{}) 鈫?{}x{}",
         crop_rect.0, crop_rect.1, crop_rect.2, crop_rect.3,
         images[0].width(), images[0].height());
 

@@ -1,4 +1,4 @@
-// Binary protocol frame read/write functions for frame-forge daemon.
+﻿// Binary protocol frame read/write functions for frame-forge daemon.
 // Follows the same pattern as seek-preview protocol.rs.
 
 pub(crate) struct SingleFrameReq {
@@ -77,7 +77,7 @@ pub(crate) async fn write_ack(
     Ok(())
 }
 
-// ── ANIMATE request (0x11) ─────────────────────────────────────────────────
+// 鈹€鈹€ ANIMATE request (0x11) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 pub(crate) struct AnimateReq {
     pub task_id: String,
