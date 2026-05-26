@@ -75,6 +75,9 @@ src/JellyfinSuite.Plugin/poster-gen-win-x64.exe
 # seek-preview 编译产物
 src/JellyfinSuite.Plugin/seek-preview-linux-x64
 
+# frame-forge 编译产物
+src/JellyfinSuite.Plugin/frame-forge-linux-x64
+
 # Vite 构建缓存
 src/frontend/.vite/
 
@@ -88,3 +91,7 @@ src/frontend/.vite/
 *.ass
 *.ssa
 *.srt
+
+# 拼接测试
+stitch-source/
+
