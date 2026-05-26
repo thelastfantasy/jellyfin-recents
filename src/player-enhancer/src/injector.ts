@@ -214,6 +214,19 @@ function injectPlayerButtons(
   screenshotWrap.appendChild(screenshotBtn);
   screenshotWrap.appendChild(switchLabel);
 
+  // Show subtitle toggle only when subtitles are actually active
+  function updateSubtitleToggleVisibility() {
+    const hasAssSubtitles = !!document.querySelector('.libassjs-canvas-parent canvas');
+    const srtEl = document.querySelector('.videoSubtitles');
+    const hasSrtSubtitles = !!srtEl && srtEl.textContent!.trim().length > 0;
+    const active = hasAssSubtitles || hasSrtSubtitles;
+    switchLabel.style.display = active ? '' : 'none';
+    screenshotWrap.classList.toggle('jfs-has-subtitles', active);
+  }
+  updateSubtitleToggleVisibility();
+  const subtitleObserver = new MutationObserver(updateSubtitleToggleVisibility);
+  subtitleObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+
   // ── Frame Export button ──────────────────────────────────────────────────
   const frameExportBtn = document.createElement('button');
   frameExportBtn.className = 'jfs-enhancer-btn';
@@ -238,19 +251,6 @@ function injectPlayerButtons(
     osdButtons.append(frameStepWrap);
     osdButtons.append(screenshotWrap);
     osdButtons.append(frameExportBtn);
-  }
-  updateSubtitleToggleVisibility();
-  const subtitleObserver = new MutationObserver(updateSubtitleToggleVisibility);
-  subtitleObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
-
-  // Insert after the native controls (dir="ltr" div), before secondary controls
-  const dirLtr = osdButtons.querySelector<HTMLElement>('div[dir="ltr"]');
-  if (dirLtr) {
-    dirLtr.after(frameStepWrap);
-    frameStepWrap.after(screenshotWrap);
-  } else {
-    osdButtons.append(frameStepWrap);
-    osdButtons.append(screenshotWrap);
   }
 
 }

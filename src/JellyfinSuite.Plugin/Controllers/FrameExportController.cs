@@ -2,6 +2,7 @@ using Jellyfin.Plugin.JellyfinSuite.Models;
 using Jellyfin.Plugin.JellyfinSuite.Services;
 using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -53,13 +54,13 @@ public class FrameExportController : ControllerBase
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound(new { error = "Item not found or no file path" });
 
-        // DRM check
-        if (item.MediaStreams?.Any(s => s.IsEncoded == true) == true)
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = "DRM-protected content" });
-
-        var jpeg = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
+        await _frameExport.EnsureStartedAsync(ct);
+        var (jpeg, qualityFlags) = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
         if (jpeg == null || jpeg.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
+
+        // Attach quality metadata
+        Response.Headers["X-Frame-Quality"] = System.Text.Json.JsonSerializer.Serialize(new { qualityFlags });
 
         return File(jpeg, "image/jpeg");
     }

@@ -3,7 +3,6 @@
 let _modalRoot: HTMLDivElement | null = null
 let _videoEl: HTMLVideoElement | null = null
 let _itemId = ''
-let _currentPage: 'grid' | 'progress' | 'result' = 'grid'
 let _activeTaskId = ''
 
 // State
@@ -51,7 +50,6 @@ function formatTime(ms: number): string {
 export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
   _videoEl = videoEl
   _itemId = itemId
-  _currentPage = 'grid'
   _frames = []
   _activeTaskId = ''
 
@@ -79,7 +77,6 @@ function closeModal(): void {
 
 function showGridPage(): void {
   if (!_modalRoot) return
-  _currentPage = 'grid'
   _modalRoot.innerHTML = `
     <div class="alive-card d3 alive-enter-scale max-w-3xl w-full mx-4 max-h-[90vh] flex flex-col overflow-hidden">
       <div class="alive-stack alive-stack-h items-center justify-between p-4 border-b border-slate-200">
@@ -317,7 +314,6 @@ async function submitGenerate(): Promise<void> {
 
 export function showProgressPage(taskId: string): void {
   _activeTaskId = taskId
-  _currentPage = 'progress'
   if (!_modalRoot) return
 
   _modalRoot.innerHTML = `
@@ -372,7 +368,6 @@ export function showProgressPage(taskId: string): void {
 }
 
 export function showResultPage(resultUrl: string, fileSize: number): void {
-  _currentPage = 'result'
   if (!_modalRoot) return
 
   const fullUrl = resultUrl.startsWith('http') ? resultUrl : `${getBaseUrl()}${resultUrl}?api_key=${encodeURIComponent(getToken())}`

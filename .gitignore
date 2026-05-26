@@ -62,6 +62,7 @@ tests/JellyfinRecents.Tests/obj/
 # Rust
 src/poster-gen/target/
 src/seek-preview/target/
+src/frame-forge/target/
 
 # poster-gen 编译产物（运行时从 Docker 构建，不入仓库）
 src/poster-gen/poster-gen-linux-x64

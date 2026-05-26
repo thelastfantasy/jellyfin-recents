@@ -3,7 +3,7 @@ import { aliveUIVite } from '@alivecss/aliveui/vite'
 
 export default defineConfig({
   plugins: [
-    aliveUIVite({ content: ['./src/**/*.{ts,tsx}'] }),
+    aliveUIVite({ content: ['./src/**/*.{ts,tsx,css}'] }),
   ],
   build: {
     lib: {

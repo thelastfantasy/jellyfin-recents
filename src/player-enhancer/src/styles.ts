@@ -1,4 +1,4 @@
-import '@alivecss/aliveui/index.css'
+import './alive.css'
 
 const STYLE_ID = 'jfs-enhancer-styles'
 
