@@ -92,6 +92,7 @@ function showGridPage(): void {
         <div class="flex gap-2">
           <button id="jfs-fe-prev" class="alive-button alive-button-secondary alive-button-sm" disabled>← 向前</button>
           <button id="jfs-fe-next" class="alive-button alive-button-secondary alive-button-sm">向后 →</button>
+          <button id="jfs-fe-generate" class="alive-button alive-button-primary alive-button-sm">生成动画</button>
         </div>
       </div>
     </div>
@@ -100,6 +101,7 @@ function showGridPage(): void {
   document.getElementById('jfs-fe-close')?.addEventListener('click', closeModal)
   document.getElementById('jfs-fe-prev')?.addEventListener('click', () => expandFrames(-1))
   document.getElementById('jfs-fe-next')?.addEventListener('click', () => expandFrames(1))
+  document.getElementById('jfs-fe-generate')?.addEventListener('click', submitGenerate)
 }
 
 async function loadInitialFrames(): Promise<void> {
@@ -274,15 +276,140 @@ function updateExpandButtons(): void {
   }
 }
 
-// ── Progress Page (Phase 7 stub) ────────────────────────────────────────────
+// ── Generate / Progress / Result ────────────────────────────────────────────
+
+async function submitGenerate(): Promise<void> {
+  const selected = _frames.filter((f) => f.selected)
+  if (selected.length < 2) {
+    alert('至少需要选择 2 帧')
+    return
+  }
+  if (selected.length > 50 && !confirm(`选中 ${selected.length} 帧，文件可能较大。继续？`)) return
+
+  const body = {
+    itemId: _itemId,
+    itemTitle: document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'export',
+    type: 'animate',
+    frames: selected.map((f) => ({ positionMs: f.posMs })),
+    params: {
+      format: 'gif',
+      resizeMode: 'width',
+      resolutionPreset: 'original',
+      fps: 5,
+      loopCount: 0,
+    },
+  }
+
+  const res = await fetch(`${getBaseUrl()}/JellyfinSuite/FrameExport/Generate?api_key=${encodeURIComponent(getToken())}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    alert(`生成失败: ${res.status}`)
+    return
+  }
+
+  const { taskId } = await res.json() as { taskId: string }
+  showProgressPage(taskId)
+}
 
 export function showProgressPage(taskId: string): void {
   _activeTaskId = taskId
   _currentPage = 'progress'
-  // Placeholder — Phase 7 will implement SSE connection + progress bar
+  if (!_modalRoot) return
+
+  _modalRoot.innerHTML = `
+    <div class="alive-card d3 alive-enter-scale max-w-md w-full mx-4">
+      <div class="p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-4">生成中</h2>
+        <div class="alive-progress">
+          <div id="jfs-fe-progress-bar" class="alive-progress-bar" style="width:0%"></div>
+        </div>
+        <p id="jfs-fe-progress-text" class="text-sm text-slate-500 mt-2">准备中...</p>
+      </div>
+      <div class="p-3 border-t border-slate-200">
+        <button id="jfs-fe-cancel" class="alive-button alive-button-secondary alive-button-sm w-full">取消</button>
+      </div>
+    </div>
+  `
+
+  document.getElementById('jfs-fe-cancel')?.addEventListener('click', () => {
+    fetch(`${getBaseUrl()}/JellyfinSuite/FrameExport/Cancel/${taskId}?api_key=${encodeURIComponent(getToken())}`, { method: 'POST' }).catch(() => {})
+    closeModal()
+  })
+
+  // SSE connection
+  const evSrc = new EventSource(`${getBaseUrl()}/JellyfinSuite/FrameExport/Progress?taskId=${encodeURIComponent(taskId)}&api_key=${encodeURIComponent(getToken())}`)
+  let retries = 0
+
+  evSrc.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data) as { status: string; percent: number; phase: string; current: number; total: number; resultUrl?: string; fileSize?: number; error?: string }
+      const bar = document.getElementById('jfs-fe-progress-bar')
+      const text = document.getElementById('jfs-fe-progress-text')
+      if (bar) bar.style.width = `${data.percent}%`
+      if (text) text.textContent = `${data.phase || '处理中...'} (${Math.round(data.percent)}%)`
+
+      if (data.status === 'complete' && data.resultUrl) {
+        evSrc.close()
+        showResultPage(data.resultUrl, data.fileSize ?? 0)
+      } else if (data.status === 'error') {
+        evSrc.close()
+        if (text) text.textContent = `错误: ${data.error || '未知错误'}`
+        document.getElementById('jfs-fe-cancel')!.textContent = '关闭'
+      }
+    } catch { /* ignore */ }
+  }
+
+  evSrc.onerror = () => {
+    if (retries++ < 3) return // auto-reconnect
+    evSrc.close()
+    const text = document.getElementById('jfs-fe-progress-text')
+    if (text) text.textContent = '连接中断，请重试'
+  }
 }
 
 export function showResultPage(resultUrl: string, fileSize: number): void {
   _currentPage = 'result'
-  // Placeholder — Phase 7 will implement result preview + download/delete
+  if (!_modalRoot) return
+
+  const fullUrl = resultUrl.startsWith('http') ? resultUrl : `${getBaseUrl()}${resultUrl}?api_key=${encodeURIComponent(getToken())}`
+  const sizeStr = fileSize > 1024 * 1024 ? `${(fileSize / 1024 / 1024).toFixed(1)} MB` : `${(fileSize / 1024).toFixed(0)} KB`
+
+  _modalRoot.innerHTML = `
+    <div class="alive-card d3 alive-enter-scale max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="alive-stack alive-stack-h items-center justify-between p-4 border-b border-slate-200">
+        <button id="jfs-fe-back" class="alive-button alive-button-ghost alive-button-sm">← 返回</button>
+        <h2 class="text-lg font-semibold text-slate-900">预览</h2>
+        <button id="jfs-fe-close2" class="alive-button alive-button-ghost alive-button-sm">✕</button>
+      </div>
+      <div class="flex-1 flex items-center justify-center p-4 bg-slate-50 overflow-auto">
+        <img src="${fullUrl}" class="max-w-full max-h-full object-contain rounded-lg shadow-lg" alt="result" />
+      </div>
+      <div class="alive-stack alive-stack-h items-center justify-between p-4 border-t border-slate-200">
+        <span class="text-sm text-slate-500">${sizeStr}</span>
+        <div class="flex gap-2">
+          <button id="jfs-fe-download" class="alive-button alive-button-primary alive-button-sm">下载</button>
+          <button id="jfs-fe-delete" class="alive-button alive-button-secondary alive-button-sm">删除</button>
+        </div>
+      </div>
+    </div>
+  `
+
+  document.getElementById('jfs-fe-back')?.addEventListener('click', () => {
+    if (_activeTaskId) {
+      fetch(`${getBaseUrl()}/JellyfinSuite/FrameExport/Result/${_activeTaskId}?api_key=${encodeURIComponent(getToken())}`, { method: 'DELETE' }).catch(() => {})
+    }
+    showGridPage()
+  })
+  document.getElementById('jfs-fe-close2')?.addEventListener('click', closeModal)
+  document.getElementById('jfs-fe-delete')?.addEventListener('click', () => {
+    fetch(`${getBaseUrl()}/JellyfinSuite/FrameExport/Result/${_activeTaskId}?api_key=${encodeURIComponent(getToken())}`, { method: 'DELETE' }).catch(() => {})
+    showGridPage()
+  })
+  document.getElementById('jfs-fe-download')?.addEventListener('click', () => {
+    window.open(fullUrl, '_blank')
+  })
 }

@@ -79,7 +79,88 @@ public class FrameExportController : ControllerBase
             return BadRequest(new { error = "fps must be 1-30" });
 
         var task = _taskManager.CreateTask(req.ItemId.ToString(), req.ItemTitle, req.Type);
-        // TODO: Phase 6 T043 — submit to Rust daemon for actual processing
+
+        // Fire-and-forget: submit to Rust daemon
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var item = _libraryManager.GetItemById(req.ItemId);
+                if (item == null || string.IsNullOrEmpty(item.Path))
+                {
+                    task.Status = Services.TaskStatus.Error;
+                    task.Error = "Item not found";
+                    task.ProgressChannel.Writer.TryComplete();
+                    return;
+                }
+
+                task.Status = Services.TaskStatus.Running;
+                var filePaths = req.Frames.Select(_ => item.Path).ToList();
+                var positions = req.Frames.Select(f => f.PositionMs).ToList();
+
+                var resolutionPreset = req.Params.ResolutionPreset;
+                var resizeMode = req.Params.ResizeMode;
+                var targetPx = resizeMode == "height"
+                    ? req.Params.CustomHeight ?? 0
+                    : req.Params.CustomWidth ?? 0;
+
+                // Map resolution preset to target pixels
+                if (targetPx == 0 && resolutionPreset != "original")
+                {
+                    targetPx = resolutionPreset switch
+                    {
+                        "1080p" => 1080,
+                        "720p" => 720,
+                        "480p" => 480,
+                        "360p" => 360,
+                        _ => 0
+                    };
+                    resizeMode = "width";
+                }
+
+                byte[]? output = req.Type switch
+                {
+                    "animate" => await _frameExport.SubmitAnimateTaskAsync(
+                        task, filePaths, positions, req.Params.Format,
+                        resizeMode, targetPx, req.Params.Fps, req.Params.LoopCount),
+                    _ => null
+                };
+
+                if (output != null && output.Length > 0)
+                {
+                    var ext = req.Params.Format == "webp" ? "webp" : "gif";
+                    var outputPath = Path.Combine(task.TempDir, $"output.{ext}");
+                    await System.IO.File.WriteAllBytesAsync(outputPath, output);
+
+                    task.OutputPath = outputPath;
+                    task.OutputSize = output.Length;
+                    task.Status = Services.TaskStatus.Complete;
+                    task.CompletedAt = DateTime.UtcNow;
+
+                    task.ProgressChannel.Writer.TryWrite(new TaskProgress
+                    {
+                        TaskId = task.TaskId,
+                        Status = "complete",
+                        ResultUrl = $"/JellyfinSuite/FrameExport/Result/{task.TaskId}/output.{ext}",
+                        FileSize = output.Length,
+                        Percent = 100,
+                    });
+                    task.ProgressChannel.Writer.TryComplete();
+                }
+            }
+            catch (Exception ex)
+            {
+                task.Status = Services.TaskStatus.Error;
+                task.Error = ex.Message;
+                task.ProgressChannel.Writer.TryWrite(new TaskProgress
+                {
+                    TaskId = task.TaskId,
+                    Status = "error",
+                    Error = ex.Message,
+                });
+                task.ProgressChannel.Writer.TryComplete();
+            }
+        });
 
         return Accepted(new GenerateResponse { TaskId = task.TaskId });
     }
