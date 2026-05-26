@@ -28,6 +28,7 @@ pub fn encode_webp_anim(frames: &[DynamicImage], fps: u16, _loop_count: u16) -> 
     // Per-frame config so WebPAnimEncoderAdd gets valid config, not zeroed
     let cfg: webp::WebPConfig = webp::WebPConfig {
         lossless: 1, quality: 75.0, method: 4,
+        segments: 4, pass: 1,
         ..unsafe { std::mem::zeroed() }
     };
     let dummy_cfg: webp::WebPConfig = unsafe { std::mem::zeroed() }; // only needed for AnimEncoder ctor
