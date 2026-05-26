@@ -5,7 +5,7 @@ import { initGestures, setSeekSeconds } from './gestures';
 import { initLongPress } from './long-press';
 import { initTrickplay, setTrickplayEnabled } from './trickplay';
 import { t } from './i18n';
-import { ICON_SCREENSHOT } from './icons';
+import { ICON_SCREENSHOT, ICON_FRAME_EXPORT } from './icons';
 
 const ROOT_ID = 'jfs-enhancer-root';
 
@@ -214,14 +214,30 @@ function injectPlayerButtons(
   screenshotWrap.appendChild(screenshotBtn);
   screenshotWrap.appendChild(switchLabel);
 
-  // Show subtitle toggle only when subtitles are actually active
-  function updateSubtitleToggleVisibility() {
-    const hasAssSubtitles = !!document.querySelector('.libassjs-canvas-parent canvas');
-    const srtEl = document.querySelector('.videoSubtitles');
-    const hasSrtSubtitles = !!srtEl && srtEl.textContent!.trim().length > 0;
-    const active = hasAssSubtitles || hasSrtSubtitles;
-    switchLabel.style.display = active ? '' : 'none';
-    screenshotWrap.classList.toggle('jfs-has-subtitles', active);
+  // ── Frame Export button ──────────────────────────────────────────────────
+  const frameExportBtn = document.createElement('button');
+  frameExportBtn.className = 'jfs-enhancer-btn';
+  frameExportBtn.title = t('frameExport.button');
+  frameExportBtn.innerHTML = ICON_FRAME_EXPORT;
+  frameExportBtn.addEventListener('click', () => {
+    const itemId = getItemId();
+    if (!itemId) return;
+    // Placeholder: openFrameExportModal will be implemented in Phase 3 (US1)
+    const videoEl = _currentVideoEl;
+    if (!videoEl) return;
+    import('./frame-export').then(m => m.openFrameExportModal(videoEl, itemId));
+  });
+
+  // Insert after the screenshot wrap
+  const dirLtr = osdButtons.querySelector<HTMLElement>('div[dir="ltr"]');
+  if (dirLtr) {
+    dirLtr.after(frameStepWrap);
+    frameStepWrap.after(screenshotWrap);
+    screenshotWrap.after(frameExportBtn);
+  } else {
+    osdButtons.append(frameStepWrap);
+    osdButtons.append(screenshotWrap);
+    osdButtons.append(frameExportBtn);
   }
   updateSubtitleToggleVisibility();
   const subtitleObserver = new MutationObserver(updateSubtitleToggleVisibility);

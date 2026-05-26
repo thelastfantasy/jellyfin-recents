@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite'
+import { aliveUIVite } from '@alivecss/aliveui/vite'
 
 export default defineConfig({
+  plugins: [
+    aliveUIVite({ content: ['./src/**/*.{ts,tsx}'] }),
+  ],
   build: {
     lib: {
       entry: 'src/index.ts',
@@ -11,7 +15,6 @@ export default defineConfig({
     emptyOutDir: false,
     rollupOptions: {
       output: {
-        // 单文件 bundle，无外部依赖
         inlineDynamicImports: true,
       },
     },
