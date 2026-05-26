@@ -235,9 +235,60 @@ async fn handle_stitch(
     stream: &mut tokio::net::UnixStream,
     _state: &Arc<State>,
 ) -> anyhow::Result<()> {
-    // Phase 10: not yet implemented — send error for now
-    send_progress(stream, "error", "stitch", 0, 1, 0.0).await?;
-    anyhow::bail!("Phase 10: panorama stitching not yet implemented")
+    use tokio::io::AsyncWriteExt;
+
+    let req = protocol::read_animate_req(stream).await?; // reuse animate req for stitch
+    eprintln!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
+
+    // Decode all frames
+    send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
+    let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
+    for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
+        let p = path.clone();
+        let pm = *pos_ms;
+        let bytes = tokio::task::spawn_blocking(move || decoder::decode_and_encode(&p, pm, 0)).await??;
+        images.push(image::load_from_memory(&bytes)?);
+        send_progress(stream, "running", "decoding", (i + 1) as u32, req.paths.len() as u32,
+            (i + 1) as f64 / req.paths.len() as f64 * 30.0).await?;
+    }
+
+    // Near-duplicate frame detection (pHash)
+    send_progress(stream, "running", "classifying", 0, 1, 30.0).await?;
+    let _hashes: Vec<u64> = images.iter().map(|img| scene_classifier::phash(img)).collect();
+
+    // Scene classification
+    let class = scene_classifier::classify(&images);
+    eprintln!("[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1}",
+        class.category, class.motion, class.edge_density, class.color_entropy);
+
+    send_progress(stream, "running", &format!("{:?}", class.category).to_lowercase(), 0, 1, 35.0).await?;
+
+    // Route to algorithm
+    send_progress(stream, "running", "matching", 0, 1, 40.0).await?;
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<image::DynamicImage> {
+        match class.category {
+            scene_classifier::SceneCategory::Anime => stitch_anime::stitch_anime(&images),
+            scene_classifier::SceneCategory::Landscape => stitch_landscape::stitch_landscape(&images),
+            scene_classifier::SceneCategory::LiveAction => stitch_liveaction::stitch_liveaction(&images),
+        }
+    }).await??;
+
+    send_progress(stream, "running", "encoding", 0, 1, 85.0).await?;
+
+    // Encode result as PNG
+    let mut out_buf = std::io::Cursor::new(Vec::new());
+    result.write_to(&mut out_buf, image::ImageFormat::Png)?;
+    let output = out_buf.into_inner();
+
+    send_progress(stream, "complete", "done", 1, 1, 100.0).await?;
+
+    let mut header = Vec::with_capacity(8 + output.len());
+    header.extend_from_slice(&2u32.to_le_bytes()); // status_code = 2 (done)
+    header.extend_from_slice(&(output.len() as u32).to_le_bytes());
+    header.extend_from_slice(&output);
+    stream.write_all(&header).await?;
+
+    Ok(())
 }
 
 async fn send_progress(
