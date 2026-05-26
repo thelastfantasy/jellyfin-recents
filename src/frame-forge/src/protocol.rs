@@ -76,3 +76,73 @@ pub(crate) async fn write_ack(
     stream.write_all(&buf).await?;
     Ok(())
 }
+
+// ── ANIMATE request (0x11) ─────────────────────────────────────────────────
+
+pub(crate) struct AnimateReq {
+    pub task_id: String,
+    pub paths: Vec<(std::path::PathBuf, i64)>, // (path, pos_ms)
+    pub format: u16,     // 0x01=GIF, 0x02=WebP
+    pub resize_mode: u16, // 0x01=width, 0x02=height
+    pub target_px: u32,  // custom pixel value
+    pub fps: u16,
+    pub loop_count: u16,
+}
+
+pub(crate) async fn read_animate_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<AnimateReq> {
+    use tokio::io::AsyncReadExt;
+
+    // task_id_len + task_id
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let tid_len = u32::from_le_bytes(len_buf) as usize;
+    let mut tid_bytes = vec![0u8; tid_len];
+    stream.read_exact(&mut tid_bytes).await?;
+    let task_id = String::from_utf8(tid_bytes)?;
+
+    // frame_count
+    let mut fc_buf = [0u8; 4];
+    stream.read_exact(&mut fc_buf).await?;
+    let frame_count = u32::from_le_bytes(fc_buf) as usize;
+
+    let mut paths = Vec::with_capacity(frame_count);
+    for _ in 0..frame_count {
+        let mut pos_buf = [0u8; 8];
+        stream.read_exact(&mut pos_buf).await?;
+        let pos_ms = i64::from_le_bytes(pos_buf);
+
+        let mut pl_buf = [0u8; 4];
+        stream.read_exact(&mut pl_buf).await?;
+        let path_len = u32::from_le_bytes(pl_buf) as usize;
+
+        let mut pbytes = vec![0u8; path_len];
+        stream.read_exact(&mut pbytes).await?;
+        let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
+
+        paths.push((path, pos_ms));
+    }
+
+    let mut fmt_buf = [0u8; 2];
+    stream.read_exact(&mut fmt_buf).await?;
+    let format = u16::from_le_bytes(fmt_buf);
+
+    let mut rm_buf = [0u8; 2];
+    stream.read_exact(&mut rm_buf).await?;
+    let resize_mode = u16::from_le_bytes(rm_buf);
+
+    let mut tp_buf = [0u8; 4];
+    stream.read_exact(&mut tp_buf).await?;
+    let target_px = u32::from_le_bytes(tp_buf);
+
+    let mut fps_buf = [0u8; 2];
+    stream.read_exact(&mut fps_buf).await?;
+    let fps = u16::from_le_bytes(fps_buf);
+
+    let mut lc_buf = [0u8; 2];
+    stream.read_exact(&mut lc_buf).await?;
+    let loop_count = u16::from_le_bytes(lc_buf);
+
+    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, fps, loop_count })
+}

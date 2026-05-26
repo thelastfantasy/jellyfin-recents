@@ -1,7 +1,13 @@
+mod animate;
+mod blender;
 mod decoder;
 mod protocol;
 mod quality;
 mod resources;
+mod scene_classifier;
+mod stitch_anime;
+mod stitch_landscape;
+mod stitch_liveaction;
 
 use anyhow::Context;
 use lru::LruCache;
@@ -15,7 +21,8 @@ use protocol::{read_msg_type, read_single_frame_req, write_ack, write_jpeg_respo
 use quality::detect_quality;
 
 const MSG_SINGLE_FRAME: u8 = 0x10;
-// 0x11 = ANIMATE, 0x12 = STITCH — Phase 6/10
+const MSG_ANIMATE: u8 = 0x11;
+const MSG_STITCH: u8 = 0x12;
 const FRAME_CACHE_CAP: usize = 100;
 
 type CacheKey = (PathBuf, i64); // (canonical_path, pos_ms/500*500)
@@ -84,6 +91,16 @@ async fn handle_conn(
                     eprintln!("[frame-forge] single_frame error: {e}");
                 }
             }
+            MSG_ANIMATE => {
+                if let Err(e) = handle_animate(&mut stream, &state).await {
+                    eprintln!("[frame-forge] animate error: {e}");
+                }
+            }
+            MSG_STITCH => {
+                if let Err(e) = handle_stitch(&mut stream, &state).await {
+                    eprintln!("[frame-forge] stitch error: {e}");
+                }
+            }
             _ => {
                 eprintln!("[frame-forge] unknown msg_type: 0x{msg_type:02x}");
                 break;
@@ -135,5 +152,115 @@ async fn handle_single_frame(
     let flags = quality.to_bitmask();
 
     write_jpeg_response(stream, req.request_id, &jpeg, flags).await?;
+    Ok(())
+}
+
+async fn handle_animate(
+    stream: &mut tokio::net::UnixStream,
+    state: &Arc<State>,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let req = protocol::read_animate_req(stream).await?;
+    eprintln!("[frame-forge] ANIMATE task={} frames={} fmt={} fps={}", req.task_id, req.paths.len(), req.format, req.fps);
+
+    // Send progress: decoding
+    send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
+
+    // Decode all frames
+    let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
+    for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
+        let cache_key = (path.clone(), pos_ms / 500 * 500);
+        let jpeg_bytes = {
+            let mut c = state.cache.lock().await;
+            c.get(&cache_key).cloned()
+        };
+
+        let bytes = if let Some(data) = jpeg_bytes {
+            data
+        } else {
+            let p = path.clone();
+            let pm = *pos_ms;
+            tokio::task::spawn_blocking(move || decoder::decode_and_encode(&p, pm, 0)).await??
+        };
+
+        let img = image::load_from_memory(&bytes)?;
+        images.push(img);
+
+        send_progress(stream, "running", "decoding", (i + 1) as u32, req.paths.len() as u32,
+            (i + 1) as f64 / req.paths.len() as f64 * 50.0).await?;
+    }
+
+    // Scale frames
+    let (tw, th) = if req.target_px > 0 {
+        let first = &images[0];
+        let (fw, fh) = (first.width(), first.height());
+        if req.resize_mode == 0x02 { // height constraint
+            let ratio = req.target_px as f64 / fh as f64;
+            ((fw as f64 * ratio) as u32, req.target_px)
+        } else {
+            let ratio = req.target_px as f64 / fw as f64;
+            (req.target_px, (fh as f64 * ratio) as u32)
+        }
+    } else {
+        (images[0].width(), images[0].height())
+    };
+
+    send_progress(stream, "running", "encoding", 0, 1, 50.0).await?;
+
+    let output = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+        let scaled: Vec<image::DynamicImage> = images.iter()
+            .map(|img| animate::scale_frame(img, tw, th))
+            .collect();
+        if req.format == 0x02 {
+            animate::encode_webp_anim(&scaled, req.fps, req.loop_count)
+        } else {
+            animate::encode_gif(&scaled, req.fps, req.loop_count)
+        }
+    }).await??;
+
+    send_progress(stream, "complete", "done", 1, 1, 100.0).await?;
+
+    // Write final output
+    let mut header = Vec::with_capacity(8 + output.len());
+    header.extend_from_slice(&2u32.to_le_bytes()); // status_code = 2 (done)
+    header.extend_from_slice(&(output.len() as u32).to_le_bytes());
+    header.extend_from_slice(&output);
+    stream.write_all(&header).await?;
+
+    Ok(())
+}
+
+async fn handle_stitch(
+    stream: &mut tokio::net::UnixStream,
+    _state: &Arc<State>,
+) -> anyhow::Result<()> {
+    // Phase 10: not yet implemented — send error for now
+    send_progress(stream, "error", "stitch", 0, 1, 0.0).await?;
+    anyhow::bail!("Phase 10: panorama stitching not yet implemented")
+}
+
+async fn send_progress(
+    stream: &mut tokio::net::UnixStream,
+    status: &str,
+    phase: &str,
+    current: u32,
+    total: u32,
+    percent: f64,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let json = format!(
+        r#"{{"taskId":"","status":"{status}","phase":"{phase}","current":{current},"total":{total},"percent":{percent}}}"#
+    );
+    let json_bytes = json.as_bytes();
+
+    let status_code: u32 = if status == "complete" { 2 } else if status == "error" { 1 } else { 0 };
+
+    let mut buf = Vec::with_capacity(4 + json_bytes.len());
+    buf.extend_from_slice(&status_code.to_le_bytes());
+    buf.extend_from_slice(json_bytes);
+
+    stream.write_all(&buf).await?;
     Ok(())
 }
