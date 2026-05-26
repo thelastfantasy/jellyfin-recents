@@ -59,8 +59,8 @@ build-frame-forge:
 		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
 		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
-		       /root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		       /root/.cargo/bin/cargo build --release"
+		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		/root/.cargo/bin/cargo build --release --features opencv"
 	cp src/frame-forge/target/release/frame-forge \
 		src/JellyfinSuite.Plugin/frame-forge-linux-x64
 
@@ -139,7 +139,7 @@ clean:
 
 build-frame-forge-win-cmd:
 	docker volume create forge-cargo-home > NUL 2>&1 || cd .
-	docker run --rm -v "D:/Dev/jellyfin-recents/src/frame-forge:/workspace" -v forge-cargo-home:/root/.cargo -w /workspace ubuntu:24.04 sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-18-dev libopencv-dev && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && ldconfig && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && /root/.cargo/bin/cargo build --release"
+	docker run --rm -v "D:/Dev/jellyfin-recents/src/frame-forge:/workspace" -v forge-cargo-home:/root/.cargo -w /workspace ubuntu:24.04 sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-18-dev libopencv-dev && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && ldconfig && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && /root/.cargo/bin/cargo build --release --features opencv"
 	CMD /C copy /Y src\frame-forge\target\release\frame-forge src\JellyfinSuite.Plugin\frame-forge-linux-x64
 
 build-poster-gen-win-cmd:

@@ -1,17 +1,5 @@
 ﻿// Motion-aware stitching for live-action scenes with foreground movement.
-//!
-//! Computes a frame-difference motion mask to exclude foreground (moving
-//! actors/objects) keypoints from homography estimation. The homography is
-//! then estimated from static background features only, preventing the
-//! panorama from warping toward moving subjects.
-//!
-//! # Caveats
-//! - Motion mask threshold (diff > 30) is hardcoded; adjustable per scene
-//! - Morphological dilation uses fixed 3脳3 kernel, 2 iterations
-//! - Does not handle parallax (different depth planes moving at different rates)
-//! - Fast camera pans may cause entire frame to be masked as motion
-
-use image::{DynamicImage, GrayImage, Luma, RgbaImage};
+// Motion-aware stitching.\nuse image::{DynamicImage, GrayImage, Luma, RgbaImage};
 
 /// Stitch frames using motion-mask filtered AKAZE.
 /// Foreground regions (where motion was detected) are filled from adjacent

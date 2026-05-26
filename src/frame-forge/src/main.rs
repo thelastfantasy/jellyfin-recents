@@ -23,7 +23,9 @@ mod quality;
 mod resources;
 mod scene_classifier;
 mod stitch_anime;
+#[cfg(feature = "opencv")]
 mod stitch_landscape;
+#[cfg(feature = "opencv")]
 mod stitch_liveaction;
 
 use anyhow::Context;
@@ -299,8 +301,12 @@ async fn handle_stitch(
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<image::DynamicImage> {
         match class.category {
             scene_classifier::SceneCategory::Anime => stitch_anime::stitch_anime(&images),
+            #[cfg(feature = "opencv")]
             scene_classifier::SceneCategory::Landscape => stitch_landscape::stitch_landscape(&images),
+            #[cfg(feature = "opencv")]
             scene_classifier::SceneCategory::LiveAction => stitch_liveaction::stitch_liveaction(&images),
+            #[cfg(not(feature = "opencv"))]
+            _ => stitch_anime::stitch_anime(&images),
         }
     }).await??;
 

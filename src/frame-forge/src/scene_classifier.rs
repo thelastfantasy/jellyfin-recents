@@ -1,24 +1,6 @@
 ﻿use image::{DynamicImage, GrayImage, Luma};
 
-//! Heuristic scene classifier for panorama stitching algorithm routing.
-//!
-//! Three signals determine the category:
-//!   edge_density > 0.15 && color_entropy < 3.5 鈫?Anime (Phase Correlation)
-//!   edge_density < 0.08                      鈫?Landscape (AKAZE + fallback)
-//!   otherwise                                鈫?LiveAction (motion-masked AKAZE)
-//!
-//! # Why these thresholds
-//! Anime frames have dense ink lines (high Canny edge density) but large flat
-//! color regions (low histogram entropy). Landscape shots (sky, water) have
-//! very few edges. Live-action has moderate edge density and high entropy
-//! from skin textures, clothing patterns, etc.
-//!
-//! # Caveats
-//! - Edge density uses Sobel magnitude > 30 threshold 鈥?may miss soft-edged anime
-//! - Color entropy is computed on grayscale histogram, not RGB 鈥?faster but
-//!   cannot distinguish colorful anime from desaturated live-action
-//! - Motion classification only uses first two frames; long pans may start slow
-//! - pHash uses 8脳8 thumbnail 鈥?collisions possible for very similar frames
+/// Scene classification result.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SceneCategory { Anime, Landscape, LiveAction }
 
@@ -77,15 +59,25 @@ pub fn classify(frames: &[DynamicImage]) -> SceneClass {
 fn compute_edge_density(img: &DynamicImage) -> f64 {
     let gray = img.to_luma8();
     let (w, h) = gray.dimensions();
-    let gx = imageproc::filter::sobel_gx(&gray);
-    let gy = imageproc::filter::sobel_gy(&gray);
+    let w = w as i32;
+    let h = h as i32;
+    // Manual Sobel kernel convolution
+    let sobel_x: [[i16; 3]; 3] = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+    let sobel_y: [[i16; 3]; 3] = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
 
     let mut edge_count = 0u64;
-    let total = (w * h) as u64;
-    for y in 0..h {
-        for x in 0..w {
-            let gx_v = gx.get_pixel(x, y)[0] as i16;
-            let gy_v = gy.get_pixel(x, y)[0] as i16;
+    let total = (w as u64) * (h as u64);
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            let mut gx_v = 0i16;
+            let mut gy_v = 0i16;
+            for ky in 0..3 {
+                for kx in 0..3 {
+                    let px = gray.get_pixel((x + kx - 1) as u32, (y + ky - 1) as u32)[0] as i16;
+                    gx_v += px * sobel_x[ky as usize][kx as usize];
+                    gy_v += px * sobel_y[ky as usize][kx as usize];
+                }
+            }
             let mag = ((gx_v * gx_v + gy_v * gy_v) as f64).sqrt();
             if mag > 30.0 { edge_count += 1; }
         }
