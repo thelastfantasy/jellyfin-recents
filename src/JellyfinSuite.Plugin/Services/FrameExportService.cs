@@ -54,24 +54,23 @@ public sealed class FrameExportService : IDisposable
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = _binaryPath,
-                    Arguments = _socketPath,
+                    FileName = "nice",
+                    Arguments = $"-n 10 \"{_binaryPath}\" \"{_socketPath}\"",
                     UseShellExecute = false,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
                 },
                 EnableRaisingEvents = true,
             };
-            _process.Exited += (_, _) =>
-            {
-                _logger.LogWarning("[FrameExport] frame-forge exited unexpectedly");
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(3000);
-                    await EnsureStartedAsync(CancellationToken.None);
-                });
-            };
             _process.Start();
+
+            // Pipe daemon stderr to Jellyfin log
+            _ = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await _process.StandardError.ReadLineAsync(ct)) != null)
+                    _logger.LogInformation("[frame-forge] {Line}", line);
+            }, ct);
 
             // Wait briefly for socket to appear
             for (int i = 0; i < 20 && !File.Exists(_socketPath); i++)
