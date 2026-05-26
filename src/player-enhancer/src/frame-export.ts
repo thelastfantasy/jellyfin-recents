@@ -4,11 +4,50 @@ let _modalRoot: HTMLDivElement | null = null
 let _videoEl: HTMLVideoElement | null = null
 let _itemId = ''
 let _activeTaskId = ''
+let _exportType: 'animate' | 'stitch' = 'animate'
 
 // State
 let _frames: FrameEntry[] = []
 let _minPosMs = 0
 let _maxPosMs = 0
+
+// ── Settings (localStorage) ─────────────────────────────────────────────────
+interface ExportSettings {
+  animateFormat: 'gif' | 'webp'
+  stitchFormat: 'png' | 'webp-lossless'
+  resizeMode: 'width' | 'height'
+  customWidth: number
+  customHeight: number
+  resolutionPreset: string
+  fps: number
+  loopCount: number
+}
+
+const DEFAULT_SETTINGS: ExportSettings = {
+  animateFormat: 'gif',
+  stitchFormat: 'png',
+  resizeMode: 'width',
+  customWidth: 0,
+  customHeight: 0,
+  resolutionPreset: 'original',
+  fps: 5,
+  loopCount: 0,
+}
+
+function loadSettings(): ExportSettings {
+  try {
+    const raw = localStorage.getItem('jfs-frameexport-settings')
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_SETTINGS }
+}
+
+function saveSettings(s: ExportSettings): void {
+  try { localStorage.setItem('jfs-frameexport-settings', JSON.stringify(s)) } catch { /* ignore */ }
+}
+
+let _settings = loadSettings()
+let _paramsOpen = false
 
 interface FrameEntry {
   posMs: number
@@ -84,12 +123,16 @@ function showGridPage(): void {
         <button id="jfs-fe-close" class="alive-button alive-button-ghost alive-button-sm">✕</button>
       </div>
       <div id="jfs-fe-grid" class="grid grid-cols-4 gap-3 p-4 overflow-y-auto flex-1"></div>
-      <div class="alive-stack alive-stack-h items-center justify-between p-3 border-t border-slate-200 bg-slate-50">
-        <span id="jfs-fe-count" class="text-sm text-slate-600">加载中...</span>
-        <div class="flex gap-2">
-          <button id="jfs-fe-prev" class="alive-button alive-button-secondary alive-button-sm" disabled>← 向前</button>
-          <button id="jfs-fe-next" class="alive-button alive-button-secondary alive-button-sm">向后 →</button>
-          <button id="jfs-fe-generate" class="alive-button alive-button-primary alive-button-sm">生成动画</button>
+      <div class="alive-stack alive-stack-v p-3 border-t border-slate-200 bg-slate-50 gap-2">
+        ${renderParamsPanel()}
+        <div class="alive-stack alive-stack-h items-center justify-between">
+          <span id="jfs-fe-count" class="text-sm text-slate-600">加载中...</span>
+          <div class="flex gap-2">
+            <button id="jfs-fe-prev" class="alive-button alive-button-secondary alive-button-sm" disabled>← 向前</button>
+            <button id="jfs-fe-next" class="alive-button alive-button-secondary alive-button-sm">向后 →</button>
+            <button id="jfs-fe-type" class="alive-button alive-button-ghost alive-button-sm">全景图</button>
+            <button id="jfs-fe-generate" class="alive-button alive-button-primary alive-button-sm">生成动画</button>
+          </div>
         </div>
       </div>
     </div>
@@ -99,6 +142,128 @@ function showGridPage(): void {
   document.getElementById('jfs-fe-prev')?.addEventListener('click', () => expandFrames(-1))
   document.getElementById('jfs-fe-next')?.addEventListener('click', () => expandFrames(1))
   document.getElementById('jfs-fe-generate')?.addEventListener('click', submitGenerate)
+  document.getElementById('jfs-fe-type')?.addEventListener('click', toggleType)
+}
+
+function toggleType(): void {
+  _exportType = _exportType === 'animate' ? 'stitch' : 'animate'
+  const genBtn = document.getElementById('jfs-fe-generate')
+  const typeBtn = document.getElementById('jfs-fe-type')
+  if (genBtn) genBtn.textContent = _exportType === 'animate' ? '生成动画' : '导出全景图'
+  if (typeBtn) typeBtn.textContent = _exportType === 'animate' ? '全景图' : '动画'
+  refreshParamsUI()
+}
+
+function renderParamsPanel(): string {
+  const fmt = _exportType === 'animate' ? _settings.animateFormat : _settings.stitchFormat
+  const isAnim = _exportType === 'animate'
+  const opts = isAnim ? ['gif', 'webp'] : ['png', 'webp-lossless']
+  const fmtOptions = opts.map(o => `<option value="${o}" ${fmt === o ? 'selected' : ''}>${o.toUpperCase()}</option>`).join('')
+
+  const presets = ['original', '1080p', '720p', '480p', '360p']
+  const resOptions = presets.map(p => `<option value="${p}" ${_settings.resolutionPreset === p ? 'selected' : ''}>${p === 'original' ? '原始' : p}</option>`).join('')
+
+  const display = _paramsOpen ? '' : 'hidden'
+
+  return `
+    <div class="alive-stack alive-stack-h items-center gap-2">
+      <select id="jfs-fe-format" class="alive-select text-xs py-1">${fmtOptions}</select>
+      <button id="jfs-fe-params-toggle" class="alive-button alive-button-ghost alive-button-xs text-[11px]">参数 ▾</button>
+    </div>
+    <div id="jfs-fe-params" class="${display} alive-stack alive-stack-v gap-2 p-2 bg-slate-100 rounded-lg text-xs">
+      <div class="alive-stack alive-stack-h items-center gap-2">
+        <span class="text-slate-600 w-12">分辨率</span>
+        <select id="jfs-fe-preset" class="alive-select text-xs flex-1">${resOptions}</select>
+      </div>
+      <div class="alive-stack alive-stack-h items-center gap-2">
+        <label class="text-slate-600 cursor-pointer"><input type="radio" name="resizeMode" value="width" ${_settings.resizeMode === 'width' ? 'checked' : ''} class="mr-1 jfs-fe-mode" />宽</label>
+        <label class="text-slate-600 cursor-pointer"><input type="radio" name="resizeMode" value="height" ${_settings.resizeMode === 'height' ? 'checked' : ''} class="mr-1 jfs-fe-mode" />高</label>
+        <input id="jfs-fe-cw" type="number" value="${_settings.customWidth || ''}" placeholder="px" class="alive-input text-xs w-16 py-0.5" ${_settings.resizeMode === 'height' ? 'disabled' : ''} />
+        <span class="text-slate-400">×</span>
+        <input id="jfs-fe-ch" type="number" value="${_settings.customHeight || ''}" placeholder="auto" class="alive-input text-xs w-16 py-0.5" ${_settings.resizeMode === 'width' ? 'disabled' : ''} />
+      </div>
+      ${isAnim ? `
+      <div class="alive-stack alive-stack-h items-center gap-2">
+        <span class="text-slate-600 w-12">帧率</span>
+        <input id="jfs-fe-fps" type="range" min="1" max="30" value="${_settings.fps}" class="flex-1" />
+        <span id="jfs-fe-fps-val" class="text-slate-600 w-8">${_settings.fps}fps</span>
+      </div>
+      <div class="alive-stack alive-stack-h items-center gap-2">
+        <span class="text-slate-600 w-12">循环</span>
+        <input id="jfs-fe-loop" type="number" min="0" max="99" value="${_settings.loopCount}" class="alive-input text-xs w-16 py-0.5" />
+        <span class="text-slate-400">(0=无限)</span>
+      </div>
+      ` : ''}
+    </div>
+  `
+}
+
+function refreshParamsUI(): void {
+  const panel = document.getElementById('jfs-fe-params')
+  if (!panel) return
+  panel.outerHTML = renderParamsPanel()
+  wireParams()
+}
+
+function wireParams(): void {
+  document.getElementById('jfs-fe-params-toggle')?.addEventListener('click', () => {
+    _paramsOpen = !_paramsOpen
+    refreshParamsUI()
+  })
+  document.getElementById('jfs-fe-format')?.addEventListener('change', (e) => {
+    if (_exportType === 'animate') _settings.animateFormat = (e.target as HTMLSelectElement).value as 'gif' | 'webp'
+    else _settings.stitchFormat = (e.target as HTMLSelectElement).value as 'png' | 'webp-lossless'
+    saveSettings(_settings)
+  })
+  document.getElementById('jfs-fe-preset')?.addEventListener('change', (e) => {
+    _settings.resolutionPreset = (e.target as HTMLSelectElement).value
+    if (_settings.resolutionPreset !== 'original') {
+      _settings.resizeMode = 'width'
+      _settings.customWidth = 0
+      _settings.customHeight = 0
+    }
+    saveSettings(_settings)
+    refreshParamsUI()
+  })
+  document.querySelectorAll('.jfs-fe-mode').forEach((r) => {
+    r.addEventListener('change', (e) => {
+      _settings.resizeMode = (e.target as HTMLInputElement).value as 'width' | 'height'
+      saveSettings(_settings)
+      refreshParamsUI()
+    })
+  })
+  document.getElementById('jfs-fe-cw')?.addEventListener('input', (e) => {
+    const v = parseInt((e.target as HTMLInputElement).value) || 0
+    _settings.customWidth = v
+    _settings.resolutionPreset = 'original'
+    if (v > 0 && _videoEl) {
+      const ratio = (_videoEl.videoHeight || 1) / (_videoEl.videoWidth || 1)
+      _settings.customHeight = Math.round(v * ratio)
+    }
+    saveSettings(_settings)
+    refreshParamsUI()
+  })
+  document.getElementById('jfs-fe-ch')?.addEventListener('input', (e) => {
+    const v = parseInt((e.target as HTMLInputElement).value) || 0
+    _settings.customHeight = v
+    _settings.resolutionPreset = 'original'
+    if (v > 0 && _videoEl) {
+      const ratio = (_videoEl.videoWidth || 1) / (_videoEl.videoHeight || 1)
+      _settings.customWidth = Math.round(v * ratio)
+    }
+    saveSettings(_settings)
+    refreshParamsUI()
+  })
+  document.getElementById('jfs-fe-fps')?.addEventListener('input', (e) => {
+    _settings.fps = parseInt((e.target as HTMLInputElement).value) || 5
+    saveSettings(_settings)
+    const val = document.getElementById('jfs-fe-fps-val')
+    if (val) val.textContent = `${_settings.fps}fps`
+  })
+  document.getElementById('jfs-fe-loop')?.addEventListener('input', (e) => {
+    _settings.loopCount = Math.max(0, Math.min(99, parseInt((e.target as HTMLInputElement).value) || 0))
+    saveSettings(_settings)
+  })
 }
 
 async function loadInitialFrames(): Promise<void> {
@@ -283,17 +448,20 @@ async function submitGenerate(): Promise<void> {
   }
   if (selected.length > 50 && !confirm(`选中 ${selected.length} 帧，文件可能较大。继续？`)) return
 
+  const format = _exportType === 'animate' ? _settings.animateFormat : _settings.stitchFormat
   const body = {
     itemId: _itemId,
     itemTitle: document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'export',
-    type: 'animate',
+    type: _exportType,
     frames: selected.map((f) => ({ positionMs: f.posMs })),
     params: {
-      format: 'gif',
-      resizeMode: 'width',
-      resolutionPreset: 'original',
-      fps: 5,
-      loopCount: 0,
+      format,
+      resizeMode: _settings.resizeMode,
+      customWidth: _settings.customWidth || null,
+      customHeight: _settings.customHeight || null,
+      resolutionPreset: _settings.resolutionPreset,
+      fps: _settings.fps,
+      loopCount: _settings.loopCount,
     },
   }
 

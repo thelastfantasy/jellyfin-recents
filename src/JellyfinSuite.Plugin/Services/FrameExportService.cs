@@ -272,6 +272,92 @@ public sealed class FrameExportService : IDisposable
         return null;
     }
 
+    public async Task<byte[]?> SubmitStitchTaskAsync(
+        TaskState task,
+        List<string> filePaths,
+        List<long> positionsMs,
+        string format,   // "png" or "webp-lossless"
+        CancellationToken ct = default)
+    {
+        if (!IsAvailable) return null;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+
+        var taskIdBytes = Encoding.UTF8.GetBytes(task.TaskId);
+        var frameCount = filePaths.Count;
+
+        using var ms = new MemoryStream();
+        ms.WriteByte(0x12); // MSG_STITCH
+        ms.Write(BitConverter.GetBytes((uint)taskIdBytes.Length), 0, 4);
+        ms.Write(taskIdBytes, 0, taskIdBytes.Length);
+        ms.Write(BitConverter.GetBytes((uint)frameCount), 0, 4);
+
+        for (int i = 0; i < frameCount; i++)
+        {
+            ms.Write(BitConverter.GetBytes(positionsMs[i]), 0, 8);
+            var pathBytes = Encoding.UTF8.GetBytes(filePaths[i]);
+            ms.Write(BitConverter.GetBytes((uint)pathBytes.Length), 0, 4);
+            ms.Write(pathBytes, 0, pathBytes.Length);
+        }
+
+        ushort fmtVal = format == "webp-lossless" ? (ushort)0x02 : (ushort)0x01;
+        ms.Write(BitConverter.GetBytes(fmtVal), 0, 2);
+        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // resize_mode = 0 (original)
+        ms.Write(BitConverter.GetBytes((uint)0), 0, 4);    // target_px = 0
+        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // fps = 0
+        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // loop = 0
+
+        var reqBuf = ms.ToArray();
+        await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
+
+        // Read progress events + final output (same pattern as animate)
+        var header = new byte[8];
+        var outputBuf = new List<byte>();
+        bool done = false;
+
+        while (!done && !ct.IsCancellationRequested)
+        {
+            await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+            var statusCode = BitConverter.ToUInt32(header, 0);
+            if (statusCode != 2)
+            {
+                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                var jsonLen = (int)BitConverter.ToUInt32(header, 0);
+                var jsonBuf = new byte[jsonLen];
+                await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
+                var json = Encoding.UTF8.GetString(jsonBuf);
+                try
+                {
+                    var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
+                    if (prog != null)
+                    {
+                        prog.TaskId = task.TaskId;
+                        task.ProgressChannel.Writer.TryWrite(prog);
+                        if (prog.Status == "error")
+                        {
+                            task.Status = TaskStatus.Error;
+                            task.Error = prog.Error;
+                            task.ProgressChannel.Writer.TryComplete();
+                            return null;
+                        }
+                    }
+                }
+                catch { }
+                if (statusCode == 1) { task.Status = TaskStatus.Error; task.ProgressChannel.Writer.TryComplete(); return null; }
+            }
+            else
+            {
+                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                var dataLen = (int)BitConverter.ToUInt32(header, 0);
+                var dataBuf = new byte[dataLen];
+                await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
+                done = true;
+                return dataBuf;
+            }
+        }
+        return null;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

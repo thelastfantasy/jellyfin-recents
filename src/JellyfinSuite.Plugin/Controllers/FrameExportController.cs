@@ -124,12 +124,20 @@ public class FrameExportController : ControllerBase
                     "animate" => await _frameExport.SubmitAnimateTaskAsync(
                         task, filePaths, positions, req.Params.Format,
                         resizeMode, targetPx, req.Params.Fps, req.Params.LoopCount),
+                    "stitch" => await _frameExport.SubmitStitchTaskAsync(
+                        task, filePaths, positions, req.Params.Format),
                     _ => null
+                };
+
+                var ext = req.Type switch
+                {
+                    "animate" => req.Params.Format == "webp" ? "webp" : "gif",
+                    "stitch" => req.Params.Format == "webp-lossless" ? "webp" : "png",
+                    _ => "bin"
                 };
 
                 if (output != null && output.Length > 0)
                 {
-                    var ext = req.Params.Format == "webp" ? "webp" : "gif";
                     var outputPath = Path.Combine(task.TempDir, $"output.{ext}");
                     await System.IO.File.WriteAllBytesAsync(outputPath, output);
 
