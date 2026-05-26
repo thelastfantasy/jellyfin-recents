@@ -23,14 +23,30 @@ pub fn encode_webp_anim(frames: &[DynamicImage], fps: u16, _loop_count: u16) -> 
     if frames.is_empty() { anyhow::bail!("no frames to encode"); }
     let first = frames[0].to_rgba8();
     let (w, h) = first.dimensions();
-    let encoder = webp::AnimEncoder::new(w, h);
-    let delay_ms = (1000u32).saturating_div(fps.max(1) as u32).max(10);
-    for img in frames {
-        let rgba = img.to_rgba8();
-        let frame = webp::Frame::from_rgba(&rgba, w, h, delay_ms as i32)?;
-        encoder.add_frame(&frame)?;
+    let delay_ms = (1000u32).saturating_div(fps.max(1) as u32).max(10) as i32;
+
+    // Ensure all frames have identical dimensions (required by WebP AnimEncoder)
+    let w = frames.iter().map(|f| f.width()).max().unwrap_or(1);
+    let h = frames.iter().map(|f| f.height()).max().unwrap_or(1);
+    let rgba_data: Vec<Vec<u8>> = frames.iter().map(|img| {
+        if img.width() == w && img.height() == h {
+            img.to_rgba8().into_raw()
+        } else {
+            let padded = image::DynamicImage::new_rgba8(w, h)
+                .to_rgba8();
+            let mut padded = padded;
+            image::imageops::overlay(&mut padded, &img.to_rgba8(), 0, 0);
+            padded.into_raw()
+        }
+    }).collect();
+
+    let config = unsafe { std::mem::zeroed::<webp::WebPConfig>() };
+    let mut encoder = webp::AnimEncoder::new(w, h, &config);
+    for rgba in &rgba_data {
+        let frame = webp::AnimFrame::from_rgba(rgba, w, h, delay_ms);
+        encoder.add_frame(frame);
     }
-    let anim = encoder.encode()?;
+    let anim = encoder.try_encode().map_err(|e| anyhow::anyhow!("WebP encode: {:?}", e))?;
     Ok(anim.to_vec())
 }
 
