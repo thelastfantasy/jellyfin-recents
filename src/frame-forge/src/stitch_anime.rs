@@ -1,3 +1,25 @@
+//! Phase Correlation based panorama stitching for anime/line-art content.
+//!
+//! Unlike feature-based methods (ORB/SIFT/AKAZE), Phase Correlation works in
+//! the frequency domain via FFT and does not require texture keypoints. This
+//! makes it uniquely effective for anime scenes dominated by flat color regions
+//! and sharp ink lines.
+//!
+//! # Algorithm (per frame pair)
+//! 1. Grayscale + Hamming window (suppress FFT boundary artifacts)
+//! 2. Forward 2D FFT on both images
+//! 3. Normalized cross-power spectrum: R = F1·conj(F2) / |F1·conj(F2)|
+//! 4. Inverse FFT → correlation surface
+//! 5. Peak detection with parabola sub-pixel refinement (±0.1px)
+//! 6. Wrapped-to-real offset conversion
+//!
+//! # Caveats
+//! - Only handles translation; rotation or scale changes cause misalignment
+//! - Effective for panning camera shots; fails on zoom/rotation shots
+//! - Hamming window reduces effective resolution at frame edges
+//! - FFT size must be power of 2 for optimal performance (rustfft handles
+//!   non-power-of-2 sizes via Bluestein's algorithm, slower)
+
 use image::DynamicImage;
 use rustfft::{FftPlanner, num_complex::Complex};
 

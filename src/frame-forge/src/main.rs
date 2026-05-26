@@ -1,13 +1,19 @@
-mod animate;
-mod blender;
-mod decoder;
-mod protocol;
-mod quality;
-mod resources;
-mod scene_classifier;
-mod stitch_anime;
-mod stitch_landscape;
-mod stitch_liveaction;
+//! frame-forge: video frame decoding, quality analysis, animation, and stitching daemon.
+//!
+//! Architecture: tokio-based Unix socket server with per-connection task spawning.
+//! Three message types:
+//!   0x10 (SINGLE_FRAME): decode + quality check, return JPEG + quality flags
+//!   0x11 (ANIMATE): decode batch → scale → GIF/WebP encode → progress events → output
+//!   0x12 (STITCH): decode batch → auto-crop → pHash dedup → scene classify → route
+//!                   to algorithm → encode PNG/WebP-lossless → progress events → output
+//!
+//! FrameCache (LRU 100): keyed by (canonical_path, pos_ms/500*500), shared across
+//! all connection handlers via Arc<State>. Avoids re-decoding the same frame for
+//! overlapping animate/stitch/single-frame requests.
+//!
+//! Resource monitoring: resources.rs reads /proc/stat and /proc/meminfo to compute
+//! a pressure value (0=idle, 1=saturated). Callers should check before spawning
+//! expensive operations to protect seek-preview and streaming latency.
 
 use anyhow::Context;
 use lru::LruCache;
@@ -160,6 +166,11 @@ async fn handle_animate(
     state: &Arc<State>,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
+
+    // NOTE: frames are re-decoded at original resolution even if a thumbnail
+    // (width=320) version exists in cache. The cache stores compressed JPEG
+    // bytes for the requested width, so a thumbnail fetch at width=320 does
+    // not prepopulate the cache for the animate path (width=0 → original).
 
     let req = protocol::read_animate_req(stream).await?;
     eprintln!("[frame-forge] ANIMATE task={} frames={} fmt={} fps={}", req.task_id, req.paths.len(), req.format, req.fps);

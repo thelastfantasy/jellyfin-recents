@@ -99,8 +99,13 @@ fn compute_laplacian_variance(gray: &image::GrayImage) -> f64 {
     if count == 0 { 0.0 } else { sum / count as f64 }
 }
 
-/// Detect and return a crop rectangle that removes black/static borders.
-/// Scans edges from outside in, stopping when pixel variance exceeds threshold.
+/// Border crop: scans 25% of each edge inward. A column/row is considered
+/// "border" when its pixel variance is below `threshold` (default 5.0).
+/// Stops at the first column/row exceeding threshold. Safety: always keeps
+/// at least 80% of original width and height.
+///
+/// This handles player chrome, letterboxing, and static UI elements that
+/// would otherwise create misaligned stitch seams.
 pub fn detect_border_crop(img: &image::DynamicImage, threshold: f64) -> (u32, u32, u32, u32) {
     let gray = img.to_luma8();
     let (w, h) = gray.dimensions();

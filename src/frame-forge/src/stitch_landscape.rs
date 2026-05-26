@@ -1,3 +1,17 @@
+//! AKAZE feature-based stitching for landscape and low-texture scenes.
+//!
+//! Uses the OpenCV crate for industrial-grade AKAZE detection, Brute-Force
+//! Hamming matching, and RANSAC homography estimation. Falls back to Phase
+//! Correlation (stitch_anime) when feature matching produces too few inliers.
+//!
+//! # Caveats
+//! - Requires libopencv-dev in the build environment (Docker only)
+//! - AKAZE is Apache 2.0 licensed, no patent concerns
+//! - Falls back to Phase Correlation when inliers < 4
+//! - Simple alpha blending in overlap regions (not full multi-band)
+//! - Wide panoramas (>5 frames) accumulate drift without bundle adjustment
+//! - GPU acceleration via OpenCL is auto-detected at daemon startup
+
 use image::{DynamicImage, RgbaImage};
 use opencv::prelude::*;
 use opencv::{calib3d, core, features2d, imgproc, types};
