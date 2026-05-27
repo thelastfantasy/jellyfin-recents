@@ -159,12 +159,41 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     let max_y = offsets.iter().map(|o| o.1 + fh).max().unwrap_or(fh);
 
     let mut canvas = image::RgbaImage::new((max_x - min_x) as u32, (max_y - min_y) as u32);
+    let mut weight = vec![0u16; (canvas.width() * canvas.height()) as usize];
 
     for (i, frame) in frames.iter().enumerate() {
         let (ox, oy) = offsets[i];
         let dst_x = (ox - min_x) as i64;
         let dst_y = (oy - min_y) as i64;
-        image::imageops::overlay(&mut canvas, &frame.to_rgba8(), dst_x, dst_y);
+        let rgba = frame.to_rgba8();
+        let (fw_u, fh_u) = rgba.dimensions();
+
+        // Build per-pixel weight based on distance from edge (1..255, center=255)
+        for fy in 0..fh_u {
+            for fx in 0..fw_u {
+                let px = (dst_x + fx as i64).max(0).min(canvas.width() as i64 - 1) as u32;
+                let py = (dst_y + fy as i64).max(0).min(canvas.height() as i64 - 1) as u32;
+                let idx = (py * canvas.width() + px) as usize;
+
+                let edge_w = (fx.min(fw_u - 1 - fx).min(fy).min(fh_u - 1 - fy) as f64
+                    / (fw_u.min(fh_u) as f64 / 2.0).min(1.0).max(0.0) * 255.0) as u16;
+                let w = (edge_w.min(255) as u16).max(1);
+                let prev_w = weight[idx];
+
+                let src = rgba.get_pixel(fx, fy);
+                if prev_w > 0 {
+                    let dst = canvas.get_pixel_mut(px, py);
+                    let total = prev_w + w;
+                    dst[0] = ((dst[0] as u16 * prev_w + src[0] as u16 * w) / total) as u8;
+                    dst[1] = ((dst[1] as u16 * prev_w + src[1] as u16 * w) / total) as u8;
+                    dst[2] = ((dst[2] as u16 * prev_w + src[2] as u16 * w) / total) as u8;
+                    dst[3] = 255;
+                } else {
+                    canvas.put_pixel(px, py, *src);
+                }
+                weight[idx] = prev_w.saturating_add(w);
+            }
+        }
     }
 
     Ok(DynamicImage::ImageRgba8(canvas))
