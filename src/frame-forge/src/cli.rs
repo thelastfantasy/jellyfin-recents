@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
             eprintln!();
             eprintln!("  --json exclusively controls all params:");
             eprintln!("  {{");
-            eprintln!("    \"frames\": [{{\"path\":\"frame.webp\",\"pos_ms\":120000}}, ...],");
+            eprintln!("    \"frames\": [{{\"path\":\"frame.webp\",\"duration_ms\":200}}, ...],");
             eprintln!("    \"output\": \"out.webp\",");
             eprintln!("    \"height\": 200,");
             eprintln!("    \"fps\": 5");
@@ -87,7 +87,9 @@ fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
         let json = std::fs::read_to_string(manifest_path)?;
         let m: Manifest = serde_json::from_str(&json)?;
         let paths: Vec<&str> = m.frames.iter().map(|f| f.path.as_str()).collect();
-        let timestamps: Vec<u64> = m.frames.iter().map(|f| f.pos_ms).collect();
+        // Accumulate durations into timestamps for internal use
+        let mut ts = 0u64;
+        let timestamps: Vec<u64> = m.frames.iter().map(|f| { ts += f.duration_ms; ts }).collect();
         let output = m.output.as_deref().unwrap_or("output.webp");
         let height = m.height.unwrap_or(200);
         let fps = m.fps.unwrap_or(5);
@@ -135,7 +137,11 @@ fn encode_and_save(images: &[DynamicImage], timestamps: &[u64], output: &str, he
 }
 
 #[derive(serde::Deserialize)]
-struct ManifestFrame { path: String, pos_ms: u64 }
+struct ManifestFrame {
+    path: String,
+    /// Per-frame display duration in ms (user-facing), accumulated into timestamps internally
+    duration_ms: u64,
+}
 
 #[derive(serde::Deserialize)]
 struct Manifest {
