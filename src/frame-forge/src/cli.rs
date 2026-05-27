@@ -19,10 +19,10 @@ fn main() -> anyhow::Result<()> {
         _ => {
             eprintln!("Usage:");
             eprintln!("  forge stitch --input file1.webp file2.webp ... --output out.png");
-            eprintln!("  forge animate --manifest frames.json");
+            eprintln!("  forge animate --json frames.json");
             eprintln!("  forge animate --input f1.webp f2.webp ... --output out.gif --height 200 [--fps 5] [--timestamps ms1 ms2 ...]");
             eprintln!();
-            eprintln!("  manifest.json exclusively controls all params:");
+            eprintln!("  --json exclusively controls all params:");
             eprintln!("  {{");
             eprintln!("    \"frames\": [{{\"path\":\"frame.webp\",\"pos_ms\":120000}}, ...],");
             eprintln!("    \"output\": \"out.webp\",");
@@ -82,7 +82,7 @@ fn cmd_stitch(args: &[String]) -> anyhow::Result<()> {
 fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
     let kv = parse_kv(args);
 
-    if let Some(manifest_path) = kv.iter().find(|(k,_)| *k == "manifest").and_then(|(_,v)| v.first()) {
+    if let Some(manifest_path) = kv.iter().find(|(k,_)| *k == "json").and_then(|(_,v)| v.first()) {
         // JSON manifest — all-in-one
         let json = std::fs::read_to_string(manifest_path)?;
         let m: Manifest = serde_json::from_str(&json)?;
