@@ -65,23 +65,36 @@ pub fn encode_webp_anim(frames: &[DynamicImage], fps: u16, _loop_count: u16) -> 
 // ── Timestamp-aware variants — preserves original video playback speed ──────
 
 /// GIF with per-frame delays derived from original video timestamps (ms).
-/// Each frame's delay = (next_pos_ms - current_pos_ms) / 10 centiseconds.
+/// First and last frame delays use the average gap; middle frames use actual gaps.
+/// This prevents jarring timing when frames are unevenly spaced.
 pub fn encode_gif_timed(frames: &[DynamicImage], timestamps: &[u64], loop_count: u16) -> anyhow::Result<Vec<u8>> {
     use gif::{Encoder, Frame, Repeat};
     if frames.is_empty() { anyhow::bail!("no frames to encode"); }
     let first = frames[0].to_rgba8();
     let (w, h) = first.dimensions();
+
+    // Compute average gap for edge frames
+    let n = frames.len();
+    let avg_gap_ms = if n > 1 && timestamps.len() >= n {
+        (timestamps[n-1] - timestamps[0]).max(10) / (n-1).max(1) as u64
+    } else {
+        200 // fallback: 200ms = 5fps
+    };
+
     let mut buf = Cursor::new(Vec::new());
     {
         let mut encoder = Encoder::new(&mut buf, w as u16, h as u16, &[])?;
         encoder.set_repeat(if loop_count == 0 { Repeat::Infinite } else { Repeat::Finite(loop_count) })?;
-        for i in 0..frames.len() {
-            let delay_cs = if i + 1 < timestamps.len() {
+        for i in 0..n {
+            let delay_cs = if i == 0 {
+                // first frame: average gap
+                (avg_gap_ms / 10) as u16
+            } else if i < n - 1 && i + 1 < timestamps.len() {
+                // middle frames: actual gap
                 ((timestamps[i + 1] - timestamps[i]).max(10) / 10) as u16
             } else {
-                // last frame: use average of previous delays, or fallback
-                let avg = if i > 0 { (timestamps[i] - timestamps[0]) / i.max(1) as u64 } else { 200 };
-                (avg.max(10) / 10) as u16
+                // last frame: average gap
+                (avg_gap_ms / 10) as u16
             };
             let rgba = frames[i].to_rgba8();
             let mut frame = Frame::from_rgba_speed(w as u16, h as u16, &mut rgba.into_raw(), 10);
@@ -92,13 +105,33 @@ pub fn encode_gif_timed(frames: &[DynamicImage], timestamps: &[u64], loop_count:
     Ok(buf.into_inner())
 }
 
-/// WebP with per-frame absolute timestamps from original video (ms).
-/// Each frame's timestamp = original_pos_ms - first_pos_ms.
+/// WebP with absolute timestamps from original video (ms).
+/// First and last frame intervals use the average gap rather than actual gaps,
+/// so skipped/uneven frames don't cause jarring first/last frame timing.
 pub fn encode_webp_timed(frames: &[DynamicImage], timestamps: &[u64], _loop_count: u16) -> anyhow::Result<Vec<u8>> {
     if frames.is_empty() { anyhow::bail!("no frames to encode"); }
     let w = frames.iter().map(|f| f.width()).max().unwrap_or(1);
     let h = frames.iter().map(|f| f.height()).max().unwrap_or(1);
-    let first_ts = timestamps.first().copied().unwrap_or(0) as i32;
+    let n = frames.len().min(timestamps.len());
+
+    let avg_gap_ms = if n > 1 {
+        (timestamps[n-1] - timestamps[0]).max(10) / (n-1).max(1) as u64
+    } else {
+        200u64
+    };
+
+    // Build absolute positions: first gap = avg, middle = actual gaps, last gap = avg
+    let mut positions: Vec<i32> = Vec::with_capacity(n);
+    positions.push(0);
+    for i in 1..n {
+        let prev = positions[i - 1] as u64;
+        let gap = if i == 1 || i == n - 1 {
+            avg_gap_ms  // first and last frame use average to avoid jarring timing
+        } else {
+            timestamps[i] - timestamps[i - 1]
+        };
+        positions.push((prev + gap.max(10)) as i32);
+    }
 
     let cfg = webp::WebPConfig {
         lossless: 1, quality: 75.0, method: 4, segments: 4, pass: 1,
@@ -106,7 +139,7 @@ pub fn encode_webp_timed(frames: &[DynamicImage], timestamps: &[u64], _loop_coun
     };
     let dummy_cfg: webp::WebPConfig = unsafe { std::mem::zeroed() };
     let mut encoder = webp::AnimEncoder::new(w, h, &dummy_cfg);
-    let rgba_data: Vec<Vec<u8>> = frames.iter().map(|img| {
+    let rgba_data: Vec<Vec<u8>> = frames.iter().take(n).map(|img| {
         if img.width() == w && img.height() == h {
             img.to_rgba8().into_raw()
         } else {
@@ -116,8 +149,7 @@ pub fn encode_webp_timed(frames: &[DynamicImage], timestamps: &[u64], _loop_coun
         }
     }).collect();
     for (i, rgba) in rgba_data.iter().enumerate() {
-        let ts = timestamps.get(i).copied().unwrap_or(0) as i32;
-        let frame = webp::AnimFrame::new(rgba, webp::PixelLayout::Rgba, w, h, ts - first_ts, Some(&cfg));
+        let frame = webp::AnimFrame::new(rgba, webp::PixelLayout::Rgba, w, h, positions[i], Some(&cfg));
         encoder.add_frame(frame);
     }
     let anim = encoder.try_encode().map_err(|e| anyhow::anyhow!("WebP: {:?}", e))?;
