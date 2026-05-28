@@ -11,7 +11,7 @@ pub fn decode_and_encode(
 ) -> anyhow::Result<Vec<u8>> {
     let _t = Instant::now();
 
-    let ictx = ffmpeg_next::format::input(&path)
+    let mut ictx = ffmpeg_next::format::input(&path)
         .with_context(|| format!("failed to open {}", path.display()))?;
 
     let video_stream = ictx
@@ -27,16 +27,12 @@ pub fn decode_and_encode(
 
     let time_base = video_stream.time_base();
     let target_pts = (pos_ms as i64)
-        .checked_mul(time_base.den() as i64)
-        .and_then(|v| v.checked_div(time_base.num() as i64 * 1000))
+        .checked_mul(time_base.denominator() as i64)
+        .and_then(|v| v.checked_div(time_base.numerator() as i64 * 1000))
         .unwrap_or(0);
 
     // Seek to keyframe before target
-    ictx.seek(
-        stream_index as i32,
-        target_pts,
-        std::ops::Range { start: target_pts.saturating_sub(100), end: target_pts + 100 },
-    )?;
+    ictx.seek(target_pts, ..)?;
 
     let mut decoded_rgb: Option<image::DynamicImage> = None;
 
@@ -102,7 +98,7 @@ pub fn decode_and_encode(
     let elapsed = _t.elapsed();
     let bytes = jpeg_buf.into_inner();
     eprintln!(
-        "[frame-forge] decode {path} @{pos_ms}ms w={width} 鈫?{:.0}ms ({} B)",
+        "[frame-forge] decode {} @{pos_ms}ms w={width} -> {:.0}ms ({} B)",
         path.display(),
         elapsed.as_secs_f64() * 1000.0,
         bytes.len()

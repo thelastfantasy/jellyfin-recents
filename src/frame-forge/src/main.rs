@@ -65,7 +65,7 @@ async fn run() -> anyhow::Result<()> {
     let sock_path = args.get(1).context("Usage: frame-forge <socket-path>")?;
 
     ffmpeg_next::init()?;
-    let gpu_available = opencv::core::ocl::have_opencl().unwrap_or(false);
+    let gpu_available = false; // OCL detection requires explicit opencl feature
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;

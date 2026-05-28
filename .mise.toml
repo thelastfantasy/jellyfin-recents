@@ -24,8 +24,8 @@ description = "构建并部署到本地 Jellyfin 开发容器"
 run = "make update"
 
 [tasks.deploy]
-description = "构建并部署到 Jellyfin 容器（Windows cmd 专用，含 Docker Rust 编译）"
-run = "mise exec -- make deploy-win-cmd"
+description = "构建并部署到本地 Jellyfin 容器（含 Docker Rust 编译）"
+run = "make update"
 
 [tasks.test]
 description = "运行所有测试（Rust + TypeScript + C#）"

@@ -16,7 +16,7 @@ required-features = ["cli"]
 # Daemon deps (Linux only)
 tokio = { version = "1", features = ["full"], optional = true }
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
-opencv = { version = "0.93", optional = true }
+opencv = { version = "0.93", optional = true, features = ["clang-runtime"] }
 
 # Shared deps (cross-platform)
 image = "0.25"

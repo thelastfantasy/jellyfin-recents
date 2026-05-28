@@ -1,5 +1,5 @@
 ﻿// Motion-aware stitching for live-action scenes with foreground movement.
-// Motion-aware stitching.\nuse image::{DynamicImage, GrayImage, Luma, RgbaImage};
+use image::{DynamicImage, GrayImage, Luma, RgbaImage};
 
 /// Stitch frames using motion-mask filtered AKAZE.
 /// Foreground regions (where motion was detected) are filled from adjacent

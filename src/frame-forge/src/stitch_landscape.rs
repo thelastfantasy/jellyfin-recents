@@ -14,7 +14,7 @@
 
 use image::{DynamicImage, RgbaImage};
 use opencv::prelude::*;
-use opencv::{calib3d, core, features2d, imgproc, types};
+use opencv::{calib3d, core, features2d, imgproc};
 
 /// AKAZE feature-based stitching for landscape/low-texture scenes.
 /// Falls back to Phase Correlation when feature matching fails.
@@ -43,19 +43,19 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
         let curr = image_to_mat(&images[i]);
 
         // Try AKAZE feature matching
-        if let Ok(h) = estimate_homography_akaze(&prev, &curr) {
+        if let Ok(homo) = estimate_homography_akaze(&prev, &curr) {
             // Warp current frame into prev coordinate system
-            let warped = warp_image(&curr, &h, w, h);
+            let warped = warp_image(&curr, &homo, w, h);
             result = blend_pair(&result, &warped);
         } else {
             // Fallback to Phase Correlation
             let prev_img = DynamicImage::ImageRgba8(result.clone());
-            let (dx, dy) = crate::stitch_anime::phase_correlate(&prev_img, &images[i]);
+            let (dx, dy, _) = crate::stitch_anime::phase_correlate(&prev_img, &images[i]);
             let dst_x = dx.max(0) as u32;
             let dst_y = dy.max(0) as u32;
             let mut new_canvas = RgbaImage::new(
-                (w + dx.unsigned_abs()).max(w as u32),
-                (h + dy.unsigned_abs()).max(h as u32),
+                w as u32 + dx.unsigned_abs(),
+                h as u32 + dy.unsigned_abs(),
             );
             image::imageops::overlay(&mut new_canvas, &result, 0, 0);
             let rgba = images[i].to_rgba8();
@@ -70,15 +70,12 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
 fn image_to_mat(img: &DynamicImage) -> core::Mat {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let data = rgba.into_raw();
-    unsafe {
-        core::Mat::new_rows_cols_with_data(
-            h as i32, w as i32,
-            core::CV_8UC4,
-            data.as_ptr() as *mut _,
-            core::Mat_AUTO_STEP,
-        ).unwrap()
-    }
+    let raw = rgba.into_raw();
+    let mut mat = core::Mat::new_rows_cols_with_default(
+        h as i32, w as i32, core::CV_8UC4, core::Scalar::default()
+    ).unwrap();
+    mat.data_bytes_mut().unwrap().copy_from_slice(&raw);
+    mat
 }
 
 fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Result<core::Mat> {
@@ -89,17 +86,17 @@ fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Resu
     imgproc::cvt_color(img2, &mut gray2, imgproc::COLOR_RGBA2GRAY, 0)?;
 
     // AKAZE detector + descriptor
-    let akaze = features2d::AKAZE::create(
-        features2d::AKAZE_DESCRIPTOR_MLDB, 0, 3, 0.001f32, 4, 4,
-        opencv::core::KAZE_DIFF_PM_G2,
+    let mut akaze = features2d::AKAZE::create(
+        features2d::AKAZE_DescriptorType::DESCRIPTOR_MLDB, 0, 3, 0.001f32, 4, 4,
+        features2d::KAZE_DiffusivityType::DIFF_PM_G2,
     )?;
 
-    let mut kp1 = types::VectorOfKeyPoint::new();
-    let mut kp2 = types::VectorOfKeyPoint::new();
+    let mut kp1 = core::Vector::<core::KeyPoint>::new();
+    let mut kp2 = core::Vector::<core::KeyPoint>::new();
     let mut desc1 = core::Mat::default();
     let mut desc2 = core::Mat::default();
-    akaze.detect_and_compute(&gray1, &core::no_array()?, &mut kp1, &mut desc1, false)?;
-    akaze.detect_and_compute(&gray2, &core::no_array()?, &mut kp2, &mut desc2, false)?;
+    akaze.detect_and_compute(&gray1, &core::no_array(), &mut kp1, &mut desc1, false)?;
+    akaze.detect_and_compute(&gray2, &core::no_array(), &mut kp2, &mut desc2, false)?;
 
     if kp1.len() < 4 || kp2.len() < 4 {
         anyhow::bail!("not enough keypoints ({}/{})", kp1.len(), kp2.len());
@@ -109,8 +106,8 @@ fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Resu
     // Compute gradient magnitude and exclude keypoints below threshold
     let grad1 = gradient_magnitude(&gray1)?;
     let grad2 = gradient_magnitude(&gray2)?;
-    let kp1 = filter_keypoints_by_gradient(&kp1, &grad1, 20.0);
-    let kp2 = filter_keypoints_by_gradient(&kp2, &grad2, 20.0);
+    let mut kp1 = filter_keypoints_by_gradient(&kp1, &grad1, 20.0);
+    let mut kp2 = filter_keypoints_by_gradient(&kp2, &grad2, 20.0);
 
     if kp1.len() < 4 || kp2.len() < 4 {
         anyhow::bail!("not enough keypoints after ROI filtering ({}/{})", kp1.len(), kp2.len());
@@ -122,13 +119,16 @@ fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Resu
     akaze.compute(&gray1, &mut kp1, &mut desc1)?;
     akaze.compute(&gray2, &mut kp2, &mut desc2)?;
 
-    // BFMatcher
-    let matcher = features2d::BFMatcher::create(core::NORM_HAMMING, false)?;
-    let mut matches = types::VectorOfDMatch::new();
-    matcher.r#match(&desc1, &desc2, &mut matches, &core::no_array()?)?;
+    // BFMatcher — add train descriptors then match
+    let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, false)?;
+    let mut matches = core::Vector::<core::DMatch>::new();
+    let mut train_mats = core::Vector::<core::Mat>::new();
+    train_mats.push(desc2.try_clone()?);
+    matcher.add(&train_mats)?;
+    matcher.match_(&desc1, &mut matches, &core::no_array())?;
 
     // Sort by distance and keep top 30%
-    let mut match_vec: Vec<features2d::DMatch> = matches.iter().collect();
+    let mut match_vec: Vec<core::DMatch> = matches.iter().collect();
     match_vec.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
     let n = (match_vec.len() as f64 * 0.3).max(4.0) as usize;
     match_vec.truncate(n);
@@ -142,15 +142,15 @@ fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Resu
     let mut pts2 = core::Mat::new_rows_cols_with_default(match_vec.len() as i32, 1, core::CV_32FC2, core::Scalar::default())?;
 
     for (i, m) in match_vec.iter().enumerate() {
-        let p1 = kp1.get(m.query_idx as usize)?.pt;
-        let p2 = kp2.get(m.train_idx as usize)?.pt;
-        *pts1.at_2d::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p1.x, p1.y]);
-        *pts2.at_2d::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p2.x, p2.y]);
+        let p1 = kp1.get(m.query_idx as usize)?.pt();
+        let p2 = kp2.get(m.train_idx as usize)?.pt();
+        *pts1.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p1.x, p1.y]);
+        *pts2.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p2.x, p2.y]);
     }
 
     // RANSAC homography
-    let mask = core::Mat::default();
-    let h = calib3d::find_homography(&pts1, &pts2, &mut mask.const_clone()?, calib3d::RANSAC, 3.0)?;
+    let mut mask = core::Mat::default();
+    let h = calib3d::find_homography(&pts1, &pts2, &mut mask, calib3d::RANSAC, 3.0)?;
 
     Ok(h)
 }
@@ -221,17 +221,17 @@ fn gradient_magnitude(gray: &core::Mat) -> anyhow::Result<core::Mat> {
 
 /// Remove keypoints whose gradient magnitude is below threshold.
 fn filter_keypoints_by_gradient(
-    kp: &types::VectorOfKeyPoint,
+    kp: &core::Vector::<core::KeyPoint>,
     grad: &core::Mat,
     threshold: f64,
-) -> types::VectorOfKeyPoint {
-    let mut filtered = types::VectorOfKeyPoint::new();
+) -> core::Vector::<core::KeyPoint> {
+    let mut filtered = core::Vector::<core::KeyPoint>::new();
     for i in 0..kp.len() {
-        let pt = kp.get(i).unwrap().pt;
+        let pt = kp.get(i).unwrap().pt();
         let gx = pt.x.round() as i32;
         let gy = pt.y.round() as i32;
         if gx >= 0 && gx < grad.cols() && gy >= 0 && gy < grad.rows() {
-            let val = grad.at_2d::<f32>(gy, gx).unwrap_or(0.0);
+            let val = *grad.at_2d::<f32>(gy, gx).unwrap_or(&0.0);
             if val as f64 >= threshold {
                 filtered.push(kp.get(i).unwrap());
             }
