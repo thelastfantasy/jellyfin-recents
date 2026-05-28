@@ -51,6 +51,18 @@ at specs/009-frame-export-stitch/plan.md
 
 **不要**直接在前端写 `data.seekSeconds` 就假定返回的是 camelCase，必须先用 DevTools 确认实际 key 名。
 
+## Rust 修改规范（必须遵守）
+
+**修改 Rust 代码后，必须先通过 `cargo check` 再执行 build，不得跳过直接构建。**
+
+- `src/frame-forge` 含 `#[cfg(feature = "opencv")]` 代码，Windows 本地无 OpenCV，必须在 Docker 中 check：
+  ```
+  make check-frame-forge
+  ```
+- 其他纯 Rust crate（`poster-gen`、`seek-preview`）可在本地直接 `cargo check`
+- 只有 `check` 全部通过（0 errors）才允许触发完整 build（`make build-frame-forge` / `make update`）
+- 每次修改后先跑 check，根据错误修复后再跑 check，确认 clean 再 build，**不得以 full build 做试错工具**
+
 ## Shell 规范
 
 - **所有 CLI 操作（npm、cargo、dotnet、make 等）一律用 bash**，不得使用 PowerShell skill

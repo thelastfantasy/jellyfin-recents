@@ -46,6 +46,7 @@ src/frontend/dist/
 src/JellyfinSuite.Plugin/Web/jellyfin-suite.js
 src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js
 src/JellyfinSuite.Plugin/Web/jellyfin-suite-frontend.css
+src/JellyfinSuite.Plugin/Web/jellyfin-suite-player-enhancer.css
 src/JellyfinSuite.Plugin/bin/
 src/JellyfinSuite.Plugin/obj/
 tests/JellyfinRecents.Tests/bin/
