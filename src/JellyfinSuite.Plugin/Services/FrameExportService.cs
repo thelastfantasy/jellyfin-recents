@@ -12,6 +12,8 @@ public sealed class FrameExportService : IDisposable
 {
     private const string BinaryName = "frame-forge-linux-x64";
     private const byte MsgSingleFrame = 0x10;
+    private const byte MsgPrefetchFrame = 0x13;
+    private const byte MsgListCached = 0x14;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -22,6 +24,8 @@ public sealed class FrameExportService : IDisposable
 
     private Socket? _socket;
     private readonly SemaphoreSlim _socketLock = new(1, 1);
+    // Serialises per-request send+receive so concurrent HTTP requests don't interleave on the socket.
+    private readonly SemaphoreSlim _requestLock = new(1, 1);
 
     private uint _nextRequestId;
     private bool _disposed;
@@ -49,19 +53,22 @@ public sealed class FrameExportService : IDisposable
             if (_process is { HasExited: false })
                 return;
 
+            if (File.Exists(_socketPath)) File.Delete(_socketPath);
+
+            try { File.SetUnixFileMode(_binaryPath, UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute); }
+            catch { /* non-Unix or permission denied — proceed anyway */ }
+
             _logger.LogInformation("[FrameExport] Starting frame-forge: {Path}", _binaryPath);
-            _process = new Process
+
+            var psi = new ProcessStartInfo("nice", $"-n 10 \"{_binaryPath}\" \"{_socketPath}\"")
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "nice",
-                    Arguments = $"-n 10 \"{_binaryPath}\" \"{_socketPath}\"",
-                    UseShellExecute = false,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                },
-                EnableRaisingEvents = true,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
             };
+            psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
+
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.Start();
 
             // Pipe daemon stderr to Jellyfin log
@@ -111,53 +118,68 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return (null, 0);
 
         await EnsureStartedAsync(ct).ConfigureAwait(false);
-        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
 
-        var requestId = Interlocked.Increment(ref _nextRequestId);
-        var pathBytes = Encoding.UTF8.GetBytes(filePath);
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
 
-        // Build request frame:
-        // [1] msg_type (0x10)
-        // [4] request_id (u32 LE)
-        // [8] pos_ms (i64 LE)
-        // [4] width (u32 LE)
-        // [4] path_len (u32 LE)
-        // [N] file path (UTF-8)
-        var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length];
-        buf[0] = MsgSingleFrame;
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
-        BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), posMs);
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(13, 4), (uint)width);
-        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
-        pathBytes.CopyTo(buf.AsSpan(21));
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
 
-        await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+            // [1] msg_type (0x10)
+            // [4] request_id (u32 LE)
+            // [8] pos_ms (i64 LE)
+            // [4] width (u32 LE)
+            // [4] path_len (u32 LE)
+            // [N] file path (UTF-8)
+            // [32] item_id (ASCII hex, no dashes)
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            buf[0] = MsgSingleFrame;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), posMs);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(13, 4), (uint)width);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
+            pathBytes.CopyTo(buf.AsSpan(21));
+            itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
 
-        // Read response:
-        // [4] request_id (u32 LE)
-        // [4] jpeg_len (u32 LE)
-        // [N] JPEG bytes
-        // [2] quality_flags (u16 LE)
-        var header = new byte[8];
-        await ReceiveExactAsync(sock, header, 8, ct).ConfigureAwait(false);
-        var respId = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, 4));
-        var jpegLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, 8));
+            try
+            {
+                await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
-        if (jpegLen == 0)
-            return (null, 0);
+                // [4] request_id (u32 LE)
+                // [4] jpeg_len (u32 LE)
+                // [N] JPEG bytes
+                // [2] quality_flags (u16 LE)
+                var header = new byte[8];
+                await ReceiveExactAsync(sock, header, 8, ct).ConfigureAwait(false);
+                var jpegLen = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, 4));
 
-        var jpegData = new byte[jpegLen];
-        await ReceiveExactAsync(sock, jpegData, jpegLen, ct).ConfigureAwait(false);
+                if (jpegLen == 0)
+                    return (null, 0);
 
-        var flagBuf = new byte[2];
-        await ReceiveExactAsync(sock, flagBuf, 2, ct).ConfigureAwait(false);
-        var flags = BinaryPrimitives.ReadUInt16LittleEndian(flagBuf);
+                var jpegData = new byte[jpegLen];
+                await ReceiveExactAsync(sock, jpegData, (int)jpegLen, ct).ConfigureAwait(false);
 
-        _logger.LogInformation(
-            "[FrameExport] {Path} @{PosMs}ms → {Size}B flags=0x{Flags:X4}",
-            Path.GetFileName(filePath), posMs, jpegLen, flags);
+                var flagBuf = new byte[2];
+                await ReceiveExactAsync(sock, flagBuf, 2, ct).ConfigureAwait(false);
+                var flags = BinaryPrimitives.ReadUInt16LittleEndian(flagBuf);
 
-        return (jpegData, flags);
+                return (jpegData, flags);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning("[FrameExport] socket error — resetting: {Ex}", ex.Message);
+                try { _socket?.Dispose(); } catch { }
+                _socket = null;
+                return (null, 0);
+            }
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
     }
 
     private static async Task ReceiveExactAsync(Socket sock, byte[] buffer, int count, CancellationToken ct)
@@ -172,12 +194,113 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
+    public async Task PrefetchFrameAsync(
+        string filePath,
+        long posMs,
+        int width,
+        Guid itemId,
+        CancellationToken ct = default)
+    {
+        if (!IsAvailable) return;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
+
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            buf[0] = MsgPrefetchFrame;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), posMs);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(13, 4), (uint)width);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
+            pathBytes.CopyTo(buf.AsSpan(21));
+            itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // ACK: [4 request_id][4 jpeg_len=0]
+            var ack = new byte[8];
+            await ReceiveExactAsync(sock, ack, 8, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] prefetch socket error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<long>> ListCachedAsync(
+        Guid itemId,
+        int width,
+        CancellationToken ct = default)
+    {
+        if (!IsAvailable) return Array.Empty<long>();
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
+
+            // [1] msg_type (0x14)
+            // [4] request_id
+            // [32] item_id
+            // [4] width
+            var buf = new byte[41];
+            buf[0] = MsgListCached;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1), requestId);
+            itemIdBytes.CopyTo(buf.AsSpan(5));
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(37), (uint)width);
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Response: [4 request_id][4 count][count × 8 pos_ms]
+            var header = new byte[8];
+            await ReceiveExactAsync(sock, header, 8, ct).ConfigureAwait(false);
+            var count = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
+            if (count == 0) return Array.Empty<long>();
+
+            var body = new byte[count * 8];
+            await ReceiveExactAsync(sock, body, (int)(count * 8), ct).ConfigureAwait(false);
+
+            var result = new List<long>((int)count);
+            for (var i = 0; i < (int)count; i++)
+                result.Add(BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 8)));
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] ListCached socket error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+            return Array.Empty<long>();
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
     public async Task<byte[]?> SubmitAnimateTaskAsync(
         TaskState task,
         List<string> filePaths,
         List<long> positionsMs,
         string format,   // "gif" or "webp"
-        string resizeMode, int targetPx, int fps, int loopCount,
+        string resizeMode, int targetPx, float speed, int loopCount,
+        float cropX = 0f, float cropY = 0f, float cropW = 0f, float cropH = 0f,
+        float quality = 0.75f,
         CancellationToken ct = default)
     {
         if (!IsAvailable) return null;
@@ -207,8 +330,13 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(fmtVal), 0, 2);
         ms.Write(BitConverter.GetBytes(modeVal), 0, 2);
         ms.Write(BitConverter.GetBytes((uint)targetPx), 0, 4);
-        ms.Write(BitConverter.GetBytes((ushort)fps), 0, 2);
+        ms.Write(BitConverter.GetBytes(speed), 0, 4);
         ms.Write(BitConverter.GetBytes((ushort)loopCount), 0, 2);
+        ms.Write(BitConverter.GetBytes(cropX), 0, 4);
+        ms.Write(BitConverter.GetBytes(cropY), 0, 4);
+        ms.Write(BitConverter.GetBytes(cropW), 0, 4);
+        ms.Write(BitConverter.GetBytes(cropH), 0, 4);
+        ms.Write(BitConverter.GetBytes(quality), 0, 4);
 
         var reqBuf = ms.ToArray();
         await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
@@ -276,7 +404,8 @@ public sealed class FrameExportService : IDisposable
         TaskState task,
         List<string> filePaths,
         List<long> positionsMs,
-        string format,   // "png" or "webp-lossless"
+        string format,   // "png" or "webp"
+        float quality = 0.75f,
         CancellationToken ct = default)
     {
         if (!IsAvailable) return null;
@@ -300,12 +429,17 @@ public sealed class FrameExportService : IDisposable
             ms.Write(pathBytes, 0, pathBytes.Length);
         }
 
-        ushort fmtVal = format == "webp-lossless" ? (ushort)0x02 : (ushort)0x01;
-        ms.Write(BitConverter.GetBytes(fmtVal), 0, 2);
-        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // resize_mode = 0 (original)
-        ms.Write(BitConverter.GetBytes((uint)0), 0, 4);    // target_px = 0
-        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // fps = 0
-        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);  // loop = 0
+        ushort fmtVal = format == "webp" ? (ushort)0x02 : (ushort)0x01;
+        ms.Write(BitConverter.GetBytes(fmtVal), 0, 2);          // format
+        ms.Write(BitConverter.GetBytes((ushort)0x01), 0, 2);    // resize_mode (unused for stitch)
+        ms.Write(BitConverter.GetBytes((uint)0), 0, 4);         // target_px = 0
+        ms.Write(BitConverter.GetBytes(1.0f), 0, 4);            // speed = 1.0 (f32, unused for stitch)
+        ms.Write(BitConverter.GetBytes((ushort)0), 0, 2);       // loop_count = 0
+        ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_x = 0
+        ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_y = 0
+        ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_w = 0 (disabled)
+        ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_h = 0
+        ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
 
         var reqBuf = ms.ToArray();
         await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
@@ -366,6 +500,7 @@ public sealed class FrameExportService : IDisposable
         _socket?.Dispose();
         _startLock.Dispose();
         _socketLock.Dispose();
+        _requestLock.Dispose();
 
         if (_process is { HasExited: false })
         {

@@ -8,11 +8,9 @@ use disk_cache::DiskCache;
 use tokio::net::UnixListener;
 
 fn main() -> Result<()> {
-    // 2 async workers (socket I/O + channel dispatch) +
-    // max_blocking_threads = PREFETCH_WORKERS + 1 (FETCH) = explicit budget
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .max_blocking_threads(server::PREFETCH_WORKERS + 1)
+        .max_blocking_threads(3) // 1 FETCH + 2 concurrent PREFETCH decodes
         .enable_all()
         .build()?
         .block_on(run())

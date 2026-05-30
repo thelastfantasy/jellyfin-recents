@@ -1,69 +1,84 @@
+using System.Text.Json.Serialization;
+
 namespace Jellyfin.Plugin.JellyfinSuite.Models;
+
+// ── POST /FrameExport/Prefetch/{itemId} ─────────────────────────────
+
+public class PrefetchRequest
+{
+    [JsonPropertyName("positions")] public List<long> Positions { get; set; } = new();
+    [JsonPropertyName("width")]     public int Width { get; set; } = 320;
+}
 
 // ── POST /FrameExport/Generate ──────────────────────────────────────
 
 public class GenerateRequest
 {
-    public Guid ItemId { get; set; }
-    public string ItemTitle { get; set; } = "";
-    public string Type { get; set; } = "animate"; // "animate" | "stitch"
-    public List<FrameReference> Frames { get; set; } = new();
-    public ExportParams Params { get; set; } = new();
+    [JsonPropertyName("itemId")]    public Guid ItemId { get; set; }
+    [JsonPropertyName("itemTitle")] public string ItemTitle { get; set; } = "";
+    [JsonPropertyName("type")]      public string Type { get; set; } = "animate"; // "animate" | "stitch"
+    [JsonPropertyName("frames")]    public List<FrameReference> Frames { get; set; } = new();
+    [JsonPropertyName("params")]    public ExportParams Params { get; set; } = new();
 }
 
 public class FrameReference
 {
-    public long PositionMs { get; set; }
+    [JsonPropertyName("positionMs")] public long PositionMs { get; set; }
 }
 
 public class ExportParams
 {
-    public string Format { get; set; } = "gif"; // animate: gif/webp; stitch: png/webp-lossless
-    public string ResizeMode { get; set; } = "width";
-    public int? CustomWidth { get; set; }
-    public int? CustomHeight { get; set; }
-    public string ResolutionPreset { get; set; } = "original";
-    public int Fps { get; set; } = 5;
-    public int LoopCount { get; set; }
+    [JsonPropertyName("format")]           public string Format { get; set; } = "gif"; // animate: gif/webp; stitch: png/webp-lossless
+    [JsonPropertyName("resizeMode")]       public string ResizeMode { get; set; } = "width";
+    [JsonPropertyName("customWidth")]      public int? CustomWidth { get; set; }
+    [JsonPropertyName("customHeight")]     public int? CustomHeight { get; set; }
+    [JsonPropertyName("resolutionPreset")] public string ResolutionPreset { get; set; } = "original";
+    [JsonPropertyName("speed")]            public float Speed { get; set; } = 1.0f;
+    [JsonPropertyName("loopCount")]        public int LoopCount { get; set; }
+    [JsonPropertyName("cropX")]   public float? CropX    { get; set; }
+    [JsonPropertyName("cropY")]   public float? CropY    { get; set; }
+    [JsonPropertyName("cropW")]   public float? CropW    { get; set; }
+    [JsonPropertyName("cropH")]   public float? CropH    { get; set; }
+    [JsonPropertyName("quality")] public float  Quality  { get; set; } = 0.75f;
 }
 
 public class GenerateResponse
 {
-    public string TaskId { get; set; } = "";
+    [JsonPropertyName("taskId")] public string TaskId { get; set; } = "";
 }
 
 // ── GET /FrameExport/Progress (SSE) ─────────────────────────────────
 
 public class TaskProgressDto
 {
-    public string TaskId { get; set; } = "";
-    public string Status { get; set; } = ""; // running | complete | error | fallback | cancelled
-    public string Phase { get; set; } = "";
-    public int Current { get; set; }
-    public int Total { get; set; }
-    public double Percent { get; set; }
-    public string? ResultUrl { get; set; }
-    public long? FileSize { get; set; }
-    public string? Error { get; set; }
+    [JsonPropertyName("taskId")]    public string  TaskId    { get; set; } = "";
+    [JsonPropertyName("status")]    public string  Status    { get; set; } = ""; // running | complete | error | fallback | cancelled
+    [JsonPropertyName("phase")]     public string  Phase     { get; set; } = "";
+    [JsonPropertyName("current")]   public int     Current   { get; set; }
+    [JsonPropertyName("total")]     public int     Total     { get; set; }
+    [JsonPropertyName("percent")]   public double  Percent   { get; set; }
+    [JsonPropertyName("resultUrl")] public string? ResultUrl { get; set; }
+    [JsonPropertyName("fileSize")]  public long?   FileSize  { get; set; }
+    [JsonPropertyName("error")]     public string? Error     { get; set; }
 }
 
 // ── Frame quality metadata ──────────────────────────────────────────
 
 public class FrameQualityMeta
 {
-    public long PositionMs { get; set; }
-    public double BrightnessVar { get; set; }
-    public double LaplacianVar { get; set; }
-    public double FrameDiff { get; set; }
-    public bool IsJunk { get; set; }
-    public string? JunkReason { get; set; }
+    [JsonPropertyName("positionMs")]    public long    PositionMs    { get; set; }
+    [JsonPropertyName("brightnessVar")] public double  BrightnessVar { get; set; }
+    [JsonPropertyName("laplacianVar")]  public double  LaplacianVar  { get; set; }
+    [JsonPropertyName("frameDiff")]     public double  FrameDiff     { get; set; }
+    [JsonPropertyName("isJunk")]        public bool    IsJunk        { get; set; }
+    [JsonPropertyName("junkReason")]    public string? JunkReason    { get; set; }
 }
 
 // ── Quality thresholds config ───────────────────────────────────────
 
 public class QualityThresholds
 {
-    public double BlackBrightnessVarMin { get; set; } = 5.0;
-    public double WhiteBrightnessVarMax { get; set; } = 250.0;
-    public double BlurLaplacianVarMin { get; set; } = 10.0;
+    [JsonPropertyName("blackBrightnessVarMin")] public double BlackBrightnessVarMin { get; set; } = 5.0;
+    [JsonPropertyName("whiteBrightnessVarMax")] public double WhiteBrightnessVarMax { get; set; } = 250.0;
+    [JsonPropertyName("blurLaplacianVarMin")]   public double BlurLaplacianVarMin   { get; set; } = 10.0;
 }

@@ -14,6 +14,7 @@ import { GroupSection } from './GroupSection'
 import { Pagination } from './Pagination'
 import { DEFAULTS } from './SettingsPopover'
 import { PosterQueueWidget } from './PosterQueueWidget'
+import { FrameExportQueueWidget } from './FrameExportQueueWidget'
 
 // 注入 scrollbar-gutter: stable 到 html
 if (typeof document !== 'undefined' && !document.getElementById('jfs-scrollbar-gutter')) {
@@ -200,6 +201,7 @@ export function App({ locale }: Props) {
         )}
       </div>
       {posterUnlocked && <PosterQueueWidget />}
+      <FrameExportQueueWidget />
     </LocaleContext.Provider>
   )
 }

@@ -12,8 +12,7 @@ namespace Jellyfin.Plugin.JellyfinSuite;
 /// </summary>
 public class PlayerEnhancerEntryPoint : IHostedService
 {
-    internal const string EnhancerUrl =
-        "/web/configurationpage?name=JellyfinSuitePlayerEnhancer";
+    internal const string EnhancerUrl = "/JellyfinSuite/PlayerEnhancer/Launcher";
 
     private readonly IApplicationPaths _appPaths;
     private readonly ILogger<PlayerEnhancerEntryPoint> _logger;
@@ -63,16 +62,7 @@ public class PlayerEnhancerEntryPoint : IHostedService
         }
     }
 
-    private string GetVersionedUrl()
-    {
-        var dllPath = GetType().Assembly.Location;
-        if (File.Exists(dllPath))
-        {
-            var ts = new DateTimeOffset(File.GetLastWriteTimeUtc(dllPath)).ToUnixTimeSeconds();
-            return $"{EnhancerUrl}&v={ts}";
-        }
-        return EnhancerUrl;
-    }
+    private static string GetVersionedUrl() => EnhancerUrl;
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -123,7 +113,7 @@ public class PlayerEnhancerEntryPoint : IHostedService
         var html = File.ReadAllText(indexPath);
         var cleaned = Regex.Replace(
             html,
-            @"<script type=""module"" src=""/web/configurationpage\?name=JellyfinSuitePlayerEnhancer[^""]*""></script>",
+            @"<script type=""module"" src=""(?:/web/configurationpage\?name=JellyfinSuitePlayerEnhancer|/JellyfinSuite/PlayerEnhancer/Launcher)[^""]*""></script>",
             string.Empty);
         if (cleaned == html) return false;
 

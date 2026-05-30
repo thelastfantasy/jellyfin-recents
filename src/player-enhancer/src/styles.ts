@@ -27,6 +27,8 @@ const JELLYFIN_OVERRIDES = `
 
   /* OSD button baseline */
   .jfs-enhancer-btn {
+    -webkit-appearance: none;
+    appearance: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -35,15 +37,19 @@ const JELLYFIN_OVERRIDES = `
     padding: 8px;
     cursor: pointer;
     color: #fff;
+    background: transparent;
+    border: none;
+    outline: none;
     opacity: 0.75;
     transition: opacity 0.15s;
     border-radius: 4px;
     flex-shrink: 0;
     touch-action: manipulation;
   }
+  .jfs-enhancer-btn::before, .jfs-enhancer-btn::after { display: none; content: none; }
   .jfs-enhancer-btn:hover { opacity: 1; background: rgba(255,255,255,0.12); }
   .jfs-enhancer-btn:active { background: rgba(255,255,255,0.22); }
-  .jfs-enhancer-btn svg { width: 20px; height: 20px; pointer-events: none; }
+  .jfs-enhancer-btn svg { width: 20px; height: 20px; pointer-events: none; display: inline; }
 
   /* F+/-10 adaptive: hide on narrow viewports */
   .videoOsdBottom .buttons { container-type: inline-size; }
@@ -286,6 +292,437 @@ const JELLYFIN_OVERRIDES = `
     0%   { opacity: 1; }
     65%  { opacity: 1; }
     100% { opacity: 0; }
+  }
+
+  /* ── Frame Export OSD Panel ─────────────────────────────── */
+  .jfs-fe-osd {
+    cursor: grab;
+    pointer-events: auto;
+    background: rgba(8,8,8,0.88);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.65);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: min(58vh, 520px);
+    box-sizing: border-box;
+    font-size: 13px;
+    user-select: none;
+  }
+  .jfs-fe-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+  }
+  .jfs-fe-row.sep-b { border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .jfs-fe-row.sep-t { border-top: 1px solid rgba(255,255,255,0.07); }
+  .jfs-fe-row.dark-bg { background: rgba(0,0,0,0.25); }
+  .jfs-fe-spacer { flex: 1; min-width: 0; }
+  .jfs-fe-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .jfs-fe-scroll { flex: 1; overflow-y: auto; padding: 8px 10px; min-height: 0; }
+  .jfs-fe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
+  .jfs-fe-card {
+    border-radius: 5px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.04);
+    border: 2px solid transparent;
+    transition: border-color 0.12s;
+    position: relative;
+  }
+  .jfs-fe-card.sel { border-color: #00a4dc; }
+  .jfs-fe-card.junk { opacity: 0.45; border-color: rgba(239,68,68,0.6); }
+  .jfs-fe-card.jfs-pressing { transform: scale(0.93); transition: transform 0.35s; }
+  .jfs-fe-card img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+  .jfs-fe-card-foot {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 5px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.6);
+  }
+  .jfs-fe-frnum { color: rgba(255,255,255,0.38); font-size: 9px; }
+  .jfs-fe-badge {
+    position: absolute; top: 2px; left: 2px;
+    background: rgba(239,68,68,0.8); color: #fff;
+    font-size: 9px; padding: 1px 4px; border-radius: 3px;
+  }
+  .jfs-fe-osd button,
+  .jfs-fe-osd select,
+  .jfs-fe-osd input,
+  .jfs-fe-osd label { cursor: pointer; }
+  .jfs-fe-osd .jfs-fe-card { cursor: pointer; }
+
+  .jfs-fe-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    color: #fff;
+    white-space: nowrap;
+    background: rgba(255,255,255,0.10);
+    transition: background 0.12s;
+    flex-shrink: 0;
+  }
+  .jfs-fe-btn:hover:not([disabled]) { background: rgba(255,255,255,0.18); }
+  .jfs-fe-btn:active:not([disabled]) { background: rgba(255,255,255,0.26); }
+  .jfs-fe-btn.p { background: #00a4dc; }
+  .jfs-fe-btn.p:hover:not([disabled]) { background: #0090c4; }
+  .jfs-fe-btn.g { background: transparent; }
+  .jfs-fe-btn.g:hover:not([disabled]) { background: rgba(255,255,255,0.10); }
+  .jfs-fe-btn[disabled] { opacity: 0.4; cursor: default; pointer-events: none; }
+  .jfs-fe-sel {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 5px;
+    color: #fff;
+    font-size: 12px;
+    padding: 3px 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .jfs-fe-sel option { background: #111; color: #fff; }
+  .jfs-fe-inp {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 5px;
+    color: #fff;
+    font-size: 12px;
+    padding: 3px 6px;
+  }
+  .jfs-fe-inp:focus { outline: none; border-color: #00a4dc; }
+  .jfs-fe-muted { font-size: 12px; color: rgba(255,255,255,0.55); white-space: nowrap; }
+  /* Office-style params bar: horizontal groups with vertical controls */
+  .jfs-fe-pbar {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 6px 12px;
+    gap: 0;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .jfs-fe-pgroup {
+    display: flex;
+    flex-direction: column;
+    padding-right: 12px;
+  }
+  .jfs-fe-pgroup-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .jfs-fe-pgroup-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.32);
+    text-align: center;
+    margin-top: 4px;
+    padding-top: 3px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .jfs-fe-pgroup-sep {
+    width: 1px;
+    background: rgba(255,255,255,0.10);
+    margin: 2px 12px 2px 0;
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+
+  .jfs-fe-progress { width: 100%; height: 28px; background: rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; margin: 8px 0; position: relative; }
+  .jfs-fe-bar { position: absolute; left:0; top:0; bottom:0; background: #8b5cf6; border-radius: 6px; transition: width 0.3s; }
+  .jfs-fe-progress-label { position: absolute; inset:0; display:flex; align-items:center; justify-content:center; margin:0; font-size:12px; font-weight:600; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.5); pointer-events:none; }
+  .jfs-fe-lbl { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: rgba(255,255,255,0.75); font-size: 12px; }
+
+  /* Segmented control (animate/stitch toggle) */
+  .jfs-fe-seg {
+    display: inline-flex;
+    background: rgba(255,255,255,0.08);
+    border-radius: 7px;
+    padding: 2px;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .jfs-fe-seg-btn {
+    padding: 4px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.5);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+  }
+  .jfs-fe-seg-btn.active {
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+  }
+  .jfs-fe-seg-btn:hover:not(.active) { color: rgba(255,255,255,0.8); }
+
+  /* Thumbnail action buttons (view / download) */
+  .jfs-fe-card-acts {
+    position: absolute;
+    top: 0; right: 0;
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+  }
+  .jfs-fe-card-act {
+    -webkit-appearance: none; appearance: none; border: none;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.58);
+    color: #fff;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transition: background 0.12s;
+  }
+  .jfs-fe-card-act:hover { background: rgba(0,0,0,0.82); }
+  .jfs-fe-card-act svg { width: 18px; height: 18px; pointer-events: none; }
+
+  /* Hide native Jellyfin OSD while frame-export panel is open */
+  body.jfs-fe-open .videoOsdBottom,
+  body.jfs-fe-open .videoOsdTop,
+  body.jfs-fe-open .upNextContainer {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.2s !important;
+  }
+
+  /* Frame card loading progress bar */
+  .jfs-fe-loading {
+    aspect-ratio: 16/9;
+    position: relative;
+    background: rgba(255,255,255,0.02);
+  }
+  .jfs-fe-load-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    width: 0%;
+    background: rgba(96,165,250,0.75);
+    transition: width 0.15s ease;
+  }
+
+  /* Frame card load error placeholder */
+  .jfs-fe-err-ph {
+    aspect-ratio: 16/9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: rgba(255,255,255,0.28);
+  }
+
+  /* Lightbox overlay */
+  .jfs-fe-lb {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(0,0,0,0.88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+  }
+  .jfs-fe-lb img {
+    max-width: 92vw;
+    max-height: 92vh;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.8);
+    cursor: default;
+  }
+  .jfs-fe-lb-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s;
+  }
+  .jfs-fe-lb-close:hover { background: rgba(255,255,255,0.28); }
+  .jfs-fe-lb-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s;
+    z-index: 1;
+    padding: 0;
+  }
+  .jfs-fe-lb-nav:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+  .jfs-fe-lb-nav:disabled { opacity: 0.2; cursor: default; }
+  .jfs-fe-lb-prev { left: 16px; }
+  .jfs-fe-lb-next { right: 16px; }
+  .jfs-fe-lb-info {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.55);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    padding: 4px 14px;
+    border-radius: 4px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  /* ── Crop popover ───────────────────────────────────────────────────────── */
+  .jfs-fe-crop-overlay {
+    position: fixed; inset: 0; z-index: 1000000;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.72);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  .jfs-fe-crop-dialog {
+    background: rgba(12,12,12,0.96);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    display: flex; flex-direction: column; overflow: hidden;
+    width: min(92vw, 880px);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.8);
+    color: #fff;
+  }
+  .jfs-fe-crop-stage {
+    position: relative;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 56px;
+    min-height: 120px;
+  }
+  .jfs-fe-crop-stage img {
+    display: block;
+    max-width: 100%;
+    max-height: 60vh;
+    object-fit: contain;
+  }
+  .jfs-fe-crop-canvas {
+    position: absolute;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  .jfs-fe-cp-nav {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 44px; height: 64px;
+    background: rgba(0,0,0,0.42);
+    border: none; color: #fff; font-size: 28px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; transition: background 0.12s; z-index: 10; padding: 0;
+  }
+  .jfs-fe-cp-nav:hover:not(:disabled) { background: rgba(0,0,0,0.72); }
+  .jfs-fe-cp-nav:disabled { opacity: 0.2; cursor: default; }
+  .jfs-fe-cp-nav-l { left: 8px; }
+  .jfs-fe-cp-nav-r { right: 8px; }
+  .jfs-fe-cp-label {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.85);
+    font-size: 11px; padding: 2px 10px; border-radius: 4px;
+    pointer-events: none; white-space: nowrap;
+  }
+
+  /* Red remove button */
+  .jfs-fe-rm-btn { color: rgba(239,68,68,0.75) !important; }
+  .jfs-fe-rm-btn:hover { background: rgba(239,68,68,0.22) !important; color: rgba(239,68,68,1) !important; }
+
+  /* Toggle switch */
+  .jfs-fe-toggle-chk { display: none; }
+  .jfs-fe-toggle-track {
+    display: inline-block; width: 28px; height: 16px; flex-shrink: 0;
+    background: rgba(255,255,255,0.18); border-radius: 8px;
+    position: relative; cursor: pointer; transition: background 0.15s;
+  }
+  .jfs-fe-toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; transition: transform 0.15s;
+  }
+  .jfs-fe-toggle-chk:checked + .jfs-fe-toggle-track { background: rgba(0,184,212,0.8); }
+  .jfs-fe-toggle-chk:checked + .jfs-fe-toggle-track::after { transform: translateX(12px); }
+
+  /* ── Toast notification ─────────────────────────────────────────────────── */
+  .jfs-fe-toast {
+    position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%);
+    z-index: 1000001; background: rgba(30,30,30,0.92);
+    color: #fff; font-size: 13px; padding: 8px 18px; border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5); pointer-events: none;
+    animation: jfs-toast-in 0.2s ease;
+  }
+  @keyframes jfs-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+  /* ── Break element: hidden on desktop, full-width on mobile ─────────────── */
+  .jfs-fe-tbar-break { display: none; }
+
+  /* ── Mobile layout (<600px) ─────────────────────────────────────────────── */
+  @media (max-width: 599px) {
+    .jfs-fe-osd { height: min(80vh, 560px); font-size: 12px; }
+    .jfs-fe-scroll { padding: 6px; }
+    .jfs-fe-grid { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+
+    /* Toolbar: 2-row layout */
+    #jfs-fe-tbar { flex-wrap: wrap; padding: 6px 8px; row-gap: 4px; }
+    #jfs-fe-tbar .jfs-fe-spacer { display: none; }
+
+    /* Row 1: title · seg · format · params · [spacer] · close */
+    .jfs-fe-title           { order: 1; }
+    .jfs-fe-seg             { order: 2; }
+    #jfs-fe-format          { order: 3; }
+    #jfs-fe-params-toggle   { order: 4; }
+    #jfs-fe-close           { order: 5; margin-left: auto; }
+
+    /* Break forces row 2 */
+    .jfs-fe-tbar-break { display: block; order: 6; width: 100%; height: 0; }
+
+    /* Row 2: prev · count · next · generate */
+    #jfs-fe-prev     { order: 7; flex: 1; justify-content: center; }
+    #jfs-fe-count    { order: 8; flex: 1; text-align: center; min-width: 0; }
+    #jfs-fe-next     { order: 9; flex: 1; justify-content: center; }
+    #jfs-fe-generate { order: 10; }
+
+    /* Bigger touch targets */
+    .jfs-fe-card-act { width: 44px; height: 44px; }
+    .jfs-fe-card-foot { font-size: 9px; padding: 2px 4px; }
   }
 `
 

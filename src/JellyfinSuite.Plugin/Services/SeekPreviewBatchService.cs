@@ -40,8 +40,6 @@ public sealed class SeekPreviewBatchService : BackgroundService
     private readonly Dictionary<(string, long), int> _dispatchPriority = [];
     // Per-item batch stats: start time + frames completed at each priority — protected by _lock
     private readonly Dictionary<string, (DateTime Start, int[] ByPriority)> _batchStats = [];
-    // Last dominant priority key for shift detection — protected by _lock
-    private string? _lastDominantKey;
 
     // SSE notification channels — protected by _subsLock
     private readonly Dictionary<string, List<Channel<long>>> _subs = [];
@@ -95,16 +93,17 @@ public sealed class SeekPreviewBatchService : BackgroundService
 
     /// <summary>
     /// Enqueue all 30 s-aligned frames for an item.
-    /// Frames already on disk or already queued are skipped.
+    /// Frames in alreadyCached are skipped (caller obtains this via ListCachedAsync).
     /// </summary>
-    public void Enqueue(string itemId, string filePath, long durationMs)
+    public void Enqueue(string itemId, string filePath, long durationMs, IEnumerable<long>? alreadyCached = null)
     {
+        var skip = alreadyCached != null ? new HashSet<long>(alreadyCached) : null;
         var added = 0;
         lock (_lock)
         {
             for (var ms = 0L; ms <= durationMs; ms += 30_000)
             {
-                if (IsOnDisk(itemId, ms)) continue;
+                if (skip != null && skip.Contains(ms)) continue;
                 if (_pendingKeys.Add((itemId, ms)))
                 {
                     _pending.Add(new BatchFrame(itemId, filePath, ms));
@@ -172,9 +171,6 @@ public sealed class SeekPreviewBatchService : BackgroundService
         };
     }
 
-    private static bool IsOnDisk(string itemId, long posMs) =>
-        File.Exists(Path.Combine(SeekPreviewService.CacheDirectory, itemId, $"{posMs}.jpg"));
-
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         // Start the Rust daemon eagerly so the first SSE connection is instant.
@@ -195,132 +191,85 @@ public sealed class SeekPreviewBatchService : BackgroundService
         }
     }
 
-    private Task TickAsync(CancellationToken _)
+    private async Task TickAsync(CancellationToken ct)
     {
-        List<BatchFrame> done;
-        List<(BatchFrame Frame, int Priority)> toSend;
-        List<string> completedItems;
-        List<(string ItemId, DateTime Start, int[] ByPriority)> completedStats;
-        string? priorityShiftFrom = null, priorityShiftTo = null;
+        if (!_seekPreview.IsAvailable) return;
+
+        BatchFrame? pick = null;
+        int pickPriority = 3;
 
         lock (_lock)
         {
-            if (_pending.Count == 0) return Task.CompletedTask;
+            if (_pending.Count == 0) return;
 
-            done = _pending.Where(f => IsOnDisk(f.ItemId, f.PosMs)).ToList();
-            foreach (var f in done)
-            {
-                _pending.Remove(f);
-                _pendingKeys.Remove((f.ItemId, f.PosMs));
-                // Record completion at the priority it was dispatched at
-                if (_dispatchPriority.TryGetValue((f.ItemId, f.PosMs), out var p))
-                {
-                    _dispatchPriority.Remove((f.ItemId, f.PosMs));
-                    if (_batchStats.TryGetValue(f.ItemId, out var stats))
-                        stats.ByPriority[p]++;
-                }
-            }
-
-            completedItems = done
-                .Select(f => f.ItemId)
-                .Distinct()
-                .Where(id => !_pending.Any(f => f.ItemId == id))
-                .ToList();
-
-            // Snapshot stats for completed items before clearing
-            completedStats = completedItems
-                .Where(id => _batchStats.ContainsKey(id))
-                .Select(id => (id, _batchStats[id].Start, _batchStats[id].ByPriority))
-                .ToList();
-            foreach (var id in completedItems) _batchStats.Remove(id);
-
-            // Build toSend with pre-computed priority (avoids double-computing outside lock)
-            toSend = _pending
+            var best = _pending
                 .Select(f => (Frame: f, Priority: CalcPriority(f.ItemId, f.PosMs)))
                 .OrderBy(x => x.Priority)
                 .ThenBy(x => Math.Abs(x.Frame.PosMs - _lastPos.GetValueOrDefault(x.Frame.ItemId, 0L)))
-                .Take(PrefetchBatchSize)
-                .ToList();
+                .FirstOrDefault();
 
-            // Record dispatch priority and detect dominant shift
-            foreach (var (f, p) in toSend)
-            {
-                _dispatchPriority[(f.ItemId, f.PosMs)] = p;
-                _logger.LogDebug("[seek-preview] dispatch p{P} {Id}@{Ms}ms active={Active}",
-                    p, f.ItemId[..8], f.PosMs, f.ItemId == _activeItemId);
-            }
-
-            var newKey = toSend.Count > 0 ? $"{toSend[0].Frame.ItemId[..8]}:p{toSend[0].Priority}" : null;
-            if (newKey != _lastDominantKey)
-            {
-                priorityShiftFrom = _lastDominantKey;
-                priorityShiftTo = newKey;
-                _lastDominantKey = newKey;
-            }
+            pick = best.Frame;
+            pickPriority = best.Priority;
         }
 
-        // Notify subscribers (outside lock)
-        if (done.Count > 0)
+        if (pick == null || !Guid.TryParseExact(pick.Value.ItemId, "N", out var guid)) return;
+
+        var f = pick.Value;
+        _logger.LogDebug("[seek-preview] dispatch p{P} {Id}@{Ms}ms", pickPriority, f.ItemId[..8], f.PosMs);
+
+        var ok = await _seekPreview.PrefetchAsync(f.FilePath, f.PosMs, DefaultWidth, guid, ct);
+
+        bool itemComplete;
+        lock (_lock)
+        {
+            _pending.Remove(f);
+            _pendingKeys.Remove((f.ItemId, f.PosMs));
+            if (_dispatchPriority.TryGetValue((f.ItemId, f.PosMs), out var p))
+            {
+                _dispatchPriority.Remove((f.ItemId, f.PosMs));
+                if (_batchStats.TryGetValue(f.ItemId, out var stats))
+                    stats.ByPriority[p]++;
+            }
+            else
+            {
+                if (_batchStats.TryGetValue(f.ItemId, out var stats))
+                    stats.ByPriority[pickPriority]++;
+            }
+            itemComplete = !_pending.Any(pf => pf.ItemId == f.ItemId);
+        }
+
+        if (ok)
         {
             lock (_subsLock)
             {
-                foreach (var grp in done.GroupBy(f => f.ItemId))
-                {
-                    if (!_subs.TryGetValue(grp.Key, out var channels)) continue;
+                if (_subs.TryGetValue(f.ItemId, out var channels))
                     foreach (var ch in channels)
-                        foreach (var f in grp)
-                            ch.Writer.TryWrite(f.PosMs);
-                }
+                        ch.Writer.TryWrite(f.PosMs);
+            }
+        }
 
-                foreach (var id in completedItems)
+        if (itemComplete)
+        {
+            if (_batchStats.TryGetValue(f.ItemId, out var stats))
+            {
+                var elapsed = (DateTime.UtcNow - stats.Start).TotalSeconds;
+                var bp = stats.ByPriority;
+                _logger.LogInformation(
+                    "[seek-preview] batch done {ItemId} in {Sec:F0}s [p0:{P0} p1:{P1} p2:{P2} p3:{P3}]",
+                    f.ItemId[..8], elapsed, bp[0], bp[1], bp[2], bp[3]);
+                _batchStats.Remove(f.ItemId);
+            }
+
+            lock (_subsLock)
+            {
+                if (_subs.TryGetValue(f.ItemId, out var channels))
                 {
-                    if (!_subs.TryGetValue(id, out var channels)) continue;
                     foreach (var ch in channels)
                         ch.Writer.TryComplete();
-                    _subs.Remove(id);
+                    _subs.Remove(f.ItemId);
                 }
             }
         }
-
-        // Log batch completion with priority breakdown
-        foreach (var (id, start, byPriority) in completedStats)
-        {
-            var elapsed = (DateTime.UtcNow - start).TotalSeconds;
-            var total = byPriority.Sum();
-            _logger.LogInformation(
-                "[seek-preview] batch done {ItemId}: {Total} frames in {Sec:F0}s [p0:{P0} p1:{P1} p2:{P2} p3:{P3}]",
-                id[..8], total, elapsed, byPriority[0], byPriority[1], byPriority[2], byPriority[3]);
-        }
-
-        // Log priority shift (dominant frame changed priority level)
-        if (priorityShiftTo != null)
-            _logger.LogInformation("[seek-preview] priority → {From} → {To}",
-                priorityShiftFrom ?? "idle", priorityShiftTo);
-
-        // Send prefetch requests
-        if (!_seekPreview.IsAvailable) return Task.CompletedTask;
-
-        if (toSend.Count > 0)
-        {
-            // Tick detail demoted to Debug; only log when frames actually completed this tick
-            if (done.Count > 0)
-            {
-                var breakdown = toSend
-                    .GroupBy(x => x.Priority)
-                    .OrderBy(g => g.Key)
-                    .Select(g => $"p{g.Key}:{g.Count()}");
-                _logger.LogInformation("[seek-preview] tick +{Done} send={Count} [{Breakdown}] pending={Pending}",
-                    done.Count, toSend.Count, string.Join(" ", breakdown), _pending.Count);
-            }
-
-            foreach (var (f, _) in toSend)
-            {
-                if (Guid.TryParseExact(f.ItemId, "N", out var guid))
-                    _seekPreview.Prefetch(f.FilePath, f.PosMs, DefaultWidth, guid);
-            }
-        }
-
-        return Task.CompletedTask;
     }
 
     private sealed class Unsubscriber : IDisposable

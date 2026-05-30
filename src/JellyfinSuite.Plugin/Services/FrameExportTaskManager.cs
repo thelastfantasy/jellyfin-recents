@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
@@ -27,15 +28,15 @@ public class TaskState
 
 public class TaskProgress
 {
-    public string TaskId { get; set; } = "";
-    public string Status { get; set; } = "running"; // running | complete | error | fallback
-    public string Phase { get; set; } = "";
-    public int Current { get; set; }
-    public int Total { get; set; }
-    public double Percent { get; set; }
-    public string? ResultUrl { get; set; }
-    public long? FileSize { get; set; }
-    public string? Error { get; set; }
+    [JsonPropertyName("taskId")]   public string TaskId  { get; set; } = "";
+    [JsonPropertyName("status")]   public string Status  { get; set; } = "running"; // running | complete | error | fallback
+    [JsonPropertyName("phase")]    public string Phase   { get; set; } = "";
+    [JsonPropertyName("current")]  public int    Current { get; set; }
+    [JsonPropertyName("total")]    public int    Total   { get; set; }
+    [JsonPropertyName("percent")]  public double Percent { get; set; }
+    [JsonPropertyName("resultUrl")] public string? ResultUrl { get; set; }
+    [JsonPropertyName("fileSize")] public long?  FileSize  { get; set; }
+    [JsonPropertyName("error")]    public string? Error    { get; set; }
 }
 
 /// <summary>
@@ -55,7 +56,7 @@ public sealed class FrameExportTaskManager : IDisposable
         MediaBrowser.Common.Configuration.IApplicationPaths appPaths)
     {
         _logger = logger;
-        _tempRoot = Path.Combine(appPaths.DataPath, "temp", "frame-forge");
+        _tempRoot = Path.Combine(appPaths.DataPath, "temp", "frame-forge", "generated");
         Directory.CreateDirectory(_tempRoot);
 
         // Cleanup orphan dirs on startup

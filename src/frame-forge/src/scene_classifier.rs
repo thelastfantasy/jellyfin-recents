@@ -1,4 +1,4 @@
-﻿use image::{DynamicImage, GrayImage, Luma};
+use image::DynamicImage;
 
 /// Scene classification result.
 #[derive(Debug, Clone, PartialEq)]
@@ -11,14 +11,9 @@ pub enum MotionType { Pan, Zoom, Rotation, Static }
 pub struct SceneClass {
     pub category: SceneCategory,
     pub motion: MotionType,
-    pub direction: Direction,
     pub edge_density: f64,
     pub color_entropy: f64,
-    pub motion_score: f64,
 }
-
-#[derive(Debug, Clone)]
-pub enum Direction { Horizontal, Vertical }
 
 /// Classify scene from a sequence of frames using heuristic rules.
 pub fn classify(frames: &[DynamicImage]) -> SceneClass {
@@ -26,10 +21,8 @@ pub fn classify(frames: &[DynamicImage]) -> SceneClass {
         return SceneClass {
             category: SceneCategory::Landscape,
             motion: MotionType::Static,
-            direction: Direction::Horizontal,
             edge_density: 0.0,
             color_entropy: 0.0,
-            motion_score: 0.0,
         };
     }
 
@@ -51,9 +44,8 @@ pub fn classify(frames: &[DynamicImage]) -> SceneClass {
     };
 
     let motion = classify_motion(motion_score);
-    let direction = detect_direction(first);
 
-    SceneClass { category, motion, direction, edge_density, color_entropy, motion_score }
+    SceneClass { category, motion, edge_density, color_entropy }
 }
 
 fn compute_edge_density(img: &DynamicImage) -> f64 {
@@ -61,7 +53,6 @@ fn compute_edge_density(img: &DynamicImage) -> f64 {
     let (w, h) = gray.dimensions();
     let w = w as i32;
     let h = h as i32;
-    // Manual Sobel kernel convolution
     let sobel_x: [[i16; 3]; 3] = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
     let sobel_y: [[i16; 3]; 3] = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
 
@@ -125,10 +116,6 @@ fn classify_motion(score: f64) -> MotionType {
     else { MotionType::Zoom }
 }
 
-fn detect_direction(img: &DynamicImage) -> Direction {
-    if img.width() < img.height() { Direction::Vertical } else { Direction::Horizontal }
-}
-
 /// Compute perceptual hash (pHash) for near-duplicate detection.
 pub fn phash(img: &DynamicImage) -> u64 {
     let thumb = img.resize_exact(8, 8, image::imageops::FilterType::Lanczos3).to_luma8();
@@ -144,9 +131,4 @@ pub fn phash(img: &DynamicImage) -> u64 {
         if p > avg { hash |= 1 << i; }
     }
     hash
-}
-
-/// Hamming distance between two pHash values.
-pub fn phash_dist(a: u64, b: u64) -> u32 {
-    (a ^ b).count_ones()
 }

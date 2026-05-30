@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Jellyfin.Plugin.JellyfinSuite.Models;
 using Jellyfin.Plugin.JellyfinSuite.Services;
 using MediaBrowser.Controller.Library;
@@ -59,10 +61,129 @@ public class FrameExportController : ControllerBase
         if (jpeg == null || jpeg.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
 
-        // Attach quality metadata
         Response.Headers["X-Frame-Quality"] = System.Text.Json.JsonSerializer.Serialize(new { qualityFlags });
-
         return File(jpeg, "image/jpeg");
+    }
+
+    /// <summary>GET /FrameExport/Keyframes/{itemId}?startMs=X&amp;endMs=Y — returns I-frame timestamps via ffprobe.</summary>
+    [HttpGet("Keyframes/{itemId:guid}")]
+    public async Task<IActionResult> GetKeyframes(
+        [FromRoute] Guid itemId,
+        [FromQuery] long startMs = 0,
+        [FromQuery] long endMs = -1,
+        CancellationToken ct = default)
+    {
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+            return NotFound(new { error = "Item not found or no file path" });
+
+        var rangeEndMs = endMs < 0 ? startMs + 10000 : Math.Max(startMs + 500, endMs);
+        var startSec = startMs / 1000.0;
+        var durSec = Math.Max(0.5, (rangeEndMs - startMs) / 1000.0);
+
+        var ffprobePath = new[] { "/usr/lib/jellyfin-ffmpeg/ffprobe", "/usr/bin/ffprobe" }
+            .FirstOrDefault(System.IO.File.Exists) ?? "ffprobe";
+
+        // "startSec%+durSec" → read durSec seconds starting at startSec
+        var interval = $"{startSec.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}" +
+                       $"%+{durSec.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}";
+
+        var psi = new ProcessStartInfo(ffprobePath)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        // Use ArgumentList to safely handle paths with spaces
+        psi.ArgumentList.Add("-v");              psi.ArgumentList.Add("quiet");
+        psi.ArgumentList.Add("-select_streams"); psi.ArgumentList.Add("v:0");
+        psi.ArgumentList.Add("-show_entries");   psi.ArgumentList.Add("packet=pts_time,flags");
+        psi.ArgumentList.Add("-of");             psi.ArgumentList.Add("csv=print_section=0");
+        psi.ArgumentList.Add("-read_intervals"); psi.ArgumentList.Add(interval);
+        psi.ArgumentList.Add(item.Path);
+        psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
+
+        try
+        {
+            using var proc = Process.Start(psi)!;
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+            var stdout = await proc.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+            await proc.WaitForExitAsync(timeoutCts.Token);
+
+            var keyframes = new List<long>();
+            foreach (var line in stdout.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var comma = line.IndexOf(',');
+                if (comma < 0) continue;
+                // flags field contains 'K' for keyframes (e.g. "K_", "K__" …)
+                if (!line[(comma + 1)..].Contains('K')) continue;
+                if (!double.TryParse(line[..comma], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var pts)) continue;
+                keyframes.Add((long)(pts * 1000));
+            }
+
+            return Ok(new { keyframes });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[FrameExport] keyframes query failed: {Ex}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "ffprobe failed" });
+        }
+    }
+
+    /// <summary>POST /FrameExport/Prefetch/{itemId} — enqueue background thumbnail decode.</summary>
+    [HttpPost("Prefetch/{itemId:guid}")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult Prefetch([FromRoute] Guid itemId, [FromBody] PrefetchRequest req)
+    {
+        if (!_frameExport.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame-forge not available");
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path))
+            return NotFound(new { error = "Item not found" });
+
+        var filePath = item.Path;
+        _ = Task.Run(async () =>
+        {
+            foreach (var posMs in req.Positions)
+            {
+                try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); }
+                catch { /* individual failures ignored */ }
+            }
+        });
+
+        return Accepted();
+    }
+
+/// <summary>GET /FrameExport/PrefetchReady/{itemId}?width=320 — SSE stream of ready frames.</summary>
+    [HttpGet("PrefetchReady/{itemId:guid}")]
+    public async Task PrefetchReady(
+        [FromRoute] Guid itemId,
+        [FromQuery] int width = 320,
+        CancellationToken ct = default)
+    {
+        Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
+        Response.Headers["Cache-Control"] = "no-cache, no-store";
+        Response.Headers["X-Accel-Buffering"] = "no";
+
+        var reported = new HashSet<long>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
+        {
+            var cached = await _frameExport.ListCachedAsync(itemId, width, ct);
+            foreach (var posMs in cached)
+            {
+                if (!reported.Add(posMs)) continue;
+                await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {posMs}\n\n"), ct);
+                await Response.Body.FlushAsync(ct);
+            }
+            await Task.Delay(200, ct);
+        }
     }
 
     /// <summary>
@@ -76,8 +197,8 @@ public class FrameExportController : ControllerBase
         if (req.Frames.Count < 2)
             return BadRequest(new { error = "At least 2 frames required" });
 
-        if (req.Type == "animate" && (req.Params.Fps < 1 || req.Params.Fps > 30))
-            return BadRequest(new { error = "fps must be 1-30" });
+        if (req.Type == "animate" && (req.Params.Speed <= 0f || req.Params.Speed > 32f))
+            return BadRequest(new { error = "speed must be > 0 and ≤ 32" });
 
         var task = _taskManager.CreateTask(req.ItemId.ToString(), req.ItemTitle, req.Type);
 
@@ -123,16 +244,19 @@ public class FrameExportController : ControllerBase
                 {
                     "animate" => await _frameExport.SubmitAnimateTaskAsync(
                         task, filePaths, positions, req.Params.Format,
-                        resizeMode, targetPx, req.Params.Fps, req.Params.LoopCount),
+                        resizeMode, targetPx, req.Params.Speed, req.Params.LoopCount,
+                        req.Params.CropX ?? 0f, req.Params.CropY ?? 0f,
+                        req.Params.CropW ?? 0f, req.Params.CropH ?? 0f,
+                        req.Params.Quality),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
-                        task, filePaths, positions, req.Params.Format),
+                        task, filePaths, positions, req.Params.Format, req.Params.Quality),
                     _ => null
                 };
 
                 var ext = req.Type switch
                 {
                     "animate" => req.Params.Format == "webp" ? "webp" : "gif",
-                    "stitch" => req.Params.Format == "webp-lossless" ? "webp" : "png",
+                    "stitch" => req.Params.Format == "webp" ? "webp" : "png",
                     _ => "bin"
                 };
 
@@ -224,7 +348,7 @@ public class FrameExportController : ControllerBase
             _ => "application/octet-stream",
         };
 
-        var downloadName = $"{task.ItemTitle}_{task.CreatedAt:yyyyMMddHHmmss}{Path.GetExtension(filePath)}";
+        var downloadName = $"{task.ItemTitle}_{task.CreatedAt:yyyyMMddHHmmss}_{task.TaskId[..6]}{Path.GetExtension(filePath)}";
         Response.Headers["Content-Disposition"] = $"attachment; filename=\"{downloadName}\"";
 
         return File(System.IO.File.ReadAllBytes(filePath), contentType);
@@ -255,6 +379,27 @@ public class FrameExportController : ControllerBase
 
         _taskManager.CancelTask(taskId);
         return Ok(new { cancelled = true });
+    }
+
+    /// <summary>GET /FrameExport/Tasks — list all in-memory tasks</summary>
+    [HttpGet("Tasks")]
+    public IActionResult GetTasks()
+    {
+        var tasks = _taskManager.GetAllTasks().Select(t => new FrameExportTaskListItemDto
+        {
+            TaskId    = t.TaskId,
+            ItemId    = t.ItemId,
+            ItemTitle = t.ItemTitle,
+            Type      = t.Type,
+            Status    = t.Status.ToString().ToLowerInvariant(),
+            ResultUrl = t.Status == Services.TaskStatus.Complete && t.OutputPath != null
+                ? $"/JellyfinSuite/FrameExport/Result/{t.TaskId}/{Path.GetFileName(t.OutputPath)}"
+                : null,
+            FileSize  = t.OutputSize,
+            Error     = t.Error,
+            CreatedAt = new DateTimeOffset(t.CreatedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+        });
+        return Ok(tasks);
     }
 
     /// <summary>GET /FrameExport/Health</summary>

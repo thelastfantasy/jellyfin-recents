@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "build:watch": "vite build --watch"
+    "build:watch": "vite build --watch",
+    "gen:types": "node ../../scripts/gen-plugin-types.mjs --url=http://localhost:8600"
   },
   "devDependencies": {
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.7.3",
     "vite": "^6.3.5"
   },

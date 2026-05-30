@@ -121,7 +121,7 @@ export async function startJob(itemId: string, req: StartJobRequest): Promise<st
     throw new Error(err.error ?? res.statusText)
   }
   const data = await res.json()
-  return data.jobId ?? data.JobId
+  return data.jobId
 }
 
 export async function pollStatus(jobId: string): Promise<JobStatusDto> {
@@ -129,13 +129,13 @@ export async function pollStatus(jobId: string): Promise<JobStatusDto> {
   if (!res.ok) throw new Error(`Status fetch failed: ${res.status}`)
   const d: any = await res.json()
   return {
-    jobId: d.jobId ?? d.JobId ?? '',
-    itemId: d.itemId ?? d.ItemId ?? '',
-    status: (d.status ?? d.Status ?? 'running') as JobStatusDto['status'],
-    progress: d.progress ?? d.Progress ?? 0,
-    total: d.total ?? d.Total ?? 0,
-    error: d.error ?? d.Error ?? null,
-    mediaInfo: d.mediaInfo ?? d.MediaInfo ?? null,
+    jobId: d.jobId ?? '',
+    itemId: d.itemId ?? '',
+    status: (d.status ?? 'running') as JobStatusDto['status'],
+    progress: d.progress ?? 0,
+    total: d.total ?? 0,
+    error: d.error ?? null,
+    mediaInfo: d.mediaInfo ?? null,
   }
 }
 
@@ -165,14 +165,14 @@ export async function listJobs(): Promise<JobListItemDto[]> {
     if (!res.ok) return []
     const raw: any[] = await res.json()
     return raw.map(d => ({
-      jobId: d.jobId ?? d.JobId ?? '',
-      itemId: d.itemId ?? d.ItemId ?? '',
-      itemTitle: d.itemTitle ?? d.ItemTitle ?? '',
-      status: (d.status ?? d.Status ?? 'done') as JobListItemDto['status'],
-      progress: d.progress ?? d.Progress ?? 0,
-      total: d.total ?? d.Total ?? 0,
-      error: d.error ?? d.Error ?? null,
-      createdAt: d.createdAt ?? d.CreatedAt ?? 0,
+      jobId: d.jobId ?? '',
+      itemId: d.itemId ?? '',
+      itemTitle: d.itemTitle ?? '',
+      status: (d.status ?? 'done') as JobListItemDto['status'],
+      progress: d.progress ?? 0,
+      total: d.total ?? 0,
+      error: d.error ?? null,
+      createdAt: d.createdAt ?? 0,
     }))
   } catch {
     return []
@@ -185,7 +185,7 @@ export async function checkCache(
   const params = new URLSearchParams({ rows: String(rows), cols: String(cols), thumbWidth: String(thumbWidth), seed, overlayHash })
   const res = await apiFetch(`${BASE}/cache/${itemId}?${params}`)
   if (res.status === 204) return false
-  if (res.ok) { const d = await res.json(); return d.cached ?? d.Cached ?? false }
+  if (res.ok) { const d = await res.json(); return d.cached ?? false }
   return false
 }
 
@@ -274,19 +274,19 @@ export interface UserFontInfo {
 }
 
 function mapFontInfo(x: any): UserFontInfo | null {
-  const key = typeof x === 'string' ? x : (x.key ?? x.Key ?? '')
+  const key = typeof x === 'string' ? x : (x.key ?? '')
   if (!key) return null
-  const script = x.script ?? x.Script ?? 'latin'
+  const script = x.script ?? 'latin'
   return {
     key,
-    displayName: x.displayName ?? x.DisplayName ?? key,
+    displayName: x.displayName ?? key,
     script: (['latin', 'cjk', 'emoji', 'symbol'].includes(script) ? script : 'latin') as FontScript,
-    format: x.format ?? x.Format ?? 'ttf',
-    isSerif: x.isSerif ?? x.IsSerif ?? null,
-    isMonospace: x.isMonospace ?? x.IsMonospace ?? null,
-    isBold: x.isBold ?? x.IsBold ?? null,
-    isItalic: x.isItalic ?? x.IsItalic ?? null,
-    hasLigatures: x.hasLigatures ?? x.HasLigatures ?? null,
+    format: x.format ?? 'ttf',
+    isSerif: x.isSerif ?? null,
+    isMonospace: x.isMonospace ?? null,
+    isBold: x.isBold ?? null,
+    isItalic: x.isItalic ?? null,
+    hasLigatures: x.hasLigatures ?? null,
   }
 }
 

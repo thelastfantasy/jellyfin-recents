@@ -19,13 +19,25 @@ run = "make build-seek-preview"
 description = "在 Docker 中编译 frame-forge Linux 二进制（含 OpenCV + FFmpeg 7 dev 库）"
 run = "make build-frame-forge"
 
+[tasks.check-seek-preview]
+description = "在 Docker 中类型检查 seek-preview（快速，不产出二进制）"
+run = "make check-seek-preview"
+
+[tasks.check-frame-forge]
+description = "在 Docker 中类型检查 frame-forge（快速，不产出二进制）"
+run = "make check-frame-forge"
+
 [tasks.update]
-description = "构建并部署到本地 Jellyfin 开发容器"
+description = "构建并部署到本地 Jellyfin 开发容器（完整）"
 run = "make update"
 
 [tasks.deploy]
-description = "构建并部署到本地 Jellyfin 容器（含 Docker Rust 编译）"
-run = "make update"
+description = "完整部署（构建所有组件并部署到 jellyfin-dev 容器）"
+run = "make deploy"
+
+[tasks.update-quick]
+description = "快速部署：仅重建前端+增强器+C#，跳过 Rust 构建"
+run = "make update-quick"
 
 [tasks.test]
 description = "运行所有测试（Rust + TypeScript + C#）"
@@ -42,6 +54,10 @@ run = "make test-frontend"
 [tasks.test-csharp]
 description = "运行 C# xUnit 测试"
 run = "make test-csharp"
+
+[tasks.gen-types]
+description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（需要容器已启动且已部署最新 DLL）"
+run = "node scripts/gen-plugin-types.mjs"
 
 [tasks.workflow-test]
 description = "本地运行 build workflow（需要 Docker）"

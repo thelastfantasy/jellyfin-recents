@@ -1,4 +1,5 @@
 using System.Text;
+using Jellyfin.Plugin.JellyfinSuite.Models;
 using Jellyfin.Plugin.JellyfinSuite.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
@@ -63,7 +64,7 @@ public class SeekPreviewController : ControllerBase
 
         if (prefetch)
         {
-            _seekPreview.Prefetch(filePath, positionMs, width, itemId);
+            _ = _seekPreview.PrefetchAsync(filePath, positionMs, width, itemId, cancellationToken);
             return Ok();
         }
 
@@ -74,14 +75,41 @@ public class SeekPreviewController : ControllerBase
         if (jpeg == null || jpeg.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame decode failed");
 
-        var alignedMs = positionMs / 100 * 100;
-        var cachePath = Path.Combine(SeekPreviewService.CacheDirectory, itemId.ToString("N"), $"{alignedMs}.jpg");
-        Response.Headers.Append("X-Frame-File", cachePath);
         _logger.LogInformation(
-            "[SeekPreview] {FileName} {PosMs}ms → {Size}B in {Ms}ms | {CachePath}",
-            Path.GetFileName(filePath), positionMs, jpeg.Length, sw.ElapsedMilliseconds, cachePath);
+            "[SeekPreview] {FileName} {PosMs}ms → {Size}B in {Ms}ms",
+            Path.GetFileName(filePath), positionMs, jpeg.Length, sw.ElapsedMilliseconds);
 
         return File(jpeg, "image/jpeg");
+    }
+
+    /// <summary>
+    /// Returns the accurate frame index and frame-start timestamp for a given playback position.
+    /// Rust decodes the frame at positionMs and returns actual pts + fps so C# can compute
+    /// the frame-boundary time. Used by the screenshot feature for precise filenames.
+    /// </summary>
+    [HttpGet("{itemId}/frame-info")]
+    [ProducesResponseType(typeof(FrameInfoDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFrameInfo(
+        [FromRoute] Guid itemId,
+        [FromQuery] long positionMs = 0,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_seekPreview.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "seek-preview not available");
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+            return NotFound();
+
+        await _seekPreview.EnsureStartedAsync(cancellationToken);
+
+        var result = await _seekPreview.FrameInfoAsync(item.Path, positionMs, itemId, cancellationToken);
+        if (result == null)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame decode failed");
+
+        return Ok(new FrameInfoDto { FrameIdx = result.Value.FrameIdx, FrameStartMs = result.Value.FrameStartMs });
     }
 
     /// <summary>
@@ -127,26 +155,28 @@ public class SeekPreviewController : ControllerBase
 
         _logger.LogInformation("[SeekPreview] ReadyStream {ItemId} → {FilePath}", itemId, filePath);
 
+        // Query Rust daemon for already-cached positions (avoids all disk I/O in C#).
+        var cachedPositions = await _seekPreview.ListCachedAsync(itemId, DefaultWidth, cancellationToken);
+
         // Register with batch service: set priority center and enqueue pending frames.
+        // Pass already-cached positions so they are skipped in the work queue.
         // Batch continues even after this SSE stream disconnects.
         _batchService.SetActive(itemIdStr, positionMs);
-        _batchService.Enqueue(itemIdStr, filePath, durationMs);
+        _batchService.Enqueue(itemIdStr, filePath, durationMs, cachedPositions);
 
         Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
         Response.Headers["Cache-Control"] = "no-cache, no-store";
         Response.Headers["X-Accel-Buffering"] = "no";
 
-        var cacheDir = Path.Combine(SeekPreviewService.CacheDirectory, itemIdStr);
         var seen = new HashSet<long>();
 
-        // Subscribe BEFORE scanning disk to avoid missing notifications during the scan.
+        // Subscribe BEFORE emitting initial state to avoid missing notifications during flush.
         var (channel, unsub) = _batchService.Subscribe(itemIdStr);
         using (unsub)
         {
-            // Emit frames already on disk immediately (these were generated in a previous session).
-            for (var ms = 0L; ms <= durationMs; ms += 30_000)
+            // Emit frames already cached (reported by Rust daemon) immediately.
+            foreach (var ms in cachedPositions)
             {
-                if (!System.IO.File.Exists(Path.Combine(cacheDir, $"{ms}.jpg"))) continue;
                 seen.Add(ms);
                 try
                 {

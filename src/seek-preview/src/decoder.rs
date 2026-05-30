@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::ptr;
 
-pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Result<Vec<u8>> {
+/// Returns (jpeg_bytes, actual_pts_ms, fps_num, fps_den).
+/// actual_pts_ms is the real decoded frame timestamp; fps_num/fps_den are the stream frame rate.
+pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Result<(Vec<u8>, i64, i64, i64)> {
     use ffmpeg_next as ff;
     use ffmpeg_next::threading;
 
@@ -11,6 +13,8 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
 
     let stream_idx;
     let tb;
+    let fps_num: i64;
+    let fps_den: i64;
     let codec_ctx;
 
     {
@@ -20,6 +24,9 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
             .context("no video stream")?;
         stream_idx = stream.index();
         tb = stream.time_base();
+        let rate = stream.avg_frame_rate();
+        fps_num = rate.0 as i64;
+        fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
         let params = stream.parameters();
         codec_ctx = ff::codec::context::Context::from_parameters(params)?;
     }
@@ -49,10 +56,15 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
     };
 
     let mut best: Option<ff::frame::Video> = None;
+    let mut best_pts: i64 = 0;
 
     'outer: for (s, pkt) in ictx.packets() {
         if s.index() != stream_idx {
             continue;
+        }
+        let pkt_pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+        if pkt_pts > target_pts && best.is_some() {
+            break 'outer;
         }
         if decoder.send_packet(&pkt).is_err() {
             continue;
@@ -61,14 +73,14 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
             let mut frame = ff::frame::Video::empty();
             match decoder.receive_frame(&mut frame) {
                 Ok(_) => {
-                    let pts = frame.pts().unwrap_or(0);
+                    best_pts = pkt_pts;
                     best = Some(frame);
-                    if pts >= target_pts {
-                        break 'outer;
-                    }
                 }
                 Err(_) => break,
             }
+        }
+        if pkt_pts >= target_pts {
+            break 'outer;
         }
     }
 
@@ -77,16 +89,23 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
         loop {
             let mut frame = ff::frame::Video::empty();
             match decoder.receive_frame(&mut frame) {
-                Ok(_) => {
-                    best = Some(frame);
-                }
+                Ok(_) => { best = Some(frame); }
                 Err(_) => break,
             }
         }
     }
 
     let frame = best.context("no frame decoded")?;
-    encode_jpeg(&frame, target_width)
+    let jpeg = encode_jpeg(&frame, target_width)?;
+
+    // Convert best_pts (stream timebase) to milliseconds: pts × num × 1000 / den
+    let actual_pts_ms = if tb.0 != 0 && tb.1 != 0 {
+        (best_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+    } else {
+        pos_ms
+    };
+
+    Ok((jpeg, actual_pts_ms, fps_num, fps_den))
 }
 
 fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<Vec<u8>> {
@@ -101,9 +120,6 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
 
         let src_fmt: AVPixelFormat = std::mem::transmute((*src).format);
 
-        // Map deprecated YUVJ* formats to their non-deprecated equivalents.
-        // YUVJ* encode "full range" implicitly in the format name, which swscale warns about.
-        // We replace them with the proper YUV* format and propagate range via sws_setColorspaceDetails.
         let src_is_full_range = matches!(
             src_fmt,
             AVPixelFormat::AV_PIX_FMT_YUVJ420P
@@ -135,15 +151,13 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
             anyhow::bail!("sws_getContext failed");
         }
 
-        // Tell swscale the actual color ranges so conversion stays correct.
-        // Output is always full range (JPEG). Input range depends on source format metadata.
         let coeffs = sws_getCoefficients(SWS_CS_DEFAULT as i32);
         sws_setColorspaceDetails(
             sws,
             coeffs,
             if src_is_full_range { 1 } else { 0 },
             coeffs,
-            1, // JPEG output is always full range
+            1,
             0,
             1 << 16,
             1 << 16,
@@ -155,7 +169,7 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
             anyhow::bail!("av_frame_alloc failed");
         }
         (*dst).format = AVPixelFormat::AV_PIX_FMT_YUV420P as i32;
-        (*dst).color_range = AVColorRange::AVCOL_RANGE_JPEG; // full range for JPEG output
+        (*dst).color_range = AVColorRange::AVCOL_RANGE_JPEG;
         (*dst).width = w;
         (*dst).height = h;
         if av_frame_get_buffer(dst, 0) < 0 {

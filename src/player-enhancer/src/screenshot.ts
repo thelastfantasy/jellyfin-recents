@@ -1,5 +1,27 @@
 import { t } from './i18n';
 
+function getApiBase(): string {
+  const ac = (window as any).ApiClient;
+  return ac?.serverAddress?.() ?? ac?._serverAddress ?? '';
+}
+
+function getToken(): string {
+  const ac = (window as any).ApiClient;
+  return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? '';
+}
+
+async function fetchFrameStartMs(itemId: string, posMs: number): Promise<number | null> {
+  try {
+    const url = `${getApiBase()}/JellyfinSuite/SeekPreview/${encodeURIComponent(itemId)}/frame-info?positionMs=${posMs}&api_key=${encodeURIComponent(getToken())}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { frameStartMs?: number };
+    return typeof data.frameStartMs === 'number' ? data.frameStartMs : null;
+  } catch {
+    return null;
+  }
+}
+
 function sanitize(name: string): string {
   return name.replace(/[^\w一-鿿぀-ヿ가-힯\- ]/g, '_').trim() || 'screenshot';
 }
@@ -99,11 +121,16 @@ async function drawVideoFrame(
 export async function takeScreenshot(
   videoEl: HTMLVideoElement,
   includeSubtitles: boolean,
-  itemTitle?: string
+  itemTitle?: string,
+  itemId?: string
 ): Promise<void> {
   const w = videoEl.videoWidth;
   const h = videoEl.videoHeight;
   if (!w || !h) return;
+
+  const posMs = Math.round(videoEl.currentTime * 1000);
+  // Start frame-info fetch concurrently with canvas capture; 5 s timeout, silently falls back.
+  const frameStartMsPromise = itemId ? fetchFrameStartMs(itemId, posMs) : Promise.resolve(null);
 
   // DOM-attached canvas works around Firefox Android hardware-decode black-frame bug
   // (OffscreenCanvas cannot read hardware-decoded frames on Firefox for Android)
@@ -145,13 +172,18 @@ export async function takeScreenshot(
     // SRT/VTT native ::cue — cannot be captured by Canvas API, silently skipped
   }
 
-  await new Promise<void>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      canvas.remove();
-      if (!blob) { reject(new Error('toBlob returned null')); return; }
-      const title = sanitize(itemTitle ?? 'screenshot');
-      downloadBlob(blob, `jellyfin-screenshot-${title}-${Date.now()}.png`);
-      resolve();
-    }, 'image/png');
-  });
+  const [blob, frameStartMs] = await Promise.all([
+    new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png')),
+    frameStartMsPromise.catch(() => null),
+  ]);
+  canvas.remove();
+
+  if (!blob) throw new Error('toBlob returned null');
+  const title = sanitize(itemTitle ?? 'screenshot');
+  const ts = frameStartMs ?? posMs;
+  const hh = String(Math.floor(ts / 3600000)).padStart(2, '0');
+  const mm = String(Math.floor((ts % 3600000) / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((ts % 60000) / 1000)).padStart(2, '0');
+  const ms = String(ts % 1000).padStart(3, '0');
+  downloadBlob(blob, `jellyfin-screenshot-${title}-${hh}-${mm}-${ss}-${ms}.png`);
 }

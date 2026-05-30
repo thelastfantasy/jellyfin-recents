@@ -6,6 +6,7 @@ pub(crate) struct SingleFrameReq {
     pub pos_ms: i64,
     pub width: u32,
     pub path: std::path::PathBuf,
+    pub item_id: String, // 32-char hex Jellyfin UUID
 }
 
 pub(crate) async fn read_msg_type(
@@ -42,7 +43,12 @@ pub(crate) async fn read_single_frame_req(
     stream.read_exact(&mut path_bytes).await?;
     let path = std::path::PathBuf::from(String::from_utf8(path_bytes)?);
 
-    Ok(SingleFrameReq { request_id, pos_ms, width, path })
+    // item_id: fixed 32 ASCII bytes (Jellyfin UUID in N format)
+    let mut id_buf = [0u8; 32];
+    stream.read_exact(&mut id_buf).await?;
+    let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
+
+    Ok(SingleFrameReq { request_id, pos_ms, width, path, item_id })
 }
 
 pub(crate) async fn write_jpeg_response(
@@ -82,11 +88,13 @@ pub(crate) async fn write_ack(
 pub(crate) struct AnimateReq {
     pub task_id: String,
     pub paths: Vec<(std::path::PathBuf, i64)>, // (path, pos_ms)
-    pub format: u16,     // 0x01=GIF, 0x02=WebP
+    pub format: u16,      // 0x01=GIF, 0x02=WebP
     pub resize_mode: u16, // 0x01=width, 0x02=height
-    pub target_px: u32,  // custom pixel value
-    pub fps: u16,
+    pub target_px: u32,   // custom pixel value
+    pub speed: f32,       // playback speed multiplier (1.0 = real-time)
     pub loop_count: u16,
+    pub crop: Option<(f32, f32, f32, f32)>, // (x, y, w, h) normalized 0-1；None = 不裁切
+    pub quality: f32,     // 0.0 = lossless, 0.01-1.0 = lossy quality
 }
 
 pub(crate) async fn read_animate_req(
@@ -136,13 +144,22 @@ pub(crate) async fn read_animate_req(
     stream.read_exact(&mut tp_buf).await?;
     let target_px = u32::from_le_bytes(tp_buf);
 
-    let mut fps_buf = [0u8; 2];
-    stream.read_exact(&mut fps_buf).await?;
-    let fps = u16::from_le_bytes(fps_buf);
+    let mut spd_buf = [0u8; 4];
+    stream.read_exact(&mut spd_buf).await?;
+    let speed = f32::from_le_bytes(spd_buf);
 
     let mut lc_buf = [0u8; 2];
     stream.read_exact(&mut lc_buf).await?;
     let loop_count = u16::from_le_bytes(lc_buf);
 
-    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, fps, loop_count })
+    // crop: 4×f32 LE；crop_w == 0.0 表示禁用
+    let mut cx_buf = [0u8; 4]; stream.read_exact(&mut cx_buf).await?; let crop_x = f32::from_le_bytes(cx_buf);
+    let mut cy_buf = [0u8; 4]; stream.read_exact(&mut cy_buf).await?; let crop_y = f32::from_le_bytes(cy_buf);
+    let mut cw_buf = [0u8; 4]; stream.read_exact(&mut cw_buf).await?; let crop_w = f32::from_le_bytes(cw_buf);
+    let mut ch_buf = [0u8; 4]; stream.read_exact(&mut ch_buf).await?; let crop_h = f32::from_le_bytes(ch_buf);
+    let crop = if crop_w > 0.0 { Some((crop_x, crop_y, crop_w, crop_h)) } else { None };
+
+    let mut q_buf = [0u8; 4]; stream.read_exact(&mut q_buf).await?; let quality = f32::from_le_bytes(q_buf);
+
+    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality })
 }

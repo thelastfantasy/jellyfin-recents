@@ -50,9 +50,14 @@ let _seekOsdEl: HTMLDivElement | null = null;
 let _seekOsdHideTimer: ReturnType<typeof setTimeout> | null = null;
 
 let _seekSeconds = 10;
+let _suspended = false;
 
 export function setSeekSeconds(s: number): void {
   _seekSeconds = s;
+}
+
+export function setGesturesSuspended(v: boolean): void {
+  _suspended = v;
 }
 
 function ensureSeekOsd(): HTMLDivElement {
@@ -149,13 +154,13 @@ export function initGestures(videoEl: HTMLVideoElement, getItemId: () => string)
       e.stopImmediatePropagation();
       e.preventDefault();
       cancelPendingLongPress();
-      if (zone === 'left') {
+      if (zone === 'left' && !_suspended) {
         videoEl.currentTime = Math.max(0, videoEl.currentTime - _seekSeconds);
         showRipple('left', `-${_seekSeconds}s`);
-      } else if (zone === 'right') {
+      } else if (zone === 'right' && !_suspended) {
         videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + _seekSeconds);
         showRipple('right', `+${_seekSeconds}s`);
-      } else {
+      } else if (zone === 'center') {
         if (videoEl.paused) videoEl.play().catch(() => {});
         else videoEl.pause();
       }
@@ -168,6 +173,7 @@ export function initGestures(videoEl: HTMLVideoElement, getItemId: () => string)
   // ── Unified touch state machine ───────────────────────────────────────────
   container.addEventListener('touchstart', (e: TouchEvent) => {
     if (!videoEl.isConnected) return;
+    if (_suspended) { gs.mode = 'idle'; return; }
     if (e.touches.length !== 1) { gs.mode = 'idle'; return; }
     if (isOsdControl(e.target)) { gs.mode = 'idle'; return; }
     const touch = e.touches[0];

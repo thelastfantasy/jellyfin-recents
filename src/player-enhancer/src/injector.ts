@@ -202,7 +202,7 @@ function injectPlayerButtons(
 
   screenshotBtn.addEventListener('click', () => {
     const title = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || undefined;
-    takeScreenshot(videoEl, checkbox.checked, title);
+    takeScreenshot(videoEl, checkbox.checked, title, getItemId());
   });
 
   // Firefox mobile 上 label>checkbox 的 touch 联动不可靠，直接处理 touchend

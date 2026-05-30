@@ -168,34 +168,90 @@ public sealed class SeekPreviewService : IDisposable
         }
     }
 
-    /// <summary>Sends a prefetch hint. Fire-and-forget — never blocks the caller.</summary>
-    public void Prefetch(string filePath, long posMs, int width, Guid itemId)
+    /// <summary>
+    /// Sends a prefetch request and awaits ACK (which arrives after Rust finishes decoding and writing to disk).
+    /// Returns true on success.
+    /// </summary>
+    public Task<bool> PrefetchAsync(string filePath, long posMs, int width, Guid itemId, CancellationToken ct = default)
     {
-        if (_prefetchSocket == null) return;
+        if (_prefetchSocket == null) return Task.FromResult(false);
 
-        _ = Task.Run(async () =>
+        return Task.Run(async () =>
         {
-            await _prefetchConnLock.WaitAsync();
+            await _prefetchConnLock.WaitAsync(ct);
             try
             {
                 var id = Interlocked.Increment(ref _nextRequestId);
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                // Longer timeout: Rust now decodes synchronously before ACKing
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(30));
                 await SendRequestAsync(_prefetchSocket, 0x02, id, posMs, width, filePath, itemId, cts.Token);
                 var buf = new byte[8];
-                _ = await ReceiveBytesAsync(_prefetchSocket, buf, cts.Token);
+                return await ReceiveBytesAsync(_prefetchSocket, buf, cts.Token);
             }
             catch
             {
-                // Prefetch is best-effort. On error, reset the socket so the buffer
-                // doesn't accumulate stale ACKs that would desync subsequent requests.
                 try { _prefetchSocket?.Dispose(); } catch { }
                 _prefetchSocket = null;
+                return false;
             }
             finally
             {
                 _prefetchConnLock.Release();
             }
-        });
+        }, ct);
+    }
+
+    /// <summary>
+    /// Queries the Rust daemon for all cached pos_ms values for the given item and width.
+    /// Uses the FETCH socket so it can be called even without a prefetch socket.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ListCachedAsync(
+        Guid itemId, int width = 320, CancellationToken ct = default)
+    {
+        if (_fetchSocket == null) return Array.Empty<long>();
+
+        await _fetchLock.WaitAsync(ct);
+        try
+        {
+            var id = Interlocked.Increment(ref _nextRequestId);
+            var itemIdBytes = System.Text.Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
+
+            // priority(1) + request_id(4) + item_id(32) + width(4)
+            var buf = new byte[41];
+            buf[0] = 0x03; // PRIORITY_LIST
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1), id);
+            itemIdBytes.CopyTo(buf, 5);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(37), (uint)width);
+
+            await _fetchSocket.SendAsync(buf, System.Net.Sockets.SocketFlags.None, ct);
+
+            // Response: [4 request_id][4 count][count × 8 pos_ms]
+            var header = new byte[8];
+            if (!await ReceiveBytesAsync(_fetchSocket, header, ct)) return Array.Empty<long>();
+
+            var count = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
+            if (count == 0) return Array.Empty<long>();
+
+            var body = new byte[count * 8];
+            if (!await ReceiveBytesAsync(_fetchSocket, body, ct)) return Array.Empty<long>();
+
+            var result = new List<long>((int)count);
+            for (var i = 0; i < (int)count; i++)
+                result.Add(System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 8)));
+            return result;
+        }
+        catch (Exception ex)
+        {
+            try { _fetchSocket?.Dispose(); } catch { }
+            _fetchSocket = null;
+            if (ex is OperationCanceledException) throw;
+            return Array.Empty<long>();
+        }
+        finally
+        {
+            _fetchLock.Release();
+        }
     }
 
     private static async Task SendRequestAsync(
@@ -245,6 +301,56 @@ public sealed class SeekPreviewService : IDisposable
             offset += read;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Sends FRAME_INFO (0x04) to the Rust daemon: decodes the frame at posMs and returns
+    /// the accurate frame index and frame-start timestamp computed from actual decoded pts + fps.
+    /// Returns null if the daemon is unavailable or decode fails.
+    /// </summary>
+    public async Task<(long FrameIdx, long FrameStartMs)?> FrameInfoAsync(
+        string filePath, long posMs, Guid itemId, CancellationToken ct = default)
+    {
+        if (_fetchSocket == null) return null;
+
+        await _fetchLock.WaitAsync(ct);
+        try
+        {
+            var id = Interlocked.Increment(ref _nextRequestId);
+            // Use the same width as seek-preview batch cache (320) so Rust can serve from RAM cache.
+            await SendRequestAsync(_fetchSocket, 0x04, id, posMs, 320, filePath, itemId, ct);
+
+            // Response: [request_id(4)][actual_pts_ms(8)][fps_num(8)][fps_den(8)]
+            var buf = new byte[28];
+            if (!await ReceiveBytesAsync(_fetchSocket, buf, ct)) return null;
+
+            var responseId = BinaryPrimitives.ReadUInt32LittleEndian(buf);
+            if (responseId != id)
+                throw new InvalidOperationException(
+                    $"[SeekPreview] FrameInfo socket desync: expected {id}, got {responseId}");
+
+            var actualPtsMs = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(4));
+            var fpsNum      = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(12));
+            var fpsDen      = BinaryPrimitives.ReadInt64LittleEndian(buf.AsSpan(20));
+
+            if (actualPtsMs < 0 || fpsNum <= 0 || fpsDen <= 0) return null;
+
+            var frameIdx    = (actualPtsMs * fpsNum + fpsDen * 500) / (fpsDen * 1000);
+            var frameStartMs = frameIdx * fpsDen * 1000 / fpsNum;
+            return (frameIdx, frameStartMs);
+        }
+        catch (Exception ex)
+        {
+            try { _fetchSocket?.Dispose(); } catch { }
+            _fetchSocket = null;
+            if (ex is OperationCanceledException) throw;
+            _logger.LogDebug(ex, "[SeekPreview] FrameInfoAsync error — socket reset");
+            return null;
+        }
+        finally
+        {
+            _fetchLock.Release();
+        }
     }
 
     public void Dispose()

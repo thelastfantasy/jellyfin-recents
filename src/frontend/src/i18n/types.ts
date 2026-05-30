@@ -149,6 +149,10 @@ export interface Translations {
   posterCustomFontUpload: string
   posterCustomFontDelete: string
   posterCustomFontSuffix: string
+  // Frame export queue widget
+  exportQueue: string
+  exportQueueRemove: string
+  exportQueueDownload: string
   // Player Enhancer management panel (admin only)
   enhancerTitle: string
   enhancerStatusEnabled: string

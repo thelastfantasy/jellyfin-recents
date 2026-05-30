@@ -1,8 +1,18 @@
-SHELL := bash
-export PATH := /c/Program Files/nodejs:$(PATH)
+# Global shell: bash (used by all existing targets)
+SHELL       := bash
+.SHELLFLAGS := -c
+
+# DEPLOY_WORKDIR: Windows-style forward-slash path for PowerShell-native deploy
+ifeq ($(OS),Windows_NT)
+  DEPLOY_WORKDIR := $(subst \,/,$(CURDIR))
+else
+  DEPLOY_WORKDIR := $(CURDIR)
+  export PATH  := /c/Program Files/nodejs:$(PATH)
+endif
 
 .PHONY: build-frontend build-plugin build-poster-gen build-poster-gen-win build-seek-preview build-frame-forge \
-        build update clean test test-rust test-frontend test-csharp workflow-test workflow-test-release
+        check-seek-preview check-frame-forge \
+        build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release
 
 build-frontend:
 	cd src/frontend && npm run build
@@ -44,8 +54,7 @@ build-seek-preview:
 	cp src/seek-preview/target/release/seek-preview \
 		src/JellyfinSuite.Plugin/seek-preview-linux-x64
 
-# Build frame-forge Linux binary via Docker.
-# Uses Ubuntu 24.04 + libopencv-dev + ffmpeg dev libs for OpenCV and ffmpeg-next.
+# Build frame-forge Linux binary via Docker (no opencv — Jellyfin container doesn't ship it).
 build-frame-forge:
 	docker volume create forge-cargo-home > /dev/null 2>&1 || true
 	MSYS_NO_PATHCONV=1 docker run --rm \
@@ -55,12 +64,12 @@ build-frame-forge:
 		ubuntu:24.04 \
 		sh -c "DEBIAN_FRONTEND=noninteractive && \
 		       apt-get update -qq && \
-		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev libopencv-dev && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
 		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
 		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build --release --features opencv"
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build --release"
 	cp src/frame-forge/target/release/frame-forge \
 		src/JellyfinSuite.Plugin/frame-forge-linux-x64
 
@@ -84,6 +93,8 @@ update: build-poster-gen build
 		jellyfin-dev:/config/plugins/JellyfinSuite/seek-preview-linux-x64
 	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/frame-forge-linux-x64 \
 		jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
+	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
 	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/meta.json \
 		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 	docker restart jellyfin-dev
@@ -91,6 +102,93 @@ update: build-poster-gen build
 	@sleep 20
 	@MSYS_NO_PATHCONV=1 docker exec jellyfin-dev \
 		curl -s -o /dev/null -w "Health check: %{http_code}\n" http://localhost:8096/health
+
+# ── PowerShell-native deploy ──────────────────────────────────────────────────
+# Completely isolated from bash targets above — never calls make sub-targets.
+# All commands inlined so no bash dependency. Safe to run from pwsh directly.
+deploy: SHELL       := pwsh
+deploy: .SHELLFLAGS := -NoProfile -Command
+deploy:
+	cd src/frontend && npm run build
+	cd src/player-enhancer && npm install && npm run build
+	dotnet build src/JellyfinSuite.Plugin -c Debug --output build/plugin
+	docker volume create seek-cargo-home
+	docker volume create seek-rustup-home
+	docker run --rm \
+		-v "$(DEPLOY_WORKDIR)/src/seek-preview:/workspace" \
+		-v seek-cargo-home:/root/.cargo \
+		-v seek-rustup-home:/root/.rustup \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && /root/.cargo/bin/cargo build --release"
+	cp src/seek-preview/target/release/seek-preview src/JellyfinSuite.Plugin/seek-preview-linux-x64
+	docker volume create forge-cargo-home
+	docker run --rm \
+		-v "$(DEPLOY_WORKDIR)/src/frame-forge:/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build --release"
+	cp src/frame-forge/target/release/frame-forge src/JellyfinSuite.Plugin/frame-forge-linux-x64
+	docker run --rm \
+		-v "$(DEPLOY_WORKDIR)/src/poster-gen:/workspace" \
+		-w /workspace \
+		rust:1.88-slim-bookworm \
+		cargo build --release
+	cp src/poster-gen/target/release/poster-gen src/JellyfinSuite.Plugin/poster-gen-linux-x64
+	docker cp build/plugin/JellyfinSuite.Plugin.dll jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
+	docker cp build/plugin/poster-gen-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/poster-gen-linux-x64
+	docker cp src/JellyfinSuite.Plugin/seek-preview-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/seek-preview-linux-x64
+	docker cp src/JellyfinSuite.Plugin/frame-forge-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
+	docker cp src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	docker cp src/JellyfinSuite.Plugin/meta.json jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
+	docker restart jellyfin-dev
+	@Write-Host "Waiting for Jellyfin to start..."
+	@Start-Sleep -Seconds 20
+	@docker exec jellyfin-dev curl -s -o /dev/null -w "Health check: %{http_code}" http://localhost:8096/health
+
+# Quick update: rebuild frontend + enhancer + C# only, skip Rust builds
+update-quick:
+	make build-frontend
+	make build-enhancer
+	make build-plugin
+	MSYS_NO_PATHCONV=1 docker cp build/plugin/JellyfinSuite.Plugin.dll \
+		jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
+	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/meta.json \
+		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
+	docker restart jellyfin-dev
+	@echo "Waiting for Jellyfin to start..."
+	@sleep 20
+	@MSYS_NO_PATHCONV=1 docker exec jellyfin-dev \
+		curl -s -o /dev/null -w "Health check: %{http_code}\n" http://localhost:8096/health
+
+# Quick deploy: rebuild enhancer JS only, copy to container. No restart needed.
+deploy-enhancer:
+	cd src/player-enhancer && npm run build
+	MSYS_NO_PATHCONV=1 docker cp src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	@echo "Enhancer deployed — reload browser to pick up changes"
+
+# Quick type-check seek-preview in Docker (no binary produced, much faster than build)
+check-seek-preview:
+	docker volume create seek-cargo-home > /dev/null 2>&1 || true
+	docker volume create seek-rustup-home > /dev/null 2>&1 || true
+	MSYS_NO_PATHCONV=1 docker run --rm \
+		-v "$$(cygpath -m $(CURDIR))/src/seek-preview:/workspace" \
+		-v seek-cargo-home:/root/.cargo \
+		-v seek-rustup-home:/root/.rustup \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		       /root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		       /root/.cargo/bin/cargo check"
 
 # Quick type-check frame-forge in Docker (no binary produced, much faster than build)
 check-frame-forge:
@@ -102,12 +200,12 @@ check-frame-forge:
 		ubuntu:24.04 \
 		sh -c "DEBIAN_FRONTEND=noninteractive && \
 		       apt-get update -qq && \
-		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev libopencv-dev && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
 		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
 		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check --features opencv"
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check --all-targets --features cli"
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -148,4 +246,3 @@ clean:
 	rm -rf build/
 	cd src/frontend && rm -rf dist/
 	cd src/poster-gen && cargo clean
-

@@ -118,17 +118,20 @@ fn encode_and_save(images: &[DynamicImage], timestamps: &[u64], output: &str, he
         img.resize_exact(w, height, image::imageops::FilterType::Lanczos3)
     }).collect();
 
+    let uniform_delay_ms = (1000u32 / fps.max(1) as u32).max(10);
+    let uniform_delays: Vec<u32> = vec![uniform_delay_ms; scaled.len()];
+
     let encoded = if output.ends_with(".gif") {
         if !timestamps.is_empty() {
             animate::encode_gif_timed(&scaled, timestamps, 0)?
         } else {
-            animate::encode_gif(&scaled, fps, 0)?
+            animate::encode_gif(&scaled, &uniform_delays, 0)?
         }
     } else {
         if !timestamps.is_empty() {
             animate::encode_webp_timed(&scaled, timestamps, 0)?
         } else {
-            animate::encode_webp_anim(&scaled, fps, 0)?
+            animate::encode_webp_anim(&scaled, &uniform_delays, 0)?
         }
     };
     std::fs::write(output, &encoded)?;

@@ -49,9 +49,52 @@ public class PlayerEnhancerController : ControllerBase
     {
         var indexPath = Path.Combine(_appPaths.WebPath, "index.html");
         var injected = System.IO.File.Exists(indexPath) &&
-            System.IO.File.ReadAllText(indexPath).Contains("/web/configurationpage?name=JellyfinSuitePlayerEnhancer");
+            System.IO.File.ReadAllText(indexPath).Contains("/JellyfinSuite/PlayerEnhancer/Launcher");
 
         return Ok(new EnhancerStatusDto { AutoInjectEnabled = injected });
+    }
+
+    /// <summary>Tiny launcher injected into index.html once; directly imports the core bundle.</summary>
+    [HttpGet("Launcher")]
+    [AllowAnonymous]
+    public ContentResult GetLauncher()
+    {
+        const string js = "import('/JellyfinSuite/PlayerEnhancer/Core')" +
+            ".catch(e=>console.warn('[JFS] enhancer load failed',e));";
+        Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        return Content(js, "application/javascript");
+    }
+
+    /// <summary>
+    /// Serves the core enhancer bundle with ETag-based revalidation.
+    /// Filesystem copy takes priority over the DLL-embedded fallback.
+    /// </summary>
+    [HttpGet("Core")]
+    [AllowAnonymous]
+    public IActionResult GetCore()
+    {
+        var fsPath = Path.Combine(_appPaths.PluginsPath, "JellyfinSuite", "jellyfin-suite-enhancer.js");
+        if (System.IO.File.Exists(fsPath))
+        {
+            var mtime = new FileInfo(fsPath).LastWriteTimeUtc;
+            var etag = $"\"{mtime.Ticks:x}\"";
+            if (Request.Headers.IfNoneMatch == etag)
+                return StatusCode(304);
+            Response.Headers.ETag = etag;
+            Response.Headers.CacheControl = "no-cache";
+            return PhysicalFile(fsPath, "application/javascript");
+        }
+
+        var stream = GetType().Assembly.GetManifestResourceStream(
+            "JellyfinSuite.Plugin.Web.jellyfin-suite-enhancer.js");
+        if (stream is null) return NotFound();
+        var dllMtime = new FileInfo(GetType().Assembly.Location).LastWriteTimeUtc;
+        var dllEtag = $"\"{dllMtime.Ticks:x}\"";
+        if (Request.Headers.IfNoneMatch == dllEtag)
+            return StatusCode(304);
+        Response.Headers.ETag = dllEtag;
+        Response.Headers.CacheControl = "no-cache";
+        return File(stream, "application/javascript");
     }
 
     [HttpPost("Inject")]

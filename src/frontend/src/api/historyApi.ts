@@ -1,29 +1,9 @@
 import { getCurrentUserId } from './jellyfinClient'
 import type { GroupByMode, MediaFilter, PlayRecord, SortByMode, SortOrder } from '../types'
+import type { components } from '../jellyfin-api'
 
-interface PlayHistoryEntry {
-  ItemId: string
-  PlayedDate: string
-  Title?: string
-  MediaType?: string
-  FavoritedAt?: string | null
-  ReleaseDate?: string | null
-  AddedDate?: string | null
-  SeriesName?: string | null
-  SeriesId?: string | null
-  SeasonNumber?: number | null
-  EpisodeNumber?: number | null
-  ImagePrimaryTag?: string | null
-  HasAncestors?: boolean
-  PlaybackPositionTicks?: number | null
-  VideoDuration?: number | null
-}
-
-interface PlayHistoryResponse {
-  Entries: PlayHistoryEntry[]
-  TotalCount: number
-  TotalPages: number
-}
+type PlayHistoryEntry   = components['schemas']['PlayHistoryEntry']
+type PlayHistoryResponse = components['schemas']['PlayHistoryResponse']
 
 export interface HistoryResult {
   records: PlayRecord[]
@@ -63,24 +43,24 @@ export async function getHistoryPlayed(query: HistoryQuery): Promise<HistoryResu
   const url = window.ApiClient.getUrl('JellyfinSuite/PlayHistory', params)
   const data = (await window.ApiClient.ajax({ url, type: 'GET', dataType: 'json' })) as PlayHistoryResponse
 
-  const records = data.Entries.map((entry): PlayRecord => ({
-    itemId: entry.ItemId,
-    title: entry.Title ?? '未知标题',
-    playedDate: new Date(entry.PlayedDate),
-    favoritedAt: entry.FavoritedAt ? new Date(entry.FavoritedAt) : null,
-    releaseDate: entry.ReleaseDate ? new Date(entry.ReleaseDate) : null,
-    addedDate: entry.AddedDate ? new Date(entry.AddedDate) : null,
-    mediaType: entry.MediaType === 'audio' ? 'audio' : 'video',
-    imagePrimaryTag: entry.ImagePrimaryTag ?? null,
-    seriesName: entry.SeriesName ?? null,
-    seriesId: entry.SeriesId ?? null,
-    seasonNumber: entry.SeasonNumber ?? null,
-    episodeNumber: entry.EpisodeNumber ?? null,
+  const records = (data.entries ?? []).map((entry): PlayRecord => ({
+    itemId: entry.itemId ?? '',
+    title: entry.title ?? '未知标题',
+    playedDate: new Date(entry.playedDate ?? 0),
+    favoritedAt: entry.favoritedAt ? new Date(entry.favoritedAt) : null,
+    releaseDate: entry.releaseDate ? new Date(entry.releaseDate) : null,
+    addedDate: entry.addedDate ? new Date(entry.addedDate) : null,
+    mediaType: entry.mediaType === 'audio' ? 'audio' : 'video',
+    imagePrimaryTag: entry.imagePrimaryTag ?? null,
+    seriesName: entry.seriesName ?? null,
+    seriesId: entry.seriesId ?? null,
+    seasonNumber: entry.seasonNumber ?? null,
+    episodeNumber: entry.episodeNumber ?? null,
     parentId: null,
-    hasAncestors: entry.HasAncestors ?? false,
-    playbackPositionTicks: entry.PlaybackPositionTicks ?? null,
-    videoDuration: entry.VideoDuration ?? null,
+    hasAncestors: entry.hasAncestors ?? false,
+    playbackPositionTicks: entry.playbackPositionTicks ?? null,
+    videoDuration: entry.videoDuration ?? null,
   }))
 
-  return { records, totalCount: data.TotalCount, totalPages: data.TotalPages }
+  return { records, totalCount: data.totalCount ?? 0, totalPages: data.totalPages ?? 0 }
 }

@@ -9,13 +9,16 @@ pub struct Request {
     pub pos_ms: i64,
     pub width: u32,
     pub path: PathBuf,
-    /// Jellyfin item ID, 32-char hex (UUID "N" format). Used as the disk-cache directory name
-    /// so C# can check frame readiness via File.Exists without replicating the hash logic.
     pub item_id: String,
 }
 
-pub async fn read_req(stream: &mut UnixStream) -> Result<Request> {
-    let priority = stream.read_u8().await?;
+/// Read just the priority byte — caller branches on it, then reads the body.
+pub async fn read_priority(stream: &mut UnixStream) -> Result<u8> {
+    Ok(stream.read_u8().await?)
+}
+
+/// Read the request body after the priority byte has already been consumed.
+pub async fn read_req_body(stream: &mut UnixStream, priority: u8) -> Result<Request> {
     let request_id = stream.read_u32_le().await?;
     let pos_ms = stream.read_i64_le().await?;
     let width = stream.read_u32_le().await?;

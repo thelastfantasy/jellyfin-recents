@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CAP_BYTES: u64 = 512 * 1024 * 1024; // 512 MB
+pub const CAP_BYTES: u64 = 512 * 1024 * 1024;
 
-fn cache_dir() -> PathBuf { std::env::temp_dir().join("seek-preview") }
+fn cache_dir() -> PathBuf { std::env::temp_dir().join("frame-forge") }
 fn index_file() -> PathBuf { cache_dir().join("index.txt") }
 const TRIM_RATIO: f64 = 0.75;
-
-// ── index ────────────────────────────────────────────────────────────────────
 
 struct Entry {
     frame_idx: i64,
@@ -24,8 +22,6 @@ struct Index {
     total_bytes: u64,
 }
 
-// ── public interface ─────────────────────────────────────────────────────────
-
 pub struct DiskCache {
     index: Mutex<Index>,
 }
@@ -33,10 +29,9 @@ pub struct DiskCache {
 impl DiskCache {
     pub fn new() -> Arc<Self> {
         let _ = std::fs::create_dir_all(cache_dir());
-        sweep_legacy_dirs();
         let index = load_index().unwrap_or_else(|_| rebuild_index());
         eprintln!(
-            "[seek-preview] disk cache: {:.1} MB used / {:.0} MB cap ({} entries)",
+            "[frame-forge] disk cache: {:.1} MB used / {:.0} MB cap ({} entries)",
             index.total_bytes as f64 / 1e6,
             CAP_BYTES as f64 / 1e6,
             index.entries.len(),
@@ -170,7 +165,7 @@ impl DiskCache {
         }
 
         eprintln!(
-            "[seek-preview] disk cache cleanup: {:.1} MB remaining ({} entries)",
+            "[frame-forge] disk cache cleanup: {:.1} MB remaining ({} entries)",
             idx.total_bytes as f64 / 1e6,
             idx.entries.len(),
         );
@@ -178,14 +173,12 @@ impl DiskCache {
     }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 // 41708 → "00h00m41s708ms"
 fn format_pos_ms(ms: i64) -> String {
-    let h  = ms / 3_600_000;
-    let m  = (ms % 3_600_000) / 60_000;
-    let s  = (ms % 60_000)    / 1_000;
-    let ms = ms % 1_000;
+    let h   = ms / 3_600_000;
+    let m   = (ms % 3_600_000) / 60_000;
+    let s   = (ms % 60_000)    / 1_000;
+    let ms  = ms % 1_000;
     format!("{h:02}h{m:02}m{s:02}s{ms:03}ms")
 }
 
@@ -219,31 +212,6 @@ fn video_mtime(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Remove directories left by the old path-hash scheme (16-char hex names).
-fn sweep_legacy_dirs() {
-    let Ok(dirs) = std::fs::read_dir(cache_dir()) else { return };
-    let mut found = false;
-    for entry in dirs.flatten() {
-        let name = entry.file_name();
-        let s = name.to_string_lossy();
-        if s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit()) {
-            let _ = std::fs::remove_dir_all(entry.path());
-            eprintln!("[seek-preview] removed legacy cache dir: {s}");
-            found = true;
-        }
-    }
-    if found {
-        let _ = std::fs::remove_file(index_file());
-    }
-}
-
-// ── index I/O ─────────────────────────────────────────────────────────────────
-//
-// Format (space-separated, one entry per line):
-//   v2
-//   total_bytes <N>
-//   <item_id> <frame_idx> <pos_ms> <width> <size_bytes> <unix_ts> <video_mtime>
-
 fn write_index(idx: &Index) -> std::io::Result<()> {
     use std::fmt::Write as FmtWrite;
     let mut s = String::new();
@@ -258,13 +226,8 @@ fn write_index(idx: &Index) -> std::io::Result<()> {
 fn load_index() -> Result<Index, Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(index_file())?;
     let mut lines = text.lines();
-
-    let version = lines.next().ok_or("empty index")?;
-    if version != "v2" {
-        return Err("unknown version".into());
-    }
-
-    let total_line = lines.next().ok_or("missing total_bytes")?;
+    if lines.next().ok_or("empty")? != "v2" { return Err("unknown version".into()); }
+    let total_line = lines.next().ok_or("missing total")?;
     let total_bytes: u64 = total_line.strip_prefix("total_bytes ").ok_or("bad header")?.parse()?;
 
     let mut entries = HashMap::new();
@@ -282,14 +245,12 @@ fn load_index() -> Result<Index, Box<dyn std::error::Error>> {
             entries.insert((item_id, pos_ms, width), Entry { frame_idx, size, written_at: ts, video_mtime: vmtime });
         }
     }
-
     Ok(Index { entries, total_bytes })
 }
 
 fn rebuild_index() -> Index {
     let mut entries = HashMap::new();
     let mut total_bytes: u64 = 0;
-
     let Ok(dirs) = std::fs::read_dir(cache_dir()) else { return Index::default() };
     for dir in dirs.flatten() {
         let item_id = dir.file_name().to_string_lossy().to_string();
@@ -315,7 +276,6 @@ fn rebuild_index() -> Index {
             entries.insert((item_id.clone(), pos_ms, width), Entry { frame_idx, size, written_at: ts, video_mtime: 0 });
         }
     }
-
-    eprintln!("[seek-preview] rebuilt disk index: {:.1} MB ({} entries)", total_bytes as f64 / 1e6, entries.len());
+    eprintln!("[frame-forge] rebuilt disk index: {:.1} MB ({} entries)", total_bytes as f64 / 1e6, entries.len());
     Index { entries, total_bytes }
 }

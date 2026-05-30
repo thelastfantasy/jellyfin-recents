@@ -1,2 +1,4 @@
-@aliveui base;
-@aliveui utilities;
+@layer jfs-alive {
+  @aliveui base;
+  @aliveui utilities;
+}
