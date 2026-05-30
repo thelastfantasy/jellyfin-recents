@@ -108,14 +108,14 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
-    public async Task<(byte[]? JpegData, ushort QualityFlags)> GetFrameAsync(
+    public async Task<(byte[]? JpegData, ushort QualityFlags, long ActualPtsMs)> GetFrameAsync(
         string filePath,
         long posMs,
         int width,
         Guid itemId,
         CancellationToken ct = default)
     {
-        if (!IsAvailable) return (null, 0);
+        if (!IsAvailable) return (null, 0, posMs);
 
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
@@ -148,16 +148,14 @@ public sealed class FrameExportService : IDisposable
             {
                 await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
-                // [4] request_id (u32 LE)
-                // [4] jpeg_len (u32 LE)
-                // [N] JPEG bytes
-                // [2] quality_flags (u16 LE)
+                // Response wire: [request_id(4)] [jpeg_len(4)] [jpeg_data(N)] [quality_flags(2)] [actual_pts_ms(8)]
+                // actual_pts_ms == -1 means cache hit; fallback to posMs.
                 var header = new byte[8];
                 await ReceiveExactAsync(sock, header, 8, ct).ConfigureAwait(false);
                 var jpegLen = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, 4));
 
                 if (jpegLen == 0)
-                    return (null, 0);
+                    return (null, 0, posMs);
 
                 var jpegData = new byte[jpegLen];
                 await ReceiveExactAsync(sock, jpegData, (int)jpegLen, ct).ConfigureAwait(false);
@@ -166,20 +164,31 @@ public sealed class FrameExportService : IDisposable
                 await ReceiveExactAsync(sock, flagBuf, 2, ct).ConfigureAwait(false);
                 var flags = BinaryPrimitives.ReadUInt16LittleEndian(flagBuf);
 
-                return (jpegData, flags);
+                var ptsBuf = new byte[8];
+                await ReceiveExactAsync(sock, ptsBuf, 8, ct).ConfigureAwait(false);
+                var actualPtsMs = BinaryPrimitives.ReadInt64LittleEndian(ptsBuf);
+                if (actualPtsMs < 0) actualPtsMs = posMs; // cache hit sentinel
+
+                return (jpegData, flags, actualPtsMs);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning("[FrameExport] socket error — resetting: {Ex}", ex.Message);
                 try { _socket?.Dispose(); } catch { }
                 _socket = null;
-                return (null, 0);
+                return (null, 0, posMs);
             }
         }
         finally
         {
             _requestLock.Release();
         }
+    }
+
+    private void InvalidateSocket()
+    {
+        try { _socket?.Dispose(); } catch { }
+        _socket = null;
     }
 
     private static async Task ReceiveExactAsync(Socket sock, byte[] buffer, int count, CancellationToken ct)
@@ -339,63 +348,70 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(quality), 0, 4);
 
         var reqBuf = ms.ToArray();
-        await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
-
-        // Read progress events + final output
-        var header = new byte[8];
-        var outputBuf = new List<byte>();
-        bool done = false;
-
-        while (!done && !ct.IsCancellationRequested)
+        try
         {
-            await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-            var statusCode = BitConverter.ToUInt32(header, 0);
-            if (statusCode != 2)
-            {
-                // Progress event: read json length + json
-                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-                var jsonLen = (int)BitConverter.ToUInt32(header, 0);
-                var jsonBuf = new byte[jsonLen];
-                await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
-                var json = Encoding.UTF8.GetString(jsonBuf);
+            await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
 
-                // Parse and forward to task progress channel
-                try
+            // Read progress events + final output
+            var header = new byte[8];
+            bool done = false;
+
+            while (!done && !ct.IsCancellationRequested)
+            {
+                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                var statusCode = BitConverter.ToUInt32(header, 0);
+                if (statusCode != 2)
                 {
-                    var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
-                    if (prog != null)
+                    // Progress event: read json length + json
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var jsonLen = (int)BitConverter.ToUInt32(header, 0);
+                    var jsonBuf = new byte[jsonLen];
+                    await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
+                    var json = Encoding.UTF8.GetString(jsonBuf);
+
+                    // Parse and forward to task progress channel
+                    try
                     {
-                        prog.TaskId = task.TaskId;
-                        task.ProgressChannel.Writer.TryWrite(prog);
-                        if (prog.Status == "error")
+                        var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
+                        if (prog != null)
                         {
-                            task.Status = TaskStatus.Error;
-                            task.Error = prog.Error;
-                            task.ProgressChannel.Writer.TryComplete();
-                            return null;
+                            prog.TaskId = task.TaskId;
+                            task.ProgressChannel.Writer.TryWrite(prog);
+                            if (prog.Status == "error")
+                            {
+                                task.Status = TaskStatus.Error;
+                                task.Error = prog.Error;
+                                task.ProgressChannel.Writer.TryComplete();
+                                return null;
+                            }
                         }
                     }
-                }
-                catch { /* skip malformed progress */ }
+                    catch { /* skip malformed progress */ }
 
-                if (statusCode == 1) // error
+                    if (statusCode == 1) // error
+                    {
+                        task.Status = TaskStatus.Error;
+                        task.Error = json;
+                        task.ProgressChannel.Writer.TryComplete();
+                        return null;
+                    }
+                }
+                else
                 {
-                    task.Status = TaskStatus.Error;
-                    task.Error = json;
-                    task.ProgressChannel.Writer.TryComplete();
-                    return null;
+                    // Final output: read data_len + data
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var dataLen = (int)BitConverter.ToUInt32(header, 0);
+                    var dataBuf = new byte[dataLen];
+                    await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
+                    done = true;
+                    return dataBuf;
                 }
             }
-            else
-            {
-                // Final output: read data_len + data
-                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-                var dataLen = (int)BitConverter.ToUInt32(header, 0);
-                var dataBuf = new byte[dataLen];
-                await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
-                done = true;
-                return dataBuf;
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
         }
         return null;
     }
@@ -442,52 +458,59 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
 
         var reqBuf = ms.ToArray();
-        await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
-
-        // Read progress events + final output (same pattern as animate)
-        var header = new byte[8];
-        var outputBuf = new List<byte>();
-        bool done = false;
-
-        while (!done && !ct.IsCancellationRequested)
+        try
         {
-            await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-            var statusCode = BitConverter.ToUInt32(header, 0);
-            if (statusCode != 2)
+            await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Read progress events + final output (same pattern as animate)
+            var header = new byte[8];
+            bool done = false;
+
+            while (!done && !ct.IsCancellationRequested)
             {
                 await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-                var jsonLen = (int)BitConverter.ToUInt32(header, 0);
-                var jsonBuf = new byte[jsonLen];
-                await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
-                var json = Encoding.UTF8.GetString(jsonBuf);
-                try
+                var statusCode = BitConverter.ToUInt32(header, 0);
+                if (statusCode != 2)
                 {
-                    var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
-                    if (prog != null)
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var jsonLen = (int)BitConverter.ToUInt32(header, 0);
+                    var jsonBuf = new byte[jsonLen];
+                    await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
+                    var json = Encoding.UTF8.GetString(jsonBuf);
+                    try
                     {
-                        prog.TaskId = task.TaskId;
-                        task.ProgressChannel.Writer.TryWrite(prog);
-                        if (prog.Status == "error")
+                        var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
+                        if (prog != null)
                         {
-                            task.Status = TaskStatus.Error;
-                            task.Error = prog.Error;
-                            task.ProgressChannel.Writer.TryComplete();
-                            return null;
+                            prog.TaskId = task.TaskId;
+                            task.ProgressChannel.Writer.TryWrite(prog);
+                            if (prog.Status == "error")
+                            {
+                                task.Status = TaskStatus.Error;
+                                task.Error = prog.Error;
+                                task.ProgressChannel.Writer.TryComplete();
+                                return null;
+                            }
                         }
                     }
+                    catch { }
+                    if (statusCode == 1) { task.Status = TaskStatus.Error; task.ProgressChannel.Writer.TryComplete(); return null; }
                 }
-                catch { }
-                if (statusCode == 1) { task.Status = TaskStatus.Error; task.ProgressChannel.Writer.TryComplete(); return null; }
+                else
+                {
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var dataLen = (int)BitConverter.ToUInt32(header, 0);
+                    var dataBuf = new byte[dataLen];
+                    await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
+                    done = true;
+                    return dataBuf;
+                }
             }
-            else
-            {
-                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
-                var dataLen = (int)BitConverter.ToUInt32(header, 0);
-                var dataBuf = new byte[dataLen];
-                await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
-                done = true;
-                return dataBuf;
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
         }
         return null;
     }

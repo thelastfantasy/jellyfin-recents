@@ -16,6 +16,7 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
     let fps_num: i64;
     let fps_den: i64;
     let codec_ctx;
+    let stream_start_ms: i64;
 
     {
         let stream = ictx
@@ -29,6 +30,15 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
         fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
         let params = stream.parameters();
         codec_ctx = ff::codec::context::Context::from_parameters(params)?;
+
+        // Normalize pts to stream start so frame #0 = first real content frame.
+        // stream.start_time() returns i64; AV_NOPTS_VALUE is i64::MIN (very negative).
+        let start_pts = stream.start_time().max(0);
+        stream_start_ms = if start_pts > 0 && tb.0 != 0 && tb.1 != 0 {
+            (start_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+        } else {
+            0
+        };
     }
 
     let thread_count = std::thread::available_parallelism()
@@ -98,14 +108,74 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
     let frame = best.context("no frame decoded")?;
     let jpeg = encode_jpeg(&frame, target_width)?;
 
-    // Convert best_pts (stream timebase) to milliseconds: pts × num × 1000 / den
+    // Convert best_pts to ms, normalized by stream start so frame #0 = first content frame.
     let actual_pts_ms = if tb.0 != 0 && tb.1 != 0 {
-        (best_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+        let raw_ms = (best_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+        (raw_ms - stream_start_ms).max(0)
     } else {
         pos_ms
     };
 
     Ok((jpeg, actual_pts_ms, fps_num, fps_den))
+}
+
+/// Enumerate all video frame timestamps by demuxing (no decoding).
+/// Returns (frames: Vec<(pts_ms, is_keyframe)>, fps_num, fps_den).
+/// Fast: reads container index without decoding pixel data.
+pub fn index_frames(path: &PathBuf) -> Result<(Vec<(i64, bool)>, i64, i64)> {
+    use ffmpeg_next as ff;
+
+    let mut ictx = ff::format::input(path)
+        .with_context(|| format!("cannot open {:?}", path))?;
+
+    let stream_idx;
+    let tb;
+    let fps_num: i64;
+    let fps_den: i64;
+    let stream_start_ms: i64;
+
+    {
+        let stream = ictx
+            .streams()
+            .best(ff::media::Type::Video)
+            .context("no video stream")?;
+        stream_idx = stream.index();
+        tb = stream.time_base();
+        let rate = stream.avg_frame_rate();
+        fps_num = rate.0 as i64;
+        fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
+
+        let start_pts = stream.start_time().max(0);
+        stream_start_ms = if start_pts > 0 && tb.0 != 0 && tb.1 != 0 {
+            (start_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+        } else {
+            0
+        };
+    }
+
+    let mut frames: Vec<(i64, bool)> = Vec::new();
+
+    for (stream, pkt) in ictx.packets() {
+        if stream.index() != stream_idx {
+            continue;
+        }
+        let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+        let is_key = pkt.is_key();
+
+        let pts_ms = if tb.0 != 0 && tb.1 != 0 {
+            let raw = (pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+            (raw - stream_start_ms).max(0)
+        } else if fps_num > 0 {
+            (frames.len() as i64 * fps_den * 1000) / fps_num
+        } else {
+            frames.len() as i64 * 42  // fallback: assume ~24fps
+        };
+
+        frames.push((pts_ms, is_key));
+    }
+
+    anyhow::ensure!(!frames.is_empty(), "no video frames found in {:?}", path);
+    Ok((frames, fps_num, fps_den))
 }
 
 fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<Vec<u8>> {

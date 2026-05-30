@@ -25,12 +25,22 @@ pub fn decode_and_encode(
     let fps_num = fps_r.0 as i64;
     let fps_den = if fps_r.1 > 0 { fps_r.1 as i64 } else { 1 };
 
+    let time_base = video_stream.time_base();
+
+    // Normalize pts to stream start so frame #0 = first real content frame.
+    let start_pts = video_stream.start_time().unwrap_or(0).max(0);
+    let stream_start_ms: i64 = if start_pts > 0
+        && time_base.numerator() != 0 && time_base.denominator() != 0 {
+        (start_pts as f64 * time_base.numerator() as f64 * 1000.0
+            / time_base.denominator() as f64) as i64
+    } else {
+        0
+    };
+
     let mut decoder = ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters())?
         .decoder()
         .video()
         .context("failed to create video decoder")?;
-
-    let time_base = video_stream.time_base();
     // target_pts in stream timebase units (for frame comparison in decode loop)
     let target_pts = (pos_ms as i64)
         .checked_mul(time_base.denominator() as i64)
@@ -99,10 +109,11 @@ pub fn decode_and_encode(
     let elapsed = _t.elapsed();
     let bytes = jpeg_buf.into_inner();
 
-    // Convert saved_pkt_pts (stream timebase) to milliseconds: pts × num × 1000 / den
+    // Convert saved_pkt_pts to ms, normalized by stream start so frame #0 = first content frame.
     let actual_pts_ms = if time_base.numerator() != 0 && time_base.denominator() != 0 {
-        (saved_pkt_pts as f64 * time_base.numerator() as f64 * 1000.0
-            / time_base.denominator() as f64) as i64
+        let raw_ms = (saved_pkt_pts as f64 * time_base.numerator() as f64 * 1000.0
+            / time_base.denominator() as f64) as i64;
+        (raw_ms - stream_start_ms).max(0)
     } else {
         pos_ms
     };

@@ -57,11 +57,12 @@ public class FrameExportController : ControllerBase
             return NotFound(new { error = "Item not found or no file path" });
 
         await _frameExport.EnsureStartedAsync(ct);
-        var (jpeg, qualityFlags) = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
+        var (jpeg, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
         if (jpeg == null || jpeg.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
 
         Response.Headers["X-Frame-Quality"] = System.Text.Json.JsonSerializer.Serialize(new { qualityFlags });
+        Response.Headers["X-Frame-Pts-Ms"] = actualPtsMs.ToString();
         return File(jpeg, "image/jpeg");
     }
 
@@ -247,9 +248,10 @@ public class FrameExportController : ControllerBase
                         resizeMode, targetPx, req.Params.Speed, req.Params.LoopCount,
                         req.Params.CropX ?? 0f, req.Params.CropY ?? 0f,
                         req.Params.CropW ?? 0f, req.Params.CropH ?? 0f,
-                        req.Params.Quality),
+                        req.Params.Quality, task.Cts.Token),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
-                        task, filePaths, positions, req.Params.Format, req.Params.Quality),
+                        task, filePaths, positions, req.Params.Format, req.Params.Quality,
+                        task.Cts.Token),
                     _ => null
                 };
 
@@ -280,6 +282,10 @@ public class FrameExportController : ControllerBase
                     });
                     task.ProgressChannel.Writer.TryComplete();
                 }
+            }
+            catch (OperationCanceledException) when (task.Status == Services.TaskStatus.Cancelled)
+            {
+                // Normal cancellation — CancelTask() already marked the task and completed the channel.
             }
             catch (Exception ex)
             {

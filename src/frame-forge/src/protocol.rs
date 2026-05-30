@@ -51,19 +51,23 @@ pub(crate) async fn read_single_frame_req(
     Ok(SingleFrameReq { request_id, pos_ms, width, path, item_id })
 }
 
+/// Wire: [request_id(4)] [jpeg_len(4)] [jpeg_data(N)] [quality_flags(2)] [actual_pts_ms(8)]
+/// actual_pts_ms is normalized to stream start. -1 means "cache hit, use posMs as fallback".
 pub(crate) async fn write_jpeg_response(
     stream: &mut tokio::net::UnixStream,
     request_id: u32,
     jpeg_data: &[u8],
     quality_flags: u16,
+    actual_pts_ms: i64,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    let mut header = Vec::with_capacity(14 + jpeg_data.len());
+    let mut header = Vec::with_capacity(22 + jpeg_data.len());
     header.extend_from_slice(&request_id.to_le_bytes());
     header.extend_from_slice(&(jpeg_data.len() as u32).to_le_bytes());
     header.extend_from_slice(jpeg_data);
     header.extend_from_slice(&quality_flags.to_le_bytes());
+    header.extend_from_slice(&actual_pts_ms.to_le_bytes());
 
     stream.write_all(&header).await?;
     Ok(())

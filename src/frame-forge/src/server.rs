@@ -153,13 +153,13 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
 async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     let req = read_single_frame_req(stream).await?;
 
-    // 1. RAM cache
+    // 1. RAM cache (actual_pts_ms unknown from cache → sentinel -1 means "use posMs")
     let ram_key: RamKey = (req.path.clone(), req.pos_ms, req.width);
     let cached = state.ram.lock().await.get(&ram_key).cloned();
     if let Some(jpeg) = cached {
         let img = image::load_from_memory(&jpeg)?;
         let flags = detect_quality(&img).to_bitmask();
-        return write_jpeg_response(stream, req.request_id, &jpeg, flags).await;
+        return write_jpeg_response(stream, req.request_id, &jpeg, flags, -1).await;
     }
 
     // 2. Disk cache
@@ -167,7 +167,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
         state.ram.lock().await.put(ram_key, jpeg.clone());
         let img = image::load_from_memory(&jpeg)?;
         let flags = detect_quality(&img).to_bitmask();
-        return write_jpeg_response(stream, req.request_id, &jpeg, flags).await;
+        return write_jpeg_response(stream, req.request_id, &jpeg, flags, -1).await;
     }
 
     // 3. Decode on demand (blocking)
@@ -197,7 +197,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
                 }
             };
             let flags = detect_quality(&img).to_bitmask();
-            write_jpeg_response(stream, req.request_id, &jpeg, flags).await?;
+            write_jpeg_response(stream, req.request_id, &jpeg, flags, actual_pts_ms).await?;
         }
         Ok(Err(e)) => {
             eprintln!("[frame-forge] decode error: {e}");
@@ -276,19 +276,40 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
         req.task_id, req.paths.len(), req.format, req.speed
     );
 
-    send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
+    let total_input = req.paths.len();
+    send_progress(stream, "running", "decoding", 0, total_input as u32, 0.0).await?;
 
-    let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
+    let mut images: Vec<image::DynamicImage> = Vec::with_capacity(total_input);
+    let mut actual_pts_vec: Vec<i64> = Vec::with_capacity(total_input);
+    let mut last_pts: Option<i64> = None;
+
     for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
         let p = path.clone();
         let pm = *pos_ms;
-        let (bytes, ..) = tokio::task::spawn_blocking(move || crate::decoder::decode_and_encode(&p, pm, 0)).await??;
+        let (bytes, pts_ms, ..) = tokio::task::spawn_blocking(move || crate::decoder::decode_and_encode(&p, pm, 0)).await??;
+
+        // Skip duplicate frames (same actual pts as previous, e.g. two posMs values decode to same frame)
+        if last_pts == Some(pts_ms) {
+            send_progress(
+                stream, "running", "decoding",
+                (i + 1) as u32, total_input as u32,
+                (i + 1) as f64 / total_input as f64 * 50.0,
+            ).await?;
+            continue;
+        }
+
+        last_pts = Some(pts_ms);
         images.push(image::load_from_memory(&bytes)?);
+        actual_pts_vec.push(pts_ms);
         send_progress(
             stream, "running", "decoding",
-            (i + 1) as u32, req.paths.len() as u32,
-            (i + 1) as f64 / req.paths.len() as f64 * 50.0,
+            (i + 1) as u32, total_input as u32,
+            (i + 1) as f64 / total_input as f64 * 50.0,
         ).await?;
+    }
+
+    if images.is_empty() {
+        anyhow::bail!("no unique frames after deduplication");
     }
 
     // 先裁切（用户指定的归一化区域）
@@ -317,13 +338,14 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
         (images[0].width(), images[0].height())
     };
 
-    let n = req.paths.len();
+    let n = images.len();
     let speed = req.speed.max(0.01);
+    // Compute delays from actual decoded pts differences (accurate for both CFR and VFR)
     let delays_ms: Vec<u32> = (0..n).map(|i| {
         let gap_ms = if i + 1 < n {
-            (req.paths[i + 1].1 - req.paths[i].1).unsigned_abs() as f32
+            (actual_pts_vec[i + 1] - actual_pts_vec[i]).unsigned_abs() as f32
         } else if i > 0 {
-            (req.paths[i].1 - req.paths[i - 1].1).unsigned_abs() as f32
+            (actual_pts_vec[i] - actual_pts_vec[i - 1]).unsigned_abs() as f32
         } else {
             200.0
         };

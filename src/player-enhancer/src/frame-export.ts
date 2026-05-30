@@ -33,6 +33,11 @@ let _autoScrollRaf: number | null = null
 let _lastTouchX = 0
 let _lastTouchY = 0
 
+// Frame index from Rust daemon (exact frame timestamps, demux-only)
+let _frameIndex: Array<{ms: number; isKey: boolean}> | null = null
+let _fiMinIdx = 0   // first visible frame in _frameIndex
+let _fiMaxIdx = -1  // last visible frame in _frameIndex
+
 // Cached state for modal restore (survives close/reopen if same item + position)
 interface SavedModalState {
   itemId: string
@@ -42,6 +47,8 @@ interface SavedModalState {
   maxPosMs: number
   fpsFrac: FpsFrac
   lastClickedIdx: number
+  fiMinIdx: number
+  fiMaxIdx: number
 }
 let _savedState: SavedModalState | null = null
 
@@ -101,6 +108,8 @@ interface FrameEntry {
   junkReason: string | null
   loadError?: boolean
   removed?: boolean
+  actualPtsMs?: number   // normalized frame start time from X-Frame-Pts-Ms header
+  blobUrl?: string       // browser blob URL (not persisted in savedState)
 }
 
 function getBaseUrl(): string {
@@ -160,12 +169,30 @@ async function fetchVideoFps(): Promise<FpsFrac> {
   }
 }
 
+async function fetchFrameIndex(): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${getBaseUrl()}/JellyfinSuite/SeekPreview/${_itemId}/frame-index?api_key=${encodeURIComponent(getToken())}`
+    )
+    if (!res.ok) return false
+    const data = await res.json() as { frames: Array<{ms: number; isKey: boolean}>; fps: {num: number; den: number} }
+    if (data.fps.num > 0 && data.fps.den > 0) {
+      _fpsFrac = { num: Number(data.fps.num), den: Number(data.fps.den) }
+    }
+    _frameIndex = data.frames
+    return data.frames.length > 0
+  } catch {
+    return false
+  }
+}
+
 function frameInterval(): number {
   return _fpsFrac.den * 1000 / _fpsFrac.num
 }
 
 function frameToMs(idx: number): number {
-  return Math.round(idx * _fpsFrac.den * 1000 / _fpsFrac.num)
+  // ceil ensures posMs >= actual frame timestamp so FFmpeg seek lands on the correct frame
+  return Math.ceil(idx * _fpsFrac.den * 1000 / _fpsFrac.num)
 }
 
 function msToFrameIdx(ms: number): number {
@@ -193,6 +220,7 @@ function escHandler(e: KeyboardEvent): void {
 
 export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
   _videoEl = videoEl
+  if (itemId !== _itemId) _frameIndex = null  // new item — discard cached index
   _itemId = itemId
   _activeTaskId = ''
 
@@ -241,6 +269,8 @@ export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string):
     _maxPosMs = _savedState.maxPosMs
     _fpsFrac = _savedState.fpsFrac
     _lastClickedIdx = _savedState.lastClickedIdx
+    _fiMinIdx = _savedState.fiMinIdx
+    _fiMaxIdx = _savedState.fiMaxIdx
     _prefetchTotal = 0
     _prefetchDone = 0
     showGridPage()
@@ -273,15 +303,21 @@ function applyDragToPoint(x: number, y: number): void {
 function closeModal(): void {
   stopAutoScroll()
   // Save state before closing so it can be restored on reopen
+  // Revoke all blob URLs before clearing frames
+  _frames.forEach(f => { if (f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = undefined } })
+
   if (_itemId && _frames.length > 0) {
     _savedState = {
       itemId: _itemId,
-      frames: _frames.map(f => ({ ...f })),
+      // blobUrl is a browser resource — exclude from saved state
+      frames: _frames.map(({ blobUrl: _b, ...rest }) => rest),
       exportType: _exportType,
       minPosMs: _minPosMs,
       maxPosMs: _maxPosMs,
       fpsFrac: { ..._fpsFrac },
       lastClickedIdx: _lastClickedIdx,
+      fiMinIdx: _fiMinIdx,
+      fiMaxIdx: _fiMaxIdx,
     }
   }
 
@@ -368,6 +404,8 @@ function showGridPage(): void {
   })
 
   wireParams()
+  // If params panel was already open (e.g. returning from progress page), re-wire its internal buttons
+  if (_paramsOpen) wireParamsPanel()
 }
 
 function lossyQualityOptions(val: number): string {
@@ -602,17 +640,40 @@ async function loadInitialFrames(): Promise<void> {
   const durationMs = (isFinite(dur) && dur > 0) ? dur * 1000 : Number.MAX_SAFE_INTEGER
   const centerMs = Math.round(_videoEl.currentTime * 1000)
 
-  _fpsFrac = await fetchVideoFps()
-  const startMs = Math.max(0, centerMs - 1000)
-  const endMs = Math.min(durationMs, centerMs + 1000)
-  const positions = samplePositionsInRange(startMs, endMs)
+  const hasIndex = await fetchFrameIndex()
 
-  _minPosMs = positions[0] ?? centerMs
-  _maxPosMs = positions[positions.length - 1] ?? centerMs
-  _frames = positions.map(posMs => ({ posMs, selected: true, jpegUrl: '', isJunk: false, junkReason: null }))
-  renderGrid()
+  if (hasIndex && _frameIndex && _frameIndex.length > 0) {
+    const startMs = Math.max(0, centerMs - 1000)
+    const endMs   = centerMs + 1000
 
-  await prefetchAndStream(positions, 320)
+    let startFi = _frameIndex.findIndex(f => f.ms >= startMs)
+    if (startFi < 0) startFi = 0
+    let endFi = _frameIndex.findIndex(f => f.ms > endMs)
+    if (endFi < 0) endFi = _frameIndex.length
+    endFi = Math.max(startFi, endFi - 1)
+
+    _fiMinIdx = startFi
+    _fiMaxIdx = endFi
+
+    const slice = _frameIndex.slice(startFi, endFi + 1)
+    _minPosMs = slice[0]?.ms ?? centerMs
+    _maxPosMs = slice[slice.length - 1]?.ms ?? centerMs
+    _frames = slice.map(f => ({
+      posMs: f.ms, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
+    }))
+    renderGrid()
+    await prefetchAndStream(slice.map(f => f.ms), 320)
+  } else {
+    if (!hasIndex) _fpsFrac = await fetchVideoFps()
+    const startMs = Math.max(0, centerMs - 1000)
+    const endMs   = Math.min(durationMs, centerMs + 1000)
+    const positions = samplePositionsInRange(startMs, endMs)
+    _minPosMs = positions[0] ?? centerMs
+    _maxPosMs = positions[positions.length - 1] ?? centerMs
+    _frames = positions.map(posMs => ({ posMs, selected: true, jpegUrl: '', isJunk: false, junkReason: null }))
+    renderGrid()
+    await prefetchAndStream(positions, 320)
+  }
 }
 
 async function prefetchAndStream(positions: number[], width: number): Promise<void> {
@@ -674,37 +735,66 @@ async function expandFrames(direction: number): Promise<void> {
   if (btn) btn.setAttribute('disabled', '')
 
   try {
-    let queryStart: number, queryEnd: number
-    if (direction < 0) {
-      queryEnd = _minPosMs
-      queryStart = Math.max(0, _minPosMs - rangeMs)
-    } else {
-      queryStart = _maxPosMs
-      queryEnd = Math.min(durationMs, _maxPosMs + rangeMs)
-    }
+    if (_frameIndex && _frameIndex.length > 0) {
+      let sliceStart: number, sliceEnd: number
 
-    const newPositions = samplePositionsInRange(queryStart, queryEnd)
+      if (direction < 0) {
+        if (_fiMinIdx <= 0) return
+        const targetMs = _frameIndex[_fiMinIdx].ms - rangeMs
+        sliceStart = 0
+        for (let i = _fiMinIdx - 1; i >= 0; i--) {
+          if (_frameIndex[i].ms < Math.max(0, targetMs)) { sliceStart = i + 1; break }
+        }
+        sliceEnd = _fiMinIdx - 1
+        _fiMinIdx = sliceStart
+        _minPosMs = _frameIndex[sliceStart].ms
+      } else {
+        if (_fiMaxIdx >= _frameIndex.length - 1) return
+        sliceStart = _fiMaxIdx + 1
+        const targetMs = _frameIndex[_fiMaxIdx].ms + rangeMs
+        sliceEnd = _frameIndex.length - 1
+        for (let i = sliceStart; i < _frameIndex.length; i++) {
+          if (_frameIndex[i].ms > targetMs) { sliceEnd = i - 1; break }
+        }
+        _fiMaxIdx = sliceEnd
+        _maxPosMs = _frameIndex[sliceEnd].ms
+      }
 
-    if (newPositions.length > 0) {
-      if (direction < 0) _minPosMs = newPositions[0]
-      else _maxPosMs = newPositions[newPositions.length - 1]
+      const slice = _frameIndex.slice(sliceStart, sliceEnd + 1)
+      if (slice.length === 0) return
 
-      const placeholders: FrameEntry[] = newPositions.map((posMs) => ({
-        posMs,
-        selected: true,
-        jpegUrl: '',
-        isJunk: false,
-        junkReason: null,
+      const placeholders: FrameEntry[] = slice.map(f => ({
+        posMs: f.ms, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
       }))
       if (direction < 0) _frames = [...placeholders, ..._frames]
       else _frames.push(...placeholders)
       renderGrid()
-
-      await prefetchAndStream(newPositions, 320)
+      await prefetchAndStream(slice.map(f => f.ms), 320)
     } else {
-      // No new frames — advance the boundary anyway so repeated clicks move forward
-      if (direction < 0) _minPosMs = queryStart
-      else _maxPosMs = queryEnd
+      let queryStart: number, queryEnd: number
+      if (direction < 0) {
+        queryEnd   = _minPosMs
+        queryStart = Math.max(0, _minPosMs - rangeMs)
+      } else {
+        queryStart = _maxPosMs
+        queryEnd   = Math.min(durationMs, _maxPosMs + rangeMs)
+      }
+
+      const newPositions = samplePositionsInRange(queryStart, queryEnd)
+      if (newPositions.length > 0) {
+        if (direction < 0) _minPosMs = newPositions[0]
+        else _maxPosMs = newPositions[newPositions.length - 1]
+        const placeholders: FrameEntry[] = newPositions.map(posMs => ({
+          posMs, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
+        }))
+        if (direction < 0) _frames = [...placeholders, ..._frames]
+        else _frames.push(...placeholders)
+        renderGrid()
+        await prefetchAndStream(newPositions, 320)
+      } else {
+        if (direction < 0) _minPosMs = queryStart
+        else _maxPosMs = queryEnd
+      }
     }
   } finally {
     if (btn) btn.removeAttribute('disabled')
@@ -823,12 +913,48 @@ function updateFrameImage(idx: number): void {
   const placeholder = card.querySelector<HTMLElement>('.jfs-fe-loading, .jfs-fe-err-ph')
   const existing = placeholder ?? card.querySelector<HTMLImageElement>('img[data-img-idx]')
   if (!existing) return
-  const img = document.createElement('img')
-  img.src = f.jpegUrl
-  img.alt = formatTime(f.posMs)
-  img.dataset.imgIdx = String(idx)
-  existing.replaceWith(img)
-  // Error handled by delegated capture listener in wireGridHandlers
+
+  fetch(f.jpegUrl).then(resp => {
+    if (!resp.ok) throw new Error('not ok')
+
+    const ptsHeader = resp.headers.get('X-Frame-Pts-Ms')
+    if (ptsHeader) {
+      const pts = parseInt(ptsHeader)
+      if (!isNaN(pts) && pts >= 0) {
+        _frames[idx].actualPtsMs = pts
+        // Update footer label with accurate frame start time
+        const foot = card.querySelector<HTMLElement>('.jfs-fe-card-foot')
+        if (foot) {
+          const sel = _frames[idx]?.selected ?? false
+          foot.innerHTML = `<input type="checkbox" ${sel ? 'checked' : ''} data-idx="${idx}" class="jfs-fe-cb" style="cursor:pointer" /> ${formatTime(pts)} <span class="jfs-fe-frnum">#${msToFrameIdx(pts)}</span>`
+        }
+      }
+    }
+
+    return resp.blob()
+  }).then(blob => {
+    const f2 = _frames[idx]
+    if (!f2) return
+    if (f2.blobUrl) URL.revokeObjectURL(f2.blobUrl)
+    const url = URL.createObjectURL(blob)
+    f2.blobUrl = url
+    const img = document.createElement('img')
+    img.src = url
+    img.alt = formatTime(f2.posMs)
+    img.dataset.imgIdx = String(idx)
+    // Check if card/placeholder still exists (grid may have been rebuilt)
+    const currentCard = grid.querySelector<HTMLElement>(`.jfs-fe-card[data-idx="${idx}"]`)
+    const currentSlot = currentCard?.querySelector<HTMLElement>('.jfs-fe-loading, .jfs-fe-err-ph')
+      ?? currentCard?.querySelector<HTMLImageElement>('img[data-img-idx]')
+    if (currentSlot) currentSlot.replaceWith(img)
+    else existing.replaceWith(img)
+  }).catch(() => {
+    _frames[idx].loadError = true
+    const errDiv = document.createElement('div')
+    errDiv.className = 'jfs-fe-err-ph'
+    errDiv.textContent = t('frameExport.loadError')
+    existing.replaceWith(errDiv)
+  })
 }
 
 // Wire all grid-level delegated event listeners — called ONCE from showGridPage().
@@ -1038,7 +1164,7 @@ function renderGrid(): void {
           </div>
           <div class="jfs-fe-card-foot">
             <input type="checkbox" ${f.selected ? 'checked' : ''} data-idx="${i}" class="jfs-fe-cb" style="cursor:pointer" />
-            ${formatTime(f.posMs)} <span class="jfs-fe-frnum">#${msToFrameIdx(f.posMs)}</span>
+            ${(() => { const t = f.actualPtsMs ?? f.posMs; return `${formatTime(t)} <span class="jfs-fe-frnum">#${msToFrameIdx(t)}</span>` })()}
           </div>
         </div>`
     })
@@ -1085,14 +1211,18 @@ function updateExpandButtons(): void {
   const dur = _videoEl?.duration ?? 0
   const maxMs = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
   if (prevBtn) {
-    if (_minPosMs <= 0) {
+    const atStart = _frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0
+    if (atStart) {
       prevBtn.setAttribute('disabled', ''); prevBtn.textContent = t('frameExport.atStart')
     } else {
       prevBtn.removeAttribute('disabled'); prevBtn.textContent = t('frameExport.loadPrev')
     }
   }
   if (nextBtn) {
-    if (maxMs > 0 && _maxPosMs >= maxMs - frameInterval()) {
+    const atEnd = _frameIndex
+      ? _fiMaxIdx >= _frameIndex.length - 1
+      : (maxMs > 0 && _maxPosMs >= maxMs - frameInterval())
+    if (atEnd) {
       nextBtn.setAttribute('disabled', ''); nextBtn.textContent = t('frameExport.atEnd')
     } else {
       nextBtn.removeAttribute('disabled'); nextBtn.textContent = t('frameExport.loadNext')
@@ -1405,7 +1535,15 @@ function openCropPopover(): void {
 // ── Generate / Progress / Result ────────────────────────────────────────────
 
 async function submitGenerate(): Promise<void> {
-  const selected = _frames.filter(f => f.selected && !f.removed)
+  const allSelected = _frames.filter(f => f.selected && !f.removed)
+  // Deduplicate by rounded posMs to avoid sending the same frame twice
+  const seenMs = new Set<number>()
+  const selected = allSelected.filter(f => {
+    const ms = Math.round(f.posMs)
+    if (seenMs.has(ms)) return false
+    seenMs.add(ms)
+    return true
+  })
   if (selected.length < 2) { alert('至少需要选择 2 帧'); return }
   if (selected.length > 240 && !confirm(`选中 ${selected.length} 帧，文件可能较大。继续？`)) return
 
@@ -1445,17 +1583,15 @@ async function submitGenerate(): Promise<void> {
 export function showProgressPage(taskId: string): void {
   _activeTaskId = taskId
   if (!_modalRoot) return
-  Object.assign(_modalRoot.style, { bottom: '12px', left: '50%', transform: 'translateX(-50%)' })
-
-  let _minimized = false
+  _modalRoot.style.display = ''
+  Object.assign(_modalRoot.style, { top: '', bottom: '12px', left: '50%', transform: 'translateX(-50%)' })
 
   _modalRoot.innerHTML = `
     <div class="jfs-fe-osd" style="min-width:480px;max-width:640px;margin:0 auto;height:auto">
       <div class="jfs-fe-row sep-b">
         <span class="jfs-fe-title">生成中</span>
-        <span id="jfs-fe-prog-mini-pct" class="jfs-fe-muted" style="display:none;font-size:11px;margin-left:6px"></span>
         <div class="jfs-fe-spacer"></div>
-        <button id="jfs-fe-minimize" class="jfs-fe-btn g" style="padding:2px 8px;font-size:15px;line-height:1" title="最小化">−</button>
+        <button id="jfs-fe-minimize" class="jfs-fe-btn g" style="padding:2px 8px;font-size:15px;line-height:1" title="最小化到控制栏">−</button>
         <button id="jfs-fe-cancel" class="jfs-fe-btn">取消</button>
       </div>
       <div id="jfs-fe-prog-body" style="padding:16px 16px 20px">
@@ -1467,17 +1603,40 @@ export function showProgressPage(taskId: string): void {
     </div>
   `
 
+  let evSrc: EventSource
+  let indicatorAc: AbortController | null = null
+
+  function hideIndicator(): void {
+    indicatorAc?.abort()
+    indicatorAc = null
+    const ind = document.getElementById('jfs-enhancer-prog-indicator')
+    if (ind) ind.style.display = 'none'
+    if (_modalRoot) _modalRoot.style.display = ''
+  }
+
   document.getElementById('jfs-fe-minimize')?.addEventListener('click', () => {
-    _minimized = !_minimized
-    const body    = document.getElementById('jfs-fe-prog-body')
-    const miniPct = document.getElementById('jfs-fe-prog-mini-pct')
-    const minBtn  = document.getElementById('jfs-fe-minimize')
-    if (body)    body.style.display    = _minimized ? 'none' : ''
-    if (miniPct) miniPct.style.display = _minimized ? '' : 'none'
-    if (minBtn)  minBtn.textContent    = _minimized ? '□' : '−'
+    if (!_modalRoot) return
+    const pct = document.getElementById('jfs-fe-progress-text')?.textContent ?? '0%'
+    _modalRoot.style.display = 'none'
+    setGesturesSuspended(false)
+    const ind = document.getElementById('jfs-enhancer-prog-indicator')
+    if (ind) {
+      ind.textContent = pct
+      ind.style.display = ''
+      indicatorAc = new AbortController()
+      ind.addEventListener('click', () => {
+        indicatorAc?.abort()
+        indicatorAc = null
+        ind.style.display = 'none'
+        if (_modalRoot) _modalRoot.style.display = ''
+        setGesturesSuspended(true)
+      }, { signal: indicatorAc.signal })
+    }
   })
 
   document.getElementById('jfs-fe-cancel')?.addEventListener('click', () => {
+    evSrc?.close()
+    hideIndicator()
     fetch(
       `${getBaseUrl()}/JellyfinSuite/FrameExport/Cancel/${taskId}?api_key=${encodeURIComponent(getToken())}`,
       { method: 'POST' }
@@ -1485,7 +1644,7 @@ export function showProgressPage(taskId: string): void {
     closeModal()
   })
 
-  const evSrc = new EventSource(
+  evSrc = new EventSource(
     `${getBaseUrl()}/JellyfinSuite/FrameExport/Progress?taskId=${encodeURIComponent(taskId)}&api_key=${encodeURIComponent(getToken())}`
   )
   let retries = 0
@@ -1493,20 +1652,27 @@ export function showProgressPage(taskId: string): void {
   evSrc.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data) as TaskProgressEvent
-      const bar     = document.getElementById('jfs-fe-progress-bar')
-      const text    = document.getElementById('jfs-fe-progress-text')
-      const miniPct = document.getElementById('jfs-fe-prog-mini-pct')
-      if (bar)     bar.style.width  = `${data.percent}%`
-      if (text)    text.textContent = `${Math.round(data.percent)}%`
-      if (miniPct) miniPct.textContent = `${Math.round(data.percent)}%`
+      const bar  = document.getElementById('jfs-fe-progress-bar')
+      const text = document.getElementById('jfs-fe-progress-text')
+      const ind  = document.getElementById('jfs-enhancer-prog-indicator')
+      if (bar)  bar.style.width  = `${data.percent}%`
+      if (text) text.textContent = `${Math.round(data.percent)}%`
+      if (ind && ind.style.display !== 'none') ind.textContent = `${Math.round(data.percent)}%`
       if (data.status === 'complete' && data.resultUrl) {
-        evSrc.close(); showResultPage(data.resultUrl, data.fileSize ?? 0)
+        evSrc.close()
+        hideIndicator()
+        showResultPage(data.resultUrl, data.fileSize ?? 0)
       } else if (data.status === 'error') {
         evSrc.close()
+        hideIndicator()
         if (bar) { bar.style.width = '100%'; bar.style.background = 'rgba(239,68,68,0.8)' }
         if (text) text.textContent = data.error ? data.error.substring(0, 40) : '生成失败'
         const cancelBtn = document.getElementById('jfs-fe-cancel')
         if (cancelBtn) cancelBtn.textContent = '关闭'
+      } else if (data.status === 'cancelled') {
+        evSrc.close()
+        hideIndicator()
+        closeModal()
       }
     } catch { /* ignore */ }
   }
@@ -1514,6 +1680,7 @@ export function showProgressPage(taskId: string): void {
   evSrc.onerror = () => {
     if (retries++ < 3) return
     evSrc.close()
+    hideIndicator()
     const text = document.getElementById('jfs-fe-progress-text')
     if (text) text.textContent = '连接中断，请重试'
   }
@@ -1521,7 +1688,7 @@ export function showProgressPage(taskId: string): void {
 
 export function showResultPage(resultUrl: string, fileSize: number): void {
   if (!_modalRoot) return
-  Object.assign(_modalRoot.style, { bottom: '12px', left: '50%', transform: 'translateX(-50%)' })
+  Object.assign(_modalRoot.style, { top: '', bottom: '12px', left: '50%', transform: 'translateX(-50%)' })
 
   const fullUrl = resultUrl.startsWith('http')
     ? resultUrl

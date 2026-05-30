@@ -227,7 +227,11 @@ function injectPlayerButtons(
   const subtitleObserver = new MutationObserver(updateSubtitleToggleVisibility);
   subtitleObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-  // ── Frame Export button ──────────────────────────────────────────────────
+  // ── Frame Export button + progress indicator ────────────────────────────
+  const frameExportWrap = document.createElement('div');
+  frameExportWrap.className = 'jfs-enhancer-frameexport-wrap';
+  frameExportWrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
+
   const frameExportBtn = document.createElement('button');
   frameExportBtn.className = 'jfs-enhancer-btn';
   frameExportBtn.title = t('frameExport.button');
@@ -235,22 +239,30 @@ function injectPlayerButtons(
   frameExportBtn.addEventListener('click', () => {
     const itemId = getItemId();
     if (!itemId) return;
-    // Placeholder: openFrameExportModal will be implemented in Phase 3 (US1)
     const videoEl = _currentVideoEl;
     if (!videoEl) return;
     import('./frame-export').then(m => m.openFrameExportModal(videoEl, itemId));
   });
+
+  const progIndicator = document.createElement('button');
+  progIndicator.id = 'jfs-enhancer-prog-indicator';
+  progIndicator.className = 'jfs-enhancer-prog-indicator';
+  progIndicator.style.display = 'none';
+  progIndicator.textContent = '0%';
+
+  frameExportWrap.appendChild(frameExportBtn);
+  frameExportWrap.appendChild(progIndicator);
 
   // Insert after the screenshot wrap
   const dirLtr = osdButtons.querySelector<HTMLElement>('div[dir="ltr"]');
   if (dirLtr) {
     dirLtr.after(frameStepWrap);
     frameStepWrap.after(screenshotWrap);
-    screenshotWrap.after(frameExportBtn);
+    screenshotWrap.after(frameExportWrap);
   } else {
     osdButtons.append(frameStepWrap);
     osdButtons.append(screenshotWrap);
-    osdButtons.append(frameExportBtn);
+    osdButtons.append(frameExportWrap);
   }
 
 }

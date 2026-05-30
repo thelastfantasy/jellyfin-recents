@@ -1,8 +1,10 @@
-use crate::decoder::decode_and_encode;
+use crate::decoder::{decode_and_encode, index_frames};
 use crate::disk_cache::DiskCache;
 use crate::protocol::{read_priority, read_req_body, write_ack, write_response};
 use lru::LruCache;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -13,6 +15,7 @@ const PRIORITY_FETCH: u8 = 0x01;
 const PRIORITY_PREFETCH: u8 = 0x02;
 const PRIORITY_LIST: u8 = 0x03;
 const PRIORITY_FRAME_INFO: u8 = 0x04;
+const PRIORITY_INDEX_FRAMES: u8 = 0x05;
 const CACHE_CAP: usize = 20;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -24,7 +27,7 @@ struct CacheKey {
 
 #[derive(Clone)]
 struct FrameMeta {
-    frame_idx: i64,
+    actual_pts_ms: i64,
     fps_num: i64,
     fps_den: i64,
 }
@@ -43,6 +46,8 @@ pub struct State {
     active_item_id: Mutex<Option<String>>,
     /// Limits concurrent interactive FETCH decodes.
     decode_sem: Arc<Semaphore>,
+    /// Per-item frame index: (pts_ms, is_keyframe)[] + fps. Keyed by item_id.
+    frame_index: Mutex<HashMap<String, Arc<(Vec<(i64, bool)>, i64, i64)>>>,
 }
 
 impl State {
@@ -52,6 +57,7 @@ impl State {
             disk,
             active_item_id: Mutex::new(None),
             decode_sem: Arc::new(Semaphore::new(1)),
+            frame_index: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -108,7 +114,7 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                         eprintln!("[seek-preview] FETCH disk hit @{pos_ms}ms ({} B)", jpeg.len());
                         let arc = Arc::new(jpeg);
                         // fps unknown from disk cache; store sentinel meta so later FRAME_INFO still triggers decode
-                        let entry = CacheEntry { jpeg: arc.clone(), meta: FrameMeta { frame_idx: -1, fps_num: 0, fps_den: 1 } };
+                        let entry = CacheEntry { jpeg: arc.clone(), meta: FrameMeta { actual_pts_ms: -1, fps_num: 0, fps_den: 1 } };
                         state.cache.lock().await.put(key, entry);
                         let _ = write_response(&mut stream, req.request_id, &arc).await;
                         continue;
@@ -143,7 +149,7 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                         bytes.len()
                     );
                     disk.write(&item_id, &path, frame_idx, pos_ms, width, &bytes);
-                    Ok((bytes, FrameMeta { frame_idx, fps_num, fps_den }))
+                    Ok((bytes, FrameMeta { actual_pts_ms, fps_num, fps_den }))
                 }).await {
                     Ok(Ok((bytes, meta))) => {
                         let arc = Arc::new(bytes);
@@ -169,6 +175,12 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
 
             PRIORITY_FRAME_INFO => {
                 if handle_frame_info(&mut stream, state.clone()).await.is_err() {
+                    break;
+                }
+            }
+
+            PRIORITY_INDEX_FRAMES => {
+                if handle_index_frames(&mut stream, state.clone()).await.is_err() {
                     break;
                 }
             }
@@ -200,7 +212,8 @@ async fn handle_frame_info(stream: &mut UnixStream, state: Arc<State>) -> anyhow
     };
 
     let meta = if let Some(m) = cached_meta {
-        eprintln!("[seek-preview] FRAME_INFO RAM hit @{pos_ms}ms f{}", m.frame_idx);
+        let frame_idx = compute_frame_idx(m.actual_pts_ms, m.fps_num, m.fps_den);
+        eprintln!("[seek-preview] FRAME_INFO RAM hit @{pos_ms}ms f{frame_idx}");
         m
     } else {
         // Decode to get accurate pts + fps; also populates RAM cache for future calls
@@ -212,27 +225,100 @@ async fn handle_frame_info(stream: &mut UnixStream, state: Arc<State>) -> anyhow
             let _p = permit;
             let (bytes, actual_pts_ms, fps_num, fps_den) = decode_and_encode(&path, pos_ms, req.width.max(1))?;
             let frame_idx = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-            Ok((bytes, FrameMeta { frame_idx, fps_num, fps_den }))
+            eprintln!("[seek-preview] FRAME_INFO decoded @{pos_ms}ms f{frame_idx}");
+            Ok((bytes, FrameMeta { actual_pts_ms, fps_num, fps_den }))
         }).await;
 
         match result {
             Ok(Ok((bytes, meta))) => {
-                // Store in RAM cache so subsequent FETCH/FRAME_INFO calls for same key are instant
                 let arc = Arc::new(bytes);
                 let entry = CacheEntry { jpeg: arc, meta: meta.clone() };
                 s2.cache.lock().await.put(k2, entry);
-                eprintln!("[seek-preview] FRAME_INFO decoded @{pos_ms}ms f{}", meta.frame_idx);
                 meta
             }
-            _ => FrameMeta { frame_idx: -1, fps_num: 0, fps_den: 1 },
+            _ => FrameMeta { actual_pts_ms: -1, fps_num: 0, fps_den: 1 },
         }
     };
 
+    // Wire: request_id(4) + actual_pts_ms(8) + fps_num(8) + fps_den(8) = 28 bytes
+    // C# reads actual_pts_ms at offset 4 and computes frame_idx from it.
     let mut buf = [0u8; 28];
     buf[0..4].copy_from_slice(&req.request_id.to_le_bytes());
-    buf[4..12].copy_from_slice(&meta.frame_idx.to_le_bytes());
+    buf[4..12].copy_from_slice(&meta.actual_pts_ms.to_le_bytes());
     buf[12..20].copy_from_slice(&meta.fps_num.to_le_bytes());
     buf[20..28].copy_from_slice(&meta.fps_den.to_le_bytes());
+    stream.write_all(&buf).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+/// INDEX_FRAMES (0x05): enumerate all video frame timestamps without decoding.
+/// Request:  [request_id(4)][item_id(32)][path_len(4)][path(N)]
+/// Response: [request_id(4)][frame_count(4)][fps_num(8)][fps_den(8)]
+///           ×frame_count: [pts_ms(8)][flags(1): bit0=keyframe]
+async fn handle_index_frames(stream: &mut UnixStream, state: Arc<State>) -> anyhow::Result<()> {
+    let request_id = stream.read_u32_le().await?;
+    let mut id_bytes = [0u8; 32];
+    stream.read_exact(&mut id_bytes).await?;
+    let item_id = String::from_utf8(id_bytes.to_vec())?;
+    let path_len = stream.read_u32_le().await? as usize;
+    let mut path_bytes = vec![0u8; path_len];
+    stream.read_exact(&mut path_bytes).await?;
+    let path = PathBuf::from(String::from_utf8(path_bytes)?);
+
+    // RAM cache check
+    let cached = state.frame_index.lock().await.get(&item_id).cloned();
+    let index = if let Some(arc) = cached {
+        eprintln!("[seek-preview] INDEX_FRAMES cache hit for {item_id}");
+        arc
+    } else {
+        let path2 = path.clone();
+        let result = tokio::task::spawn_blocking(move || index_frames(&path2)).await;
+        match result {
+            Ok(Ok((frames, fps_num, fps_den))) => {
+                eprintln!(
+                    "[seek-preview] INDEX_FRAMES {} frames fps={}/{} for {item_id}",
+                    frames.len(), fps_num, fps_den
+                );
+                let arc = Arc::new((frames, fps_num, fps_den));
+                state.frame_index.lock().await.insert(item_id.clone(), arc.clone());
+                arc
+            }
+            Ok(Err(e)) => {
+                eprintln!("[seek-preview] INDEX_FRAMES error for {item_id}: {e}");
+                // Return empty response
+                let mut buf = [0u8; 24];
+                buf[0..4].copy_from_slice(&request_id.to_le_bytes());
+                // frame_count=0, fps_num=0, fps_den=1
+                buf[20..24].copy_from_slice(&1i32.to_le_bytes());
+                stream.write_all(&buf).await?;
+                stream.flush().await?;
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("[seek-preview] INDEX_FRAMES spawn error: {e}");
+                let mut buf = [0u8; 24];
+                buf[0..4].copy_from_slice(&request_id.to_le_bytes());
+                buf[20..24].copy_from_slice(&1i32.to_le_bytes());
+                stream.write_all(&buf).await?;
+                stream.flush().await?;
+                return Ok(());
+            }
+        }
+    };
+
+    let (frames, fps_num, fps_den) = index.as_ref();
+    let frame_count = frames.len() as u32;
+
+    let mut buf = Vec::with_capacity(24 + frames.len() * 9);
+    buf.extend_from_slice(&request_id.to_le_bytes());
+    buf.extend_from_slice(&frame_count.to_le_bytes());
+    buf.extend_from_slice(&fps_num.to_le_bytes());
+    buf.extend_from_slice(&fps_den.to_le_bytes());
+    for (pts_ms, is_key) in frames {
+        buf.extend_from_slice(&pts_ms.to_le_bytes());
+        buf.push(if *is_key { 1u8 } else { 0u8 });
+    }
     stream.write_all(&buf).await?;
     stream.flush().await?;
     Ok(())

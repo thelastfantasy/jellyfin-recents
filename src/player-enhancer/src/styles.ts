@@ -121,6 +121,32 @@ const JELLYFIN_OVERRIDES = `
     transform: translateX(12px);
   }
 
+  /* Frame export progress indicator (minimized state in controls bar) */
+  .jfs-enhancer-prog-indicator {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 10px;
+    cursor: pointer;
+    color: #fff;
+    background: rgba(0, 164, 220, 0.25);
+    border: 1px solid rgba(0, 164, 220, 0.6);
+    border-radius: 20px;
+    outline: none;
+    font-size: 12px;
+    font-weight: bold;
+    opacity: 0.9;
+    transition: opacity 0.15s, background 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+    touch-action: manipulation;
+  }
+  .jfs-enhancer-prog-indicator:hover  { opacity: 1; background: rgba(0, 164, 220, 0.45); }
+  .jfs-enhancer-prog-indicator:active { background: rgba(0, 164, 220, 0.65); }
+
   /* Brightness/Volume OSD (left/right vertical bar) */
   .jfs-enhancer-osd {
     position: fixed;

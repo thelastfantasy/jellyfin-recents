@@ -113,6 +113,39 @@ public class SeekPreviewController : ControllerBase
     }
 
     /// <summary>
+    /// Returns all video frame timestamps (demux-only, no decode) for exact frame-boundary seeks.
+    /// Result is cached in the Rust daemon per item_id.
+    /// </summary>
+    [HttpGet("{itemId}/frame-index")]
+    [ProducesResponseType(typeof(FrameIndexDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetFrameIndex(
+        [FromRoute] Guid itemId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_seekPreview.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "seek-preview not available");
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+            return NotFound();
+
+        await _seekPreview.EnsureStartedAsync(cancellationToken);
+
+        var result = await _seekPreview.FrameIndexAsync(item.Path, itemId, cancellationToken);
+        if (result == null)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame index not available");
+
+        return Ok(new FrameIndexDto
+        {
+            Frames = [.. result.Value.Frames
+                .Select(f => new FrameIndexEntryDto { Ms = f.Ms, IsKey = f.IsKey })],
+            Fps = new FpsFracDto { Num = result.Value.FpsNum, Den = result.Value.FpsDen },
+        });
+    }
+
+    /// <summary>
     /// Server-Sent Events stream that emits positionMs values as frames become available on disk.
     /// The frontend subscribes once per video and uses events to warm the browser cache and
     /// populate _loadedKeys, enabling instant display during drag-seek.

@@ -22,6 +22,7 @@ public class TaskState
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
     public int? ProcessId { get; set; }
+    public CancellationTokenSource Cts { get; } = new CancellationTokenSource();
     public Channel<TaskProgress> ProgressChannel { get; } =
         Channel.CreateUnbounded<TaskProgress>();
 }
@@ -105,6 +106,7 @@ public sealed class FrameExportTaskManager : IDisposable
         if (_tasks.TryRemove(taskId, out var state))
         {
             state.ProgressChannel.Writer.TryComplete();
+            state.Cts.Dispose();
             try { Directory.Delete(state.TempDir, recursive: true); }
             catch { }
             _logger.LogInformation("[FrameExport] Task deleted: {TaskId}", taskId);
@@ -118,6 +120,7 @@ public sealed class FrameExportTaskManager : IDisposable
         {
             state.Status = TaskStatus.Cancelled;
             state.Error = "Cancelled by user";
+            state.Cts.Cancel();
             state.ProgressChannel.Writer.TryWrite(new TaskProgress
             {
                 TaskId = taskId,
