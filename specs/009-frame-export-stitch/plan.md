@@ -192,3 +192,47 @@ Phase 1: Setup（crate 骨架 + 构建�?  �?Phase 2: Foundational（Rust 核�
 | POST | `/FrameExport/Cancel/{taskId}` | 取消任务（kill 子进程） |
 | GET | `/FrameExport/FrameMeta/{itemId}` | 批量帧质量元数据（可选优化） |
 | GET | `/FrameExport/Health` | 服务健康检查（daemon 是否存活�?|
+
+---
+
+## Phase 2 补丁：FrameIndex 精确帧索引（2026-05-30）
+
+### 背景
+
+原始实现用 `Math.round(frameIdx * den * 1000 / num)` 计算 posMs，对 23.976fps 视频
+约 40% 的帧会落在实际帧边界之前，导致 FFmpeg seek 返回上一帧，出现"重复帧被去重"。
+短期修复：改用 `Math.ceil`（已提交）。
+根本修复：由 Rust 读取容器帧索引，前端直接使用精确帧起始时间。
+
+### 新增组件
+
+#### seek-preview：INDEX_FRAMES 命令（0x05）
+
+- **操作**：纯 demux，不解码；读容器 packet 时间戳表
+- **实现**：`av_read_frame` loop，仅记录 (pts_ms, is_keyframe)，无 codec 上下文
+- **速度**：MP4/MKV < 1s（容器 index 随 moov/Cues 顺序读）；TS 流无索引则跳过
+- **缓存**：内存 HashMap key=(item_id, file_mtime)；磁盘 `{cache_dir}/{item_id}.fidx`（二进制）
+- **wire 格式**：
+  ```
+  请求: [0x05][request_id(4)][item_id_len(4)][item_id(N)][path_len(4)][path(N)]
+  响应: [request_id(4)][frame_count(4)][fps_num(8)][fps_den(8)]
+        ×frame_count: [pts_ms(8)][flags(1): bit0=keyframe]
+  ```
+
+#### C#：新端点
+
+```
+GET /JellyfinSuite/SeekPreview/FrameIndex/{itemId}
+响应: { frames: [{ms: number, isKey: boolean}], fps: {num: number, den: number} }
+```
+
+- 调用 `SeekPreviewService.FrameIndexAsync(filePath, itemId, ct)`
+- 失败时返回 404（前端回退到 samplePositionsInRange 兜底）
+
+#### TypeScript frame-export.ts
+
+- `openFrameExportModal` 后台请求 FrameIndex
+- 收到后替换 `_frames` 为精确帧列表；`fpsFrac` 从响应 fps 字段更新
+- `frameToMs` / `samplePositionsInRange` 仅用于 FrameIndex 不可用时的 fallback
+- 缩略图 timestamp = 帧实际 `ms` 字段，与 PotPlayer 帧号严格对应
+- 选帧 = 选数组下标，无精度损失，无重复帧
