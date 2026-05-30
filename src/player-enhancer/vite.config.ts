@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import { aliveUIVite } from '@alivecss/aliveui/vite'
 
 export default defineConfig({
+  esbuild: {
+    jsxImportSource: 'preact',
+  },
   plugins: [
     aliveUIVite({ content: ['./src/**/*.{ts,tsx,css}'] }),
   ],
