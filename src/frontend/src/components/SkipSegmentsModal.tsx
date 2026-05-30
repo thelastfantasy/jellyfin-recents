@@ -222,7 +222,7 @@ export function SkipSegmentsModal({ onClose, onConfirm, itemId, videoDurationMs 
   const hasGlobalSkips = globalSkipsLocal.some(s => s.endMs > s.startMs)
   const [ignoreGlobal, setIgnoreGlobal] = useState(false)
   const [fullTooltipPos, setFullTooltipPos] = useState<{ x: number; y: number } | null>(null)
-  const fullTooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fullTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!itemId) return
@@ -289,10 +289,10 @@ export function SkipSegmentsModal({ onClose, onConfirm, itemId, videoDurationMs 
 
   function handleAddToGlobal(seg: SkipSegment, btn: HTMLButtonElement) {
     if (globalSkipsLocal.length >= 2) {
-      if (fullTooltipTimer.current) clearTimeout(fullTooltipTimer.current)
+      if (fullTooltipTimerRef.current) clearTimeout(fullTooltipTimerRef.current)
       const rect = btn.getBoundingClientRect()
       setFullTooltipPos({ x: rect.left + rect.width / 2, y: rect.top })
-      fullTooltipTimer.current = setTimeout(() => setFullTooltipPos(null), 2500)
+      fullTooltipTimerRef.current = setTimeout(() => setFullTooltipPos(null), 2500)
       return
     }
     const next = [...globalSkipsLocal, { startMs: seg.startMs, endMs: seg.endMs }]

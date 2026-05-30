@@ -27,9 +27,9 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
   const seekRef = useRef(seekSeconds)
   const speedRef = useRef(speedRate)
   const trickRef = useRef(trickplayEnabled)
-  seekRef.current = seekSeconds
-  speedRef.current = speedRate
-  trickRef.current = trickplayEnabled
+  useEffect(() => { seekRef.current  = seekSeconds },      [seekSeconds])
+  useEffect(() => { speedRef.current = speedRate },        [speedRate])
+  useEffect(() => { trickRef.current = trickplayEnabled }, [trickplayEnabled])
 
   useEffect(() => {
     getEnhancerStatus()

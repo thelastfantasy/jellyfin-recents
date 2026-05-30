@@ -42,8 +42,6 @@ export function GroupSection({
   enableFolderView = false, posterUnlocked = false,
   groupIndex, totalGroups, hasPrevPage, hasNextPage, onPageNav,
 }: Props) {
-  if (group.records.length === 0) return null
-
   const { t } = useLocale()
   const cardsRef = useRef<HTMLDivElement>(null)
   const prevRectsRef = useRef<Map<string, DOMRect>>(new Map())
@@ -51,6 +49,7 @@ export function GroupSection({
   const cardClonesRef = useRef<Map<string, HTMLElement>>(new Map())
 
   useLayoutEffect(() => {
+    if (group.records.length === 0) return
     const el = cardsRef.current
     if (!el) return
 
@@ -141,6 +140,8 @@ export function GroupSection({
     if (!isLast) scrollToGroupHeader(groupIndex + 1)
     else if (hasNextPage) onPageNav('next')
   }
+
+  if (group.records.length === 0) return null
 
   return (
     <Fragment>
