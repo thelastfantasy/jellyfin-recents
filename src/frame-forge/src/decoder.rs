@@ -28,7 +28,7 @@ pub fn decode_and_encode(
     let time_base = video_stream.time_base();
 
     // Normalize pts to stream start so frame #0 = first real content frame.
-    let start_pts = video_stream.start_time().unwrap_or(0).max(0);
+    let start_pts = video_stream.start_time().max(0);
     let stream_start_ms: i64 = if start_pts > 0
         && time_base.numerator() != 0 && time_base.denominator() != 0 {
         (start_pts as f64 * time_base.numerator() as f64 * 1000.0
@@ -62,9 +62,6 @@ pub fn decode_and_encode(
         decoder.send_packet(&packet)?;
         let mut decoded = ffmpeg_next::frame::Video::empty();
         while decoder.receive_frame(&mut decoded).is_ok() {
-            if decoded_rgb.is_some() && pkt_pts >= target_pts {
-                break 'outer;
-            }
             let mut rgb_frame = ffmpeg_next::frame::Video::empty();
             let mut scaler = ffmpeg_next::software::scaling::context::Context::get(
                 decoder.format(),

@@ -191,6 +191,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/JellyfinSuite/{itemId}/FrameInfo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["GetFrameInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/JellyfinSuite/PlayerEnhancer/Config": {
         parameters: {
             query?: never;
@@ -463,6 +479,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/JellyfinSuite/SeekPreview/{itemId}/frame-index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["GetFrameIndex"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/SeekPreview/{itemId}/frame-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["GetFrameInfo2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/JellyfinSuite/SeekPreview/{itemId}/ready-stream": {
         parameters: {
             query?: never;
@@ -513,9 +561,32 @@ export interface components {
             /** Format: float */
             quality?: number;
         };
-        FrameReference: {
+        FpsFracDto: {
             /** Format: int64 */
-            positionMs?: number;
+            num?: number;
+            /** Format: int64 */
+            den?: number;
+        };
+        FrameIndexDto: {
+            frames?: components["schemas"]["FrameIndexEntryDto"][];
+            fps?: components["schemas"]["FpsFracDto"];
+        };
+        FrameIndexEntryDto: {
+            /** Format: int64 */
+            ms?: number;
+            isKey?: boolean;
+        };
+        FrameInfoDto: {
+            /** Format: int64 */
+            frameIdx?: number;
+            /** Format: int64 */
+            frameStartMs?: number;
+        };
+        FrameReference: {
+            /** Format: int32 */
+            frameIdx?: number | null;
+            /** Format: int64 */
+            positionMs?: number | null;
         };
         GenerateRequest: {
             /** Format: uuid */
@@ -639,6 +710,7 @@ export interface components {
             createdAt?: number;
         };
         PrefetchRequest: {
+            frameIndices?: number[];
             positions?: number[];
             /** Format: int32 */
             width?: number;
@@ -691,6 +763,7 @@ export interface operations {
     GetFrame: {
         parameters: {
             query?: {
+                frameIdx?: number;
                 positionMs?: number;
                 width?: number;
             };
@@ -1165,6 +1238,56 @@ export interface operations {
                 content: {
                     "text/html": unknown;
                 };
+            };
+        };
+    };
+    GetFrameInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrameIndexDto"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["FrameIndexDto"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["FrameIndexDto"];
+                    "text/plain": components["schemas"]["FrameIndexDto"];
+                    "text/json": components["schemas"]["FrameIndexDto"];
+                    "text/css": components["schemas"]["FrameIndexDto"];
+                    "text/xml": components["schemas"]["FrameIndexDto"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["ProblemDetails"];
+                    "text/plain": components["schemas"]["ProblemDetails"];
+                    "text/json": components["schemas"]["ProblemDetails"];
+                    "text/css": components["schemas"]["ProblemDetails"];
+                    "text/xml": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Server Error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2374,6 +2497,108 @@ export interface operations {
                     "text/json": string;
                     "text/css": string;
                     "text/xml": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["ProblemDetails"];
+                    "text/plain": components["schemas"]["ProblemDetails"];
+                    "text/json": components["schemas"]["ProblemDetails"];
+                    "text/css": components["schemas"]["ProblemDetails"];
+                    "text/xml": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Server Error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetFrameIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrameIndexDto"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["FrameIndexDto"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["FrameIndexDto"];
+                    "text/plain": components["schemas"]["FrameIndexDto"];
+                    "text/json": components["schemas"]["FrameIndexDto"];
+                    "text/css": components["schemas"]["FrameIndexDto"];
+                    "text/xml": components["schemas"]["FrameIndexDto"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["ProblemDetails"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["ProblemDetails"];
+                    "text/plain": components["schemas"]["ProblemDetails"];
+                    "text/json": components["schemas"]["ProblemDetails"];
+                    "text/css": components["schemas"]["ProblemDetails"];
+                    "text/xml": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Server Error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetFrameInfo2: {
+        parameters: {
+            query?: {
+                positionMs?: number;
+            };
+            header?: never;
+            path: {
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrameInfoDto"];
+                    "application/json; profile=\"PascalCase\"": components["schemas"]["FrameInfoDto"];
+                    "application/json; profile=\"CamelCase\"": components["schemas"]["FrameInfoDto"];
+                    "text/plain": components["schemas"]["FrameInfoDto"];
+                    "text/json": components["schemas"]["FrameInfoDto"];
+                    "text/css": components["schemas"]["FrameInfoDto"];
+                    "text/xml": components["schemas"]["FrameInfoDto"];
                 };
             };
             /** @description Not Found */

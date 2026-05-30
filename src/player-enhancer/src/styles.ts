@@ -420,6 +420,7 @@ const JELLYFIN_OVERRIDES = `
     flex-shrink: 0;
   }
   .jfs-fe-sel option { background: #111; color: #fff; }
+  .jfs-fe-sel[disabled] { opacity: 0.35; cursor: default; pointer-events: none; }
   .jfs-fe-inp {
     background: rgba(255,255,255,0.07);
     border: 1px solid rgba(255,255,255,0.15);
@@ -551,11 +552,23 @@ const JELLYFIN_OVERRIDES = `
   .jfs-fe-err-ph {
     aspect-ratio: 16/9;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 5px;
     font-size: 10px;
     color: rgba(255,255,255,0.28);
   }
+  .jfs-fe-retry-btn {
+    font-size: 10px;
+    padding: 2px 7px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 4px;
+    color: rgba(255,255,255,0.55);
+    cursor: pointer;
+  }
+  .jfs-fe-retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
   /* Lightbox overlay */
   .jfs-fe-lb {

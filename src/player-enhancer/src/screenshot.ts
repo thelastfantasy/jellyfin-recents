@@ -10,6 +10,18 @@ function getToken(): string {
   return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? '';
 }
 
+async function fetchItemName(itemId: string): Promise<string | null> {
+  try {
+    const url = `${getApiBase()}/Items/${encodeURIComponent(itemId)}?api_key=${encodeURIComponent(getToken())}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { Name?: unknown };
+    return typeof data.Name === 'string' ? data.Name : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchFrameStartMs(itemId: string, posMs: number): Promise<number | null> {
   try {
     const url = `${getApiBase()}/JellyfinSuite/SeekPreview/${encodeURIComponent(itemId)}/frame-info?positionMs=${posMs}&api_key=${encodeURIComponent(getToken())}`;
@@ -129,6 +141,9 @@ export async function takeScreenshot(
   if (!w || !h) return;
 
   const posMs = Math.round(videoEl.currentTime * 1000);
+  // Fetch item name from API (episode Name, not series name from document.title).
+  // Concurrently with canvas capture; falls back to passed itemTitle.
+  const itemNamePromise = itemId ? fetchItemName(itemId) : Promise.resolve(null);
   // Start frame-info fetch concurrently with canvas capture; 5 s timeout, silently falls back.
   const frameStartMsPromise = itemId ? fetchFrameStartMs(itemId, posMs) : Promise.resolve(null);
 
@@ -172,14 +187,15 @@ export async function takeScreenshot(
     // SRT/VTT native ::cue — cannot be captured by Canvas API, silently skipped
   }
 
-  const [blob, frameStartMs] = await Promise.all([
+  const [blob, frameStartMs, itemName] = await Promise.all([
     new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png')),
     frameStartMsPromise.catch(() => null),
+    itemNamePromise.catch(() => null),
   ]);
   canvas.remove();
 
   if (!blob) throw new Error('toBlob returned null');
-  const title = sanitize(itemTitle ?? 'screenshot');
+  const title = sanitize(itemName ?? itemTitle ?? 'screenshot');
   const ts = frameStartMs ?? posMs;
   const hh = String(Math.floor(ts / 3600000)).padStart(2, '0');
   const mm = String(Math.floor((ts % 3600000) / 60000)).padStart(2, '0');

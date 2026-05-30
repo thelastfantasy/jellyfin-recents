@@ -154,10 +154,10 @@ export function initGestures(videoEl: HTMLVideoElement, getItemId: () => string)
       e.stopImmediatePropagation();
       e.preventDefault();
       cancelPendingLongPress();
-      if (zone === 'left' && !_suspended) {
+      if (zone === 'left') {
         videoEl.currentTime = Math.max(0, videoEl.currentTime - _seekSeconds);
         showRipple('left', `-${_seekSeconds}s`);
-      } else if (zone === 'right' && !_suspended) {
+      } else if (zone === 'right') {
         videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + _seekSeconds);
         showRipple('right', `+${_seekSeconds}s`);
       } else if (zone === 'center') {

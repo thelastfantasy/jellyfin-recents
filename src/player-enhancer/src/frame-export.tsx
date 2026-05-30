@@ -3,13 +3,54 @@
 
 import { render } from 'preact'
 import { signal } from '@preact/signals'
-import { useState, useEffect, useRef } from 'preact/hooks'
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks'
 import { setGesturesSuspended } from './gestures'
 import { t } from './i18n'
 import type { components } from './jellyfin-api'
 import type { TaskProgressEvent } from './api-types'
 
 type GenerateResponse = components['schemas']['GenerateResponse']
+
+// ── Settings defaults (must be declared before signals that call loadSettingsOnce) ──
+interface CropRect { x: number; y: number; w: number; h: number }
+
+interface ExportSettings {
+  animateFormat: 'gif' | 'webp'
+  stitchFormat: 'png' | 'webp'
+  resizeMode: 'width' | 'height'
+  customWidth: number
+  customHeight: number
+  resolutionPreset: string
+  useCustomResolution: boolean
+  speed: number
+  loopCount: number
+  cropRect: CropRect | null
+  animateQuality: number
+  stitchQuality: number
+}
+
+const DEFAULT_SETTINGS: ExportSettings = {
+  animateFormat: 'gif',
+  stitchFormat: 'png',
+  resizeMode: 'width',
+  customWidth: 0,
+  customHeight: 0,
+  resolutionPreset: 'original',
+  useCustomResolution: false,
+  speed: 1.0,
+  loopCount: 0,
+  cropRect: null,
+  animateQuality: 0.75,
+  stitchQuality: 0.75,
+}
+
+function loadSettingsOnce(): ExportSettings {
+  try {
+    const raw = localStorage.getItem('jfs-frameexport-settings')
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_SETTINGS }
+}
 
 // ── Signals (module-level reactive state) ────────────────────────────────────
 const sPage = signal<'grid' | 'progress' | 'result'>('grid')
@@ -22,6 +63,7 @@ const sSettings = signal<ExportSettings>(loadSettingsOnce())
 const sProgressTaskId = signal('')
 const sResultUrl = signal('')
 const sFileSize = signal(0)
+const sLightboxIdx = signal<number | null>(null)
 
 // ── Non-reactive module state ────────────────────────────────────────────────
 let _modalRoot: HTMLDivElement | null = null
@@ -66,41 +108,9 @@ interface SavedModalState {
 }
 let _savedState: SavedModalState | null = null
 
-// ── Settings (localStorage) ──────────────────────────────────────────────────
-interface CropRect { x: number; y: number; w: number; h: number }
-
-interface ExportSettings {
-  animateFormat: 'gif' | 'webp'
-  stitchFormat: 'png' | 'webp'
-  resizeMode: 'width' | 'height'
-  customWidth: number
-  customHeight: number
-  resolutionPreset: string
-  useCustomResolution: boolean
-  speed: number
-  loopCount: number
-  cropRect: CropRect | null
-  animateQuality: number
-  stitchQuality: number
-}
-
-const DEFAULT_SETTINGS: ExportSettings = {
-  animateFormat: 'gif',
-  stitchFormat: 'png',
-  resizeMode: 'width',
-  customWidth: 0,
-  customHeight: 0,
-  resolutionPreset: 'original',
-  useCustomResolution: false,
-  speed: 1.0,
-  loopCount: 0,
-  cropRect: null,
-  animateQuality: 0.75,
-  stitchQuality: 0.75,
-}
-
 interface FrameEntry {
   posMs: number
+  fiIdx: number          // 0-based index into _frameIndex (from FrameInfo API); -1 if unavailable
   selected: boolean
   jpegUrl: string
   isJunk: boolean
@@ -109,14 +119,6 @@ interface FrameEntry {
   removed?: boolean
   actualPtsMs?: number   // normalized frame start time from X-Frame-Pts-Ms header
   blobUrl?: string       // browser blob URL (not persisted in savedState)
-}
-
-function loadSettingsOnce(): ExportSettings {
-  try {
-    const raw = localStorage.getItem('jfs-frameexport-settings')
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
-  } catch { /* ignore */ }
-  return { ...DEFAULT_SETTINGS }
 }
 
 function saveSettings(s: ExportSettings): void {
@@ -141,9 +143,12 @@ function getToken(): string {
   return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
 }
 
-function frameUrl(posMs: number, width: number): string {
+function frameUrl(fiIdx: number, posMs: number, width: number): string {
   const base = getBaseUrl()
   const token = getToken()
+  if (fiIdx >= 0) {
+    return `${base}/JellyfinSuite/FrameExport/${_itemId}?frameIdx=${fiIdx}&width=${width}&api_key=${encodeURIComponent(token)}`
+  }
   return `${base}/JellyfinSuite/FrameExport/${_itemId}?positionMs=${Math.round(posMs)}&width=${width}&api_key=${encodeURIComponent(token)}`
 }
 
@@ -191,7 +196,7 @@ async function fetchVideoFps(): Promise<FpsFrac> {
 async function fetchFrameIndex(): Promise<boolean> {
   try {
     const res = await fetch(
-      `${getBaseUrl()}/JellyfinSuite/SeekPreview/${_itemId}/frame-index?api_key=${encodeURIComponent(getToken())}`
+      `${getBaseUrl()}/JellyfinSuite/${_itemId}/FrameInfo?api_key=${encodeURIComponent(getToken())}`
     )
     if (!res.ok) return false
     const data = await res.json() as { frames: Array<{ms: number; isKey: boolean}>; fps: {num: number; den: number} }
@@ -212,10 +217,6 @@ function frameInterval(): number {
 function frameToMs(idx: number): number {
   // ceil ensures posMs >= actual frame timestamp so FFmpeg seek lands on the correct frame
   return Math.ceil(idx * _fpsFrac.den * 1000 / _fpsFrac.num)
-}
-
-function msToFrameIdx(ms: number): number {
-  return Math.round(ms * _fpsFrac.num / (_fpsFrac.den * 1000))
 }
 
 function samplePositionsInRange(startMs: number, endMs: number): number[] {
@@ -471,7 +472,7 @@ function wireGridHandlers(grid: HTMLElement): void {
     if (dlBtn) {
       e.stopPropagation()
       const idx = parseInt(dlBtn.dataset.idx ?? '')
-      if (!isNaN(idx) && _frames[idx]) downloadFrame(_frames[idx].posMs)
+      if (!isNaN(idx) && _frames[idx]) downloadFrame(_frames[idx].fiIdx, _frames[idx].posMs)
       return
     }
     const rmBtn = (e.target as HTMLElement).closest<HTMLButtonElement>('.jfs-fe-rm-btn')
@@ -496,51 +497,65 @@ function wireGridHandlers(grid: HTMLElement): void {
       renderGrid()
     }
   }, true)
+
+  // Retry failed thumbnails
+  grid.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.jfs-fe-retry-btn')
+    if (!btn) return
+    e.stopPropagation()
+    const idx = parseInt(btn.dataset.retryIdx ?? '')
+    if (isNaN(idx) || !_frames[idx]) return
+    _frames[idx].loadError = false
+    if (_frames[idx].blobUrl) { URL.revokeObjectURL(_frames[idx].blobUrl!); _frames[idx].blobUrl = undefined }
+    renderGrid()
+    updateFrameImage(idx)
+  })
 }
 
 // ── openLightbox ──────────────────────────────────────────────────────────────
-function openLightbox(startIdx: number): void {
-  let currentIdx = startIdx
-  const overlay = document.createElement('div')
-  overlay.className = 'jfs-fe-lb'
+function openLightbox(idx: number): void {
+  sLightboxIdx.value = idx
+}
 
-  const renderLb = (): void => {
-    const f = _frames[currentIdx]
-    if (!f) return
-    const hasPrev = currentIdx > 0
-    const hasNext = currentIdx < _frames.length - 1
-    overlay.innerHTML = `
-      <button class="jfs-fe-lb-nav jfs-fe-lb-prev" title="上一帧（←）"${hasPrev ? '' : ' disabled'}>${ICON_PREV}</button>
-      <img src="${frameUrl(f.posMs, 0)}" alt="${formatTime(f.posMs)}" />
-      <button class="jfs-fe-lb-nav jfs-fe-lb-next" title="下一帧（→）"${hasNext ? '' : ' disabled'}>${ICON_NEXT}</button>
-      <button class="jfs-fe-lb-close" title="关闭">✕</button>
-      <div class="jfs-fe-lb-info">${currentIdx + 1} / ${_frames.length} · ${formatTime(f.posMs)}</div>
-    `
-    overlay.querySelector('.jfs-fe-lb-close')!.addEventListener('click', close)
-    overlay.querySelector('.jfs-fe-lb-prev')?.addEventListener('click', (e) => {
-      e.stopPropagation(); if (currentIdx > 0) { currentIdx--; renderLb() }
-    })
-    overlay.querySelector('.jfs-fe-lb-next')?.addEventListener('click', (e) => {
-      e.stopPropagation(); if (currentIdx < _frames.length - 1) { currentIdx++; renderLb() }
-    })
-  }
+function Lightbox() {
+  const idx = sLightboxIdx.value
+  if (idx === null) return null
+  const f = _frames[idx]
+  if (!f) return null
 
-  const close = (): void => { overlay.remove(); document.removeEventListener('keydown', kbHandler, true) }
-  const kbHandler = (ev: KeyboardEvent): void => {
-    ev.stopPropagation()
-    if (ev.key === 'Escape') close()
-    else if (ev.key === 'ArrowLeft' && currentIdx > 0) { currentIdx--; renderLb() }
-    else if (ev.key === 'ArrowRight' && currentIdx < _frames.length - 1) { currentIdx++; renderLb() }
-  }
-  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close() })
-  document.addEventListener('keydown', kbHandler, { capture: true })
-  renderLb()
-  document.body.appendChild(overlay)
+  const close = (): void => { sLightboxIdx.value = null }
+  const hasPrev = idx > 0
+  const hasNext = idx < _frames.length - 1
+
+  useEffect(() => {
+    const handler = (ev: KeyboardEvent): void => {
+      ev.stopPropagation()
+      if (ev.key === 'Escape') sLightboxIdx.value = null
+      else if (ev.key === 'ArrowLeft' && idx > 0) sLightboxIdx.value = idx - 1
+      else if (ev.key === 'ArrowRight' && idx < _frames.length - 1) sLightboxIdx.value = idx + 1
+    }
+    document.addEventListener('keydown', handler, { capture: true })
+    return () => document.removeEventListener('keydown', handler, { capture: true })
+  }, [idx])
+
+  return (
+    <div class="jfs-fe-lb" onClick={e => { if (e.target === e.currentTarget) close() }}>
+      <button class="jfs-fe-lb-nav jfs-fe-lb-prev" title="上一帧（←）" disabled={!hasPrev}
+        onClick={e => { e.stopPropagation(); if (hasPrev) sLightboxIdx.value = idx - 1 }}
+        dangerouslySetInnerHTML={{ __html: ICON_PREV }} />
+      <img src={frameUrl(f.fiIdx, f.posMs, 0)} alt={formatTime(f.posMs)} />
+      <button class="jfs-fe-lb-nav jfs-fe-lb-next" title="下一帧（→）" disabled={!hasNext}
+        onClick={e => { e.stopPropagation(); if (hasNext) sLightboxIdx.value = idx + 1 }}
+        dangerouslySetInnerHTML={{ __html: ICON_NEXT }} />
+      <button class="jfs-fe-lb-close" title="关闭" onClick={close}>✕</button>
+      <div class="jfs-fe-lb-info">{idx + 1} / {_frames.length} · {formatTime(f.posMs)}</div>
+    </div>
+  )
 }
 
 // ── downloadFrame ─────────────────────────────────────────────────────────────
-function downloadFrame(posMs: number): void {
-  const url = frameUrl(posMs, 0)
+function downloadFrame(fiIdx: number, posMs: number): void {
+  const url = frameUrl(fiIdx, posMs, 0)
   const title = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'frame'
   const ts = formatTime(posMs).replace(/[:.]/g, '-')
   const a = document.createElement('a')
@@ -552,26 +567,29 @@ function downloadFrame(posMs: number): void {
 }
 
 // ── prefetchAndStream ─────────────────────────────────────────────────────────
-async function prefetchAndStream(positions: number[], width: number): Promise<void> {
-  if (positions.length === 0) return
+// items: array of { fiIdx, posMs } — fiIdx >= 0 means FrameInfo is available.
+async function prefetchAndStream(items: Array<{ fiIdx: number; posMs: number }>, width: number): Promise<void> {
+  if (items.length === 0) return
   const base = getBaseUrl()
   const token = getToken()
+
+  const useIdx = items.every(it => it.fiIdx >= 0)
+  const body = useIdx
+    ? { frameIndices: items.map(it => it.fiIdx), width }
+    : { positions: items.map(it => Math.round(it.posMs)), width }
 
   try {
     await fetch(
       `${base}/JellyfinSuite/FrameExport/Prefetch/${_itemId}?api_key=${encodeURIComponent(token)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ positions: positions.map(p => Math.round(p)), width }),
-      }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     )
   } catch { /* proceed even if prefetch request fails */ }
 
   return new Promise((resolve) => {
     const sseUrl = `${base}/JellyfinSuite/FrameExport/PrefetchReady/${_itemId}?width=${width}&api_key=${encodeURIComponent(token)}`
     const evSrc = new EventSource(sseUrl)
-    const pending = new Set(positions)
+    // SSE reports posMs regardless of how the prefetch was requested
+    const pending = new Set(items.map(it => it.posMs))
     sPrefetchTotal.value = pending.size
     sPrefetchDone.value = 0
 
@@ -580,10 +598,9 @@ async function prefetchAndStream(positions: number[], width: number): Promise<vo
       if (isNaN(posMs) || !pending.delete(posMs)) return
 
       sPrefetchDone.value = sPrefetchTotal.value - pending.size
-      // Update only the card that matches this exact posMs
       for (let i = 0; i < _frames.length; i++) {
         if (_frames[i].posMs === posMs) {
-          _frames[i].jpegUrl = frameUrl(_frames[i].posMs, width)
+          _frames[i].jpegUrl = frameUrl(_frames[i].fiIdx, _frames[i].posMs, width)
           updateFrameImage(i)
         }
       }
@@ -595,6 +612,12 @@ async function prefetchAndStream(positions: number[], width: number): Promise<vo
   }).then(() => {
     sPrefetchTotal.value = 0
     sPrefetchDone.value = 0
+    // Retry frames whose SSE event may have been lost (e.g. stream closed early)
+    for (let i = 0; i < _frames.length; i++) {
+      if (_frames[i].jpegUrl && !_frames[i].blobUrl && !_frames[i].loadError) {
+        updateFrameImage(i)
+      }
+    }
   })
 }
 
@@ -623,11 +646,11 @@ async function loadInitialFrames(): Promise<void> {
     const slice = _frameIndex.slice(startFi, endFi + 1)
     _minPosMs = slice[0]?.ms ?? centerMs
     _maxPosMs = slice[slice.length - 1]?.ms ?? centerMs
-    _frames = slice.map(f => ({
-      posMs: f.ms, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
+    _frames = slice.map((f, i) => ({
+      posMs: f.ms, fiIdx: startFi + i, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
     }))
     renderGrid()
-    await prefetchAndStream(slice.map(f => f.ms), 320)
+    await prefetchAndStream(slice.map((f, i) => ({ fiIdx: startFi + i, posMs: f.ms })), 320)
   } else {
     if (!hasIndex) _fpsFrac = await fetchVideoFps()
     const startMs = Math.max(0, centerMs - 1000)
@@ -635,9 +658,9 @@ async function loadInitialFrames(): Promise<void> {
     const positions = samplePositionsInRange(startMs, endMs)
     _minPosMs = positions[0] ?? centerMs
     _maxPosMs = positions[positions.length - 1] ?? centerMs
-    _frames = positions.map(posMs => ({ posMs, selected: true, jpegUrl: '', isJunk: false, junkReason: null }))
+    _frames = positions.map(posMs => ({ posMs, fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null }))
     renderGrid()
-    await prefetchAndStream(positions, 320)
+    await prefetchAndStream(positions.map(posMs => ({ fiIdx: -1, posMs })), 320)
   }
 }
 
@@ -683,13 +706,13 @@ async function expandFrames(direction: number): Promise<void> {
       const slice = _frameIndex.slice(sliceStart, sliceEnd + 1)
       if (slice.length === 0) return
 
-      const placeholders: FrameEntry[] = slice.map(f => ({
-        posMs: f.ms, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
+      const placeholders: FrameEntry[] = slice.map((f, i) => ({
+        posMs: f.ms, fiIdx: sliceStart + i, actualPtsMs: f.ms, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
       }))
       if (direction < 0) _frames = [...placeholders, ..._frames]
       else _frames.push(...placeholders)
       renderGrid()
-      await prefetchAndStream(slice.map(f => f.ms), 320)
+      await prefetchAndStream(slice.map((f, i) => ({ fiIdx: sliceStart + i, posMs: f.ms })), 320)
     } else {
       let queryStart: number, queryEnd: number
       if (direction < 0) {
@@ -705,12 +728,12 @@ async function expandFrames(direction: number): Promise<void> {
         if (direction < 0) _minPosMs = newPositions[0]
         else _maxPosMs = newPositions[newPositions.length - 1]
         const placeholders: FrameEntry[] = newPositions.map(posMs => ({
-          posMs, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
+          posMs, fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
         }))
         if (direction < 0) _frames = [...placeholders, ..._frames]
         else _frames.push(...placeholders)
         renderGrid()
-        await prefetchAndStream(newPositions, 320)
+        await prefetchAndStream(newPositions.map(posMs => ({ fiIdx: -1, posMs })), 320)
       } else {
         if (direction < 0) _minPosMs = queryStart
         else _maxPosMs = queryEnd
@@ -773,13 +796,13 @@ function getHandles(d: CropRect, cw: number, ch: number): Array<{ id: HandleId; 
 }
 
 function hitTest(mx: number, my: number, d: CropRect, cw: number, ch: number): HandleId {
-  if (d.w >= 0.99 && d.h >= 0.99) return 'draw'
   const THRESH = 14
   for (const h of getHandles(d, cw, ch)) {
     if (Math.abs(mx - h.x) <= THRESH && Math.abs(my - h.y) <= THRESH) return h.id
   }
+  const isFullFrame = d.w >= 0.99 && d.h >= 0.99
   const [px, py, pw, ph] = [d.x * cw, d.y * ch, d.w * cw, d.h * ch]
-  if (mx >= px && mx <= px + pw && my >= py && my <= py + ph) return 'move'
+  if (!isFullFrame && mx >= px && mx <= px + pw && my >= py && my <= py + ph) return 'move'
   return 'draw'
 }
 
@@ -855,17 +878,14 @@ function openCropPopover(): void {
     const ctx = canvas.getContext('2d')!
     const cw = canvas.width, ch = canvas.height
     ctx.clearRect(0, 0, cw, ch)
-    const isFullFrame = draft.w >= 0.99 && draft.h >= 0.99
-    if (isFullFrame) {
-      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4])
-      ctx.strokeRect(1, 1, cw - 2, ch - 2); ctx.restore()
-      return
-    }
     const { x, y, w, h } = draft
+    const isFullFrame = w >= 0.99 && h >= 0.99
     const [px, py, pw, ph] = [x * cw, y * ch, w * cw, h * ch]
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(0, 0, cw, ch)
-    ctx.clearRect(px, py, pw, ph)
+    if (!isFullFrame) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, cw, ch)
+      ctx.clearRect(px, py, pw, ph)
+    }
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
     ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1); ctx.restore()
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 0.5
@@ -943,7 +963,7 @@ function openCropPopover(): void {
     const dy = (pos.y - handleStart.my) / canvas.height
     const orig = handleStart.draft0
     if (activeHandle === 'draw') {
-      const sx = orig.x, sy = orig.y
+      const sx = handleStart.mx / canvas.width, sy = handleStart.my / canvas.height
       const cx = Math.max(0, Math.min(1, pos.x / canvas.width))
       const cy = Math.max(0, Math.min(1, pos.y / canvas.height))
       draft = { x: Math.min(sx, cx), y: Math.min(sy, cy), w: Math.max(0.01, Math.abs(cx - sx)), h: Math.max(0.01, Math.abs(cy - sy)) }
@@ -1048,11 +1068,11 @@ async function submitGenerate(): Promise<void> {
   const exportType = sExportType.value
   const st = sSettings.value
   const allSelected = _frames.filter(f => f.selected && !f.removed)
-  const seenMs = new Set<number>()
+  const seenKey = new Set<number>()
   const selected = allSelected.filter(f => {
-    const ms = Math.round(f.posMs)
-    if (seenMs.has(ms)) return false
-    seenMs.add(ms)
+    const key = f.fiIdx >= 0 ? f.fiIdx : Math.round(f.posMs)
+    if (seenKey.has(key)) return false
+    seenKey.add(key)
     return true
   })
   if (selected.length < 2) { alert('至少需要选择 2 帧'); return }
@@ -1063,7 +1083,9 @@ async function submitGenerate(): Promise<void> {
     itemId: _itemId,
     itemTitle: document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'export',
     type: exportType,
-    frames: selected.map(f => ({ positionMs: Math.round(f.posMs) })),
+    frames: selected.map(f => f.fiIdx >= 0
+      ? { frameIdx: f.fiIdx }
+      : { positionMs: Math.round(f.posMs) }),
     params: {
       format,
       resizeMode: st.resizeMode,
@@ -1099,7 +1121,10 @@ function FrameCard({ frame: f, idx }: { frame: FrameEntry; idx: number }) {
     : 100
 
   const imgContent = f.loadError
-    ? <div class="jfs-fe-err-ph">{t('frameExport.loadError')}</div>
+    ? <div class="jfs-fe-err-ph">
+        <span>{t('frameExport.loadError')}</span>
+        <button class="jfs-fe-retry-btn" data-retry-idx={String(idx)}>{t('frameExport.retry')}</button>
+      </div>
     : f.blobUrl
       ? <img src={f.blobUrl} alt={formatTime(f.posMs)} data-img-idx={String(idx)} />
       : <div class="jfs-fe-loading"><div class="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
@@ -1118,7 +1143,7 @@ function FrameCard({ frame: f, idx }: { frame: FrameEntry; idx: number }) {
       </div>
       <div class="jfs-fe-card-foot">
         <input type="checkbox" checked={f.selected} data-idx={String(idx)} class="jfs-fe-cb" style={{ cursor: 'pointer' }} />
-        {formatTime(displayMs)} <span class="jfs-fe-frnum">#{msToFrameIdx(displayMs)}</span>
+        {formatTime(displayMs)}{f.fiIdx >= 0 && <span class="jfs-fe-frnum">#{f.fiIdx}</span>}
       </div>
     </div>
   )
@@ -1642,7 +1667,12 @@ function FrameExportModal() {
   const page = sPage.value
   if (page === 'progress') return <ProgressPage />
   if (page === 'result') return <ResultPage />
-  return <GridPage />
+  return (
+    <>
+      <GridPage />
+      <Lightbox />
+    </>
+  )
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -1705,6 +1735,12 @@ export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string):
     sPage.value = 'grid'
     render(<FrameExportModal />, _modalRoot)
     renderGrid()
+    // Re-fetch thumbnails that were cleared on close
+    for (let i = 0; i < _frames.length; i++) {
+      if (_frames[i].jpegUrl && !_frames[i].blobUrl && !_frames[i].loadError) {
+        updateFrameImage(i)
+      }
+    }
     return
   }
 

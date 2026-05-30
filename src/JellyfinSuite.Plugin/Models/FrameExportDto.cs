@@ -6,8 +6,11 @@ namespace Jellyfin.Plugin.JellyfinSuite.Models;
 
 public class PrefetchRequest
 {
-    [JsonPropertyName("positions")] public List<long> Positions { get; set; } = new();
-    [JsonPropertyName("width")]     public int Width { get; set; } = 320;
+    // Primary: frame indices from /JellyfinSuite/{itemId}/FrameInfo
+    [JsonPropertyName("frameIndices")] public List<int> FrameIndices { get; set; } = new();
+    // Fallback: positionMs values (used when FrameInfo unavailable)
+    [JsonPropertyName("positions")]    public List<long> Positions { get; set; } = new();
+    [JsonPropertyName("width")]        public int Width { get; set; } = 320;
 }
 
 // ── POST /FrameExport/Generate ──────────────────────────────────────
@@ -23,7 +26,10 @@ public class GenerateRequest
 
 public class FrameReference
 {
-    [JsonPropertyName("positionMs")] public long PositionMs { get; set; }
+    // Primary: frame index from /JellyfinSuite/{itemId}/FrameInfo
+    [JsonPropertyName("frameIdx")]   public int? FrameIdx   { get; set; }
+    // Fallback: positionMs (used when FrameInfo unavailable)
+    [JsonPropertyName("positionMs")] public long? PositionMs { get; set; }
 }
 
 public class ExportParams

@@ -17,6 +17,7 @@ public class FrameExportController : ControllerBase
 {
     private readonly FrameExportService _frameExport;
     private readonly FrameExportTaskManager _taskManager;
+    private readonly SeekPreviewService _seekPreview;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<FrameExportController> _logger;
 
@@ -26,18 +27,34 @@ public class FrameExportController : ControllerBase
     public FrameExportController(
         FrameExportService frameExport,
         FrameExportTaskManager taskManager,
+        SeekPreviewService seekPreview,
         ILibraryManager libraryManager,
         ILogger<FrameExportController> logger)
     {
         _frameExport = frameExport;
         _taskManager = taskManager;
+        _seekPreview = seekPreview;
         _libraryManager = libraryManager;
         _logger = logger;
     }
 
     /// <summary>
-    /// GET /FrameExport/{itemId}?positionMs=N&width=W
+    /// Resolves a frameIdx (0-based index into FrameInfo) to positionMs.
+    /// Returns null if the frame index is unavailable or frameIdx is out of range.
+    /// </summary>
+    private async Task<long?> ResolveFrameIdxAsync(string filePath, Guid itemId, int frameIdx, CancellationToken ct)
+    {
+        var result = await _seekPreview.FrameIndexAsync(filePath, itemId, ct);
+        if (result == null || frameIdx < 0 || frameIdx >= result.Value.Frames.Length)
+            return null;
+        return result.Value.Frames[frameIdx].Ms;
+    }
+
+    /// <summary>
+    /// GET /FrameExport/{itemId}?frameIdx=N&width=W
+    /// GET /FrameExport/{itemId}?positionMs=N&width=W  (fallback)
     /// Returns a JPEG frame. width ≤ 320 returns thumbnail; width=0 returns original.
+    /// Prefer frameIdx (0-based index from /JellyfinSuite/{itemId}/FrameInfo).
     /// </summary>
     [HttpGet("{itemId:guid}")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
@@ -45,6 +62,7 @@ public class FrameExportController : ControllerBase
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFrame(
         [FromRoute] Guid itemId,
+        [FromQuery] int? frameIdx = null,
         [FromQuery] long positionMs = 0,
         [FromQuery] int width = 320,
         CancellationToken ct = default)
@@ -55,6 +73,14 @@ public class FrameExportController : ControllerBase
         var item = _libraryManager.GetItemById(itemId);
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound(new { error = "Item not found or no file path" });
+
+        if (frameIdx.HasValue)
+        {
+            var resolved = await ResolveFrameIdxAsync(item.Path, itemId, frameIdx.Value, ct);
+            if (resolved == null)
+                return NotFound(new { error = $"frameIdx {frameIdx.Value} out of range" });
+            positionMs = resolved.Value;
+        }
 
         await _frameExport.EnsureStartedAsync(ct);
         var (jpeg, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
@@ -134,7 +160,10 @@ public class FrameExportController : ControllerBase
         }
     }
 
-    /// <summary>POST /FrameExport/Prefetch/{itemId} — enqueue background thumbnail decode.</summary>
+    /// <summary>
+    /// POST /FrameExport/Prefetch/{itemId} — enqueue background thumbnail decode.
+    /// Accepts frameIndices (preferred, resolved via FrameInfo) or positions (positionMs fallback).
+    /// </summary>
     [HttpPost("Prefetch/{itemId:guid}")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
@@ -150,7 +179,27 @@ public class FrameExportController : ControllerBase
         var filePath = item.Path;
         _ = Task.Run(async () =>
         {
-            foreach (var posMs in req.Positions)
+            IReadOnlyList<long> posList;
+            if (req.FrameIndices.Count > 0)
+            {
+                var frameResult = await _seekPreview.FrameIndexAsync(filePath, itemId);
+                if (frameResult == null)
+                {
+                    _logger.LogWarning("[FrameExport] Prefetch: FrameInfo unavailable for {ItemId}, skipping", itemId);
+                    return;
+                }
+                var frames = frameResult.Value.Frames;
+                posList = req.FrameIndices
+                    .Where(i => i >= 0 && i < frames.Length)
+                    .Select(i => frames[i].Ms)
+                    .ToList();
+            }
+            else
+            {
+                posList = req.Positions;
+            }
+
+            foreach (var posMs in posList)
             {
                 try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); }
                 catch { /* individual failures ignored */ }
@@ -219,7 +268,23 @@ public class FrameExportController : ControllerBase
 
                 task.Status = Services.TaskStatus.Running;
                 var filePaths = req.Frames.Select(_ => item.Path).ToList();
-                var positions = req.Frames.Select(f => f.PositionMs).ToList();
+
+                // Resolve frameIdx → posMs for frames that specify an index.
+                // Fall back to PositionMs for frames that don't.
+                SeekPreviewService.FrameIndexEntryInternal[]? frameIndexFrames = null;
+                if (req.Frames.Any(f => f.FrameIdx.HasValue))
+                {
+                    var fi = await _seekPreview.FrameIndexAsync(item.Path, req.ItemId, task.Cts.Token);
+                    frameIndexFrames = fi?.Frames;
+                }
+
+                var positions = req.Frames.Select(f =>
+                {
+                    if (f.FrameIdx.HasValue && frameIndexFrames != null
+                        && f.FrameIdx.Value >= 0 && f.FrameIdx.Value < frameIndexFrames.Length)
+                        return frameIndexFrames[f.FrameIdx.Value].Ms;
+                    return f.PositionMs ?? 0L;
+                }).ToList();
 
                 var resolutionPreset = req.Params.ResolutionPreset;
                 var resizeMode = req.Params.ResizeMode;
