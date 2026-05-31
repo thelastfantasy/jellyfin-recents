@@ -33,7 +33,7 @@ run = "make update"
 
 [tasks.deploy]
 description = "完整部署（构建所有组件并部署到 jellyfin-dev 容器）"
-run = "make deploy"
+run = "pwsh -NoProfile -File scripts/deploy.ps1"
 
 [tasks.update-quick]
 description = "快速部署：仅重建前端+增强器+C#，跳过 Rust 构建"

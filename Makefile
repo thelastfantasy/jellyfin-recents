@@ -104,48 +104,9 @@ update: build-poster-gen build
 		curl -s -o /dev/null -w "Health check: %{http_code}\n" http://localhost:8096/health
 
 # ── PowerShell-native deploy ──────────────────────────────────────────────────
-# Completely isolated from bash targets above — never calls make sub-targets.
-# All commands inlined so no bash dependency. Safe to run from pwsh directly.
-deploy: SHELL       := pwsh
-deploy: .SHELLFLAGS := -NoProfile -Command
+# Prefer `mise run deploy` which runs pwsh directly (bypassing make shell issues).
 deploy:
-	cd apps/frontend && pnpm run build
-	cd apps/player-enhancer && pnpm install && pnpm run build
-	dotnet build packages/JellyfinSuite.Plugin -c Debug --output build/plugin
-	docker volume create seek-cargo-home
-	docker volume create seek-rustup-home
-	docker run --rm \
-		-v "$(DEPLOY_WORKDIR):/workspace" \
-		-v seek-cargo-home:/root/.cargo \
-		-v seek-rustup-home:/root/.rustup \
-		-w /workspace \
-		ubuntu:24.04 \
-		sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && /root/.cargo/bin/cargo build -p seek-preview --release"
-	cp target/release/seek-preview packages/JellyfinSuite.Plugin/seek-preview-linux-x64
-	docker volume create forge-cargo-home
-	docker run --rm \
-		-v "$(DEPLOY_WORKDIR):/workspace" \
-		-v forge-cargo-home:/root/.cargo \
-		-w /workspace \
-		ubuntu:24.04 \
-		sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release"
-	cp target/release/frame-forge packages/JellyfinSuite.Plugin/frame-forge-linux-x64
-	docker run --rm \
-		-v "$(DEPLOY_WORKDIR):/workspace" \
-		-w /workspace \
-		rust:1.88-slim-bookworm \
-		cargo build -p poster-gen --release
-	cp target/release/poster-gen packages/JellyfinSuite.Plugin/poster-gen-linux-x64
-	docker cp build/plugin/JellyfinSuite.Plugin.dll jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
-	docker cp build/plugin/poster-gen-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/poster-gen-linux-x64
-	docker cp packages/JellyfinSuite.Plugin/seek-preview-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/seek-preview-linux-x64
-	docker cp packages/JellyfinSuite.Plugin/frame-forge-linux-x64 jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
-	docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
-	docker cp packages/JellyfinSuite.Plugin/meta.json jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
-	docker restart jellyfin-dev
-	@Write-Host "Waiting for Jellyfin to start..."
-	@Start-Sleep -Seconds 20
-	@docker exec jellyfin-dev curl -s -o /dev/null -w "Health check: %{http_code}" http://localhost:8096/health
+	@echo "Use 'mise run deploy' instead (make shell on Windows cannot run pwsh commands)."
 
 # Quick update: rebuild frontend + enhancer + C# only, skip Rust builds
 update-quick:
