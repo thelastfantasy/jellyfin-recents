@@ -37,9 +37,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            src/poster-gen
-            src/seek-preview
-            src/frame-forge
+            . -> target
 
       - name: Install FFmpeg 7.x and OpenCV dev libs
         run: |
@@ -52,25 +50,20 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            src/frontend/package-lock.json
-            src/player-enhancer/package-lock.json
+          cache: "pnpm"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install frontend dependencies
-        working-directory: src/frontend
-        run: npm ci
-
-      - name: Install enhancer dependencies
-        working-directory: src/player-enhancer
-        run: npm ci
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Test Rust
         run: make test-rust
@@ -82,47 +75,43 @@ jobs:
         run: make test-csharp
 
       - name: Build frontend
-        working-directory: src/frontend
-        run: npm run build
+        working-directory: apps/frontend
+        run: pnpm run build
 
       - name: Build enhancer
-        working-directory: src/player-enhancer
-        run: npm run build
+        working-directory: apps/player-enhancer
+        run: pnpm run build
 
       - name: Build seek-preview (Linux x64)
-        working-directory: src/seek-preview
-        run: cargo build --release
+        run: cargo build -p seek-preview --release
 
       - name: Build frame-forge (Linux x64)
-        working-directory: src/frame-forge
-        run: cargo build --release
+        run: cargo build -p frame-forge --release
 
       - name: Install cross
         run: cargo install cross --locked
 
       - name: Build Rust binary (Linux x64)
-        working-directory: src/poster-gen
-        run: cross build --release --target x86_64-unknown-linux-gnu -j 2
+        run: cross build -p poster-gen --release --target x86_64-unknown-linux-gnu -j 2
 
       - name: Build Rust binary (Windows x64)
-        working-directory: src/poster-gen
-        run: cross build --release --target x86_64-pc-windows-gnu -j 2
+        run: cross build -p poster-gen --release --target x86_64-pc-windows-gnu -j 2
 
       - name: Publish plugin
         run: |
-          dotnet publish src/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj \
+          dotnet publish packages/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj \
             -c Release \
             -p:Version=${{ steps.version.outputs.ver4 }} \
             -o publish/
 
       - name: Copy Rust binaries to publish dir
         run: |
-          cp src/poster-gen/target/x86_64-unknown-linux-gnu/release/poster-gen publish/poster-gen-linux-x64
+          cp target/x86_64-unknown-linux-gnu/release/poster-gen publish/poster-gen-linux-x64
           chmod +x publish/poster-gen-linux-x64
-          cp src/poster-gen/target/x86_64-pc-windows-gnu/release/poster-gen.exe publish/poster-gen-win-x64.exe
-          cp src/seek-preview/target/release/seek-preview publish/seek-preview-linux-x64
+          cp target/x86_64-pc-windows-gnu/release/poster-gen.exe publish/poster-gen-win-x64.exe
+          cp target/release/seek-preview publish/seek-preview-linux-x64
           chmod +x publish/seek-preview-linux-x64
-          cp src/frame-forge/target/release/frame-forge publish/frame-forge-linux-x64
+          cp target/release/frame-forge publish/frame-forge-linux-x64
           chmod +x publish/frame-forge-linux-x64
 
       - name: Prepare meta.json files
@@ -135,7 +124,7 @@ jobs:
             --arg ver "$VER4" \
             --arg ts "$TIMESTAMP" \
             '.version = $ver | .timestamp = $ts' \
-            src/JellyfinSuite.Plugin/meta.json \
+            packages/JellyfinSuite.Plugin/meta.json \
             > publish/meta.json
 
           # Bundled variant — different GUID and name so Jellyfin treats it as a separate plugin
@@ -143,7 +132,7 @@ jobs:
             --arg ver "$VER4" \
             --arg ts "$TIMESTAMP" \
             '.guid = "9f4b2e0a-c736-4d58-b9e1-0a2f3c4d5e6b" | .name = "Jellyfin Suite + Fonts" | .version = $ver | .timestamp = $ts' \
-            src/JellyfinSuite.Plugin/meta.json \
+            packages/JellyfinSuite.Plugin/meta.json \
             > publish/meta-bundled.json
 
       - name: Download bundled fonts

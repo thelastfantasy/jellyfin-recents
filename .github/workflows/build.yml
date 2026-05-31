@@ -20,9 +20,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            src/poster-gen
-            src/seek-preview
-            src/frame-forge
+            . -> target
 
       - name: Install FFmpeg 7.x and OpenCV dev libs
         run: |
@@ -35,25 +33,20 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            src/frontend/package-lock.json
-            src/player-enhancer/package-lock.json
+          cache: "pnpm"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install frontend dependencies
-        working-directory: src/frontend
-        run: npm ci
-
-      - name: Install enhancer dependencies
-        working-directory: src/player-enhancer
-        run: npm ci
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Test Rust
         run: make test-rust
@@ -65,12 +58,12 @@ jobs:
         run: make test-csharp
 
       - name: Build frontend
-        working-directory: src/frontend
-        run: npm run build
+        working-directory: apps/frontend
+        run: pnpm run build
 
       - name: Build enhancer
-        working-directory: src/player-enhancer
-        run: npm run build
+        working-directory: apps/player-enhancer
+        run: pnpm run build
 
       - name: Build plugin
-        run: dotnet build src/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj -c Release
+        run: dotnet build packages/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj -c Release
