@@ -3,6 +3,7 @@ import type { Translations } from './types'
 import { zh } from './locales/zh'
 import { en } from './locales/en'
 import { ja } from './locales/ja'
+import { detectLang } from '@jfs/i18n'
 
 export type { Translations } from './types'
 export type Locale = 'zh' | 'en' | 'ja'
@@ -18,7 +19,7 @@ const INTL_TAG: Record<Locale, string> = {
 
 // ── Locale detection ──────────────────────────────────────────────
 
-export function mapToLocale(tag: string): Locale {
+function mapTagToLocale(tag: string): Locale {
   if (tag.startsWith('zh')) return 'zh'
   if (tag.startsWith('ja')) return 'ja'
   return 'en'
@@ -39,15 +40,11 @@ export async function detectLocale(): Promise<Locale> {
         dataType: 'json',
       }) as { Configuration?: { UiCulture?: string } }
       const culture = data?.Configuration?.UiCulture
-      if (culture) return mapToLocale(culture)
+      if (culture) return mapTagToLocale(culture)
     }
   } catch { /* fall through */ }
 
-  // Fallback: Jellyfin sets document.documentElement.lang via globalize
-  const docLang = document.documentElement.lang
-  if (docLang) return mapToLocale(docLang)
-
-  return mapToLocale(navigator.language || 'en')
+  return detectLang()
 }
 
 export function getTranslations(locale: Locale): Translations {

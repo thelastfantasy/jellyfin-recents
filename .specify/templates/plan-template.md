@@ -31,7 +31,19 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Verify compliance with `.specify/memory/constitution.md` v1.0.0:
+
+| Principle | Status | Notes |
+|-----------|--------|-------|
+| I. No Functionality Loss — no existing features removed or broken | ✅ / ❌ / N/A | |
+| II. Structural Invariance — CSS/import/render order preserved | ✅ / ❌ / N/A | |
+| III. Test Gate — `mise run test` passes at end of each Stage | ✅ / ❌ / N/A | |
+| IV. Build Gate — `mise run update` + CI workflow pass | ✅ / ❌ / N/A | |
+| V. Incremental Verification — per-Stage gate defined before work starts | ✅ / ❌ / N/A | |
+| VI. Git History Preservation — `git mv` used, moves committed separately | ✅ / ❌ / N/A | |
+| VII. Structure/Logic Separation — structural commits contain no logic changes | ✅ / ❌ / N/A | |
+
+> ERROR on any ❌ unless justified below.
 
 ## Project Structure
 

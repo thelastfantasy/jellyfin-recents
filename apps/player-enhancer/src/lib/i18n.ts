@@ -1,3 +1,5 @@
+import { detectLang, createT } from '@jfs/i18n'
+
 const TRANSLATIONS = {
   en: {
     'longpress.speeding':       'Speeding ×{rate}',
@@ -250,19 +252,9 @@ const TRANSLATIONS = {
 
 type TranslationKey = keyof typeof TRANSLATIONS.en;
 
-function detectLang(): 'en' | 'zh' | 'ja' {
-  const lang =
-    document.documentElement.lang ||
-    navigator.language ||
-    'en';
-  const prefix = lang.toLowerCase().split('-')[0];
-  if (prefix === 'zh') return 'zh';
-  if (prefix === 'ja') return 'ja';
-  return 'en';
-}
-
-const _lang = detectLang();
-
 export function t(key: TranslationKey): string {
-  return TRANSLATIONS[_lang][key] ?? TRANSLATIONS.en[key] ?? key;
+  const _lang = detectLang()
+  const translations = TRANSLATIONS as unknown as Record<string, Record<string, string>>
+  const langTranslations = translations[_lang] ?? translations.en
+  return langTranslations[key] ?? translations.en?.[key] ?? key
 }

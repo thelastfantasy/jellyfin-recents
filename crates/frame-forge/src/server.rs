@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use crate::disk_cache::DiskCache;
+use jfs_common::DiskCache;
 use crate::protocol::{read_msg_type, read_single_frame_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
@@ -42,7 +42,7 @@ pub struct State {
 
 impl State {
     pub fn new() -> Arc<Self> {
-        let disk = DiskCache::new();
+        let disk = DiskCache::new("frame-forge");
         let (tx, rx) = mpsc::channel(PREFETCH_QUEUE_CAP);
         let state = Arc::new(Self {
             ram: Mutex::new(LruCache::new(NonZeroUsize::new(RAM_CACHE_CAP).unwrap())),
@@ -90,7 +90,7 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
         let disk = state.disk.clone();
         let item_id = job.item_id.clone();
 
-        match tokio::task::spawn_blocking(move || crate::decoder::decode_and_encode(&path, pos_ms, width)).await {
+        match tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path, pos_ms, width)).await {
             Ok(Ok((bytes, actual_pts_ms, fps_num, fps_den))) => {
                 let frame_idx = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
                 disk.write(&item_id, &job.path, frame_idx, pos_ms, width, &bytes);
@@ -179,7 +179,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
 
     let _permit = state.decode_sem.clone().acquire_owned().await?;
     let result = tokio::task::spawn_blocking(move || {
-        crate::decoder::decode_and_encode(&path, pos_ms, width)
+        jfs_common::decode_and_encode(&path, pos_ms, width)
     })
     .await;
 
@@ -286,7 +286,7 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
     for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
         let p = path.clone();
         let pm = *pos_ms;
-        let (bytes, pts_ms, ..) = tokio::task::spawn_blocking(move || crate::decoder::decode_and_encode(&p, pm, 0)).await??;
+        let (bytes, pts_ms, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pm, 0)).await??;
 
         // Skip duplicate frames (same actual pts as previous, e.g. two posMs values decode to same frame)
         if last_pts == Some(pts_ms) {
@@ -442,7 +442,7 @@ async fn handle_stitch(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow::
     for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
         let p = path.clone();
         let pm = *pos_ms;
-        let (bytes, ..) = tokio::task::spawn_blocking(move || crate::decoder::decode_and_encode(&p, pm, 0)).await??;
+        let (bytes, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pm, 0)).await??;
         images.push(image::load_from_memory(&bytes)?);
         send_progress(
             stream, "running", "decoding",

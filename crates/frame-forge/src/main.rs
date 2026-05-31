@@ -10,8 +10,6 @@
 
 mod animate;
 mod blender;
-mod decoder;
-mod disk_cache;
 mod protocol;
 mod quality;
 mod scene_classifier;
@@ -38,7 +36,7 @@ async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let sock_path = args.get(1).context("Usage: frame-forge <socket-path>")?;
 
-    ffmpeg_next::init()?;
+    jfs_common::init();
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;
@@ -74,7 +72,7 @@ async fn run() -> Result<()> {
 #[cfg(all(test, feature = "daemon"))]
 mod tests {
     use crate::animate::{encode_gif, encode_webp_anim};
-    use crate::decoder::decode_and_encode;
+    use jfs_common::decode_and_encode;
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::sync::OnceLock;

@@ -27,6 +27,12 @@ function inlineCssPlugin(): Plugin {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@jfs/api-types': resolve(__dirname, '../../packages/api-types/src/jellyfin-api.ts'),
+      '@jfs/i18n': resolve(__dirname, '../../packages/i18n/src/index.ts'),
+    },
+  },
   plugins: [preact()],
   build: {
     lib: {
@@ -35,7 +41,7 @@ export default defineConfig({
       formats: ['iife'],
       fileName: () => 'jellyfin-suite.js',
     },
-    outDir: resolve(__dirname, '../JellyfinSuite.Plugin/Web'),
+    outDir: resolve(__dirname, '../../packages/JellyfinSuite.Plugin/Web'),
     emptyOutDir: false,
     rollupOptions: {
       output: {

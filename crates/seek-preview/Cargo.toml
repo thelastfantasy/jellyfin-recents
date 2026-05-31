@@ -8,7 +8,7 @@ name = "seek-preview"
 path = "src/main.rs"
 
 [dependencies]
+jfs-common = { path = "../jfs-common" }
 tokio = { version = "1", features = ["full"] }
-ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"] }
 lru = "0.18"
 anyhow = "1"

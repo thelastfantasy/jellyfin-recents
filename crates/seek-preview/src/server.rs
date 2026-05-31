@@ -1,5 +1,5 @@
-use crate::decoder::{decode_and_encode, index_frames};
-use crate::disk_cache::DiskCache;
+use jfs_common::{decode_and_encode, index_frames, compute_frame_idx};
+use jfs_common::DiskCache;
 use crate::protocol::{read_priority, read_req_body, write_ack, write_response};
 use lru::LruCache;
 use std::collections::HashMap;
@@ -60,11 +60,6 @@ impl State {
             frame_index: Mutex::new(HashMap::new()),
         })
     }
-}
-
-fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
-    if fps_num <= 0 || fps_den <= 0 { return -1; }
-    (actual_pts_ms * fps_num + fps_den * 500) / (fps_den * 1000)
 }
 
 async fn evict_on_switch(state: &Arc<State>, item_id: &str) {

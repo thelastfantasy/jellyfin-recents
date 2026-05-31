@@ -1,7 +1,7 @@
 import { render } from 'preact'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import { t } from '../lib/i18n'
-import type { components } from '../types/jellyfin-suite-api'
+import type { components } from '@jfs/api-types'
 
 import {
   sPage, sFrames, sExportType, sPrefetchTotal, sPrefetchDone,

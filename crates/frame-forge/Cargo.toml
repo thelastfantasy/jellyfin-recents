@@ -14,6 +14,7 @@ required-features = ["cli"]
 
 [dependencies]
 # Daemon deps (Linux only)
+jfs-common = { path = "../jfs-common" }
 tokio = { version = "1", features = ["full"], optional = true }
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
 opencv = { version = "0.93", optional = true, features = ["clang-runtime"] }

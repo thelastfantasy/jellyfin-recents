@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::Path;
 use std::ptr;
 
 /// Returns (jpeg_bytes, actual_pts_ms, fps_num, fps_den).
 /// actual_pts_ms is the real decoded frame timestamp; fps_num/fps_den are the stream frame rate.
-pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Result<(Vec<u8>, i64, i64, i64)> {
+pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<(Vec<u8>, i64, i64, i64)> {
     use ffmpeg_next as ff;
     use ffmpeg_next::threading;
 
@@ -122,7 +122,7 @@ pub fn decode_and_encode(path: &PathBuf, pos_ms: i64, target_width: u32) -> Resu
 /// Enumerate all video frame timestamps by demuxing (no decoding).
 /// Returns (frames: Vec<(pts_ms, is_keyframe)>, fps_num, fps_den).
 /// Fast: reads container index without decoding pixel data.
-pub fn index_frames(path: &PathBuf) -> Result<(Vec<(i64, bool)>, i64, i64)> {
+pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
     use ffmpeg_next as ff;
 
     let mut ictx = ff::format::input(path)

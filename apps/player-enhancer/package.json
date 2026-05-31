@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@alivecss/aliveui": "^1.3.1",
+    "@jfs/api-types": "workspace:*",
+    "@jfs/i18n": "workspace:*",
     "@preact/signals": "^2.9.1",
     "preact": "^10.29.2"
   }

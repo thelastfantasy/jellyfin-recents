@@ -84,8 +84,7 @@ console.log(`Filtered: ${Object.keys(filteredPaths).length} paths, ${Object.keys
 
 // Generate via programmatic API (avoids npx/shell issues on Windows)
 const targets = [
-  join(root, 'src/player-enhancer/src/jellyfin-api.ts'),
-  join(root, 'src/frontend/src/jellyfin-api.ts'),
+  join(root, 'packages/api-types/src/jellyfin-api.ts'),
 ]
 
 const ast = await openapiTS(filteredSpec)

@@ -1,0 +1,8 @@
+[package]
+name = "jfs-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"] }
+anyhow = "1"
