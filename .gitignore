@@ -11,9 +11,8 @@ build/
 .env
 .env.local
 .env.*.local
-# 根目录误生成的 npm lockfile（前端 lockfile 在 src/frontend/）
+# 根目录误生成的 npm lockfile（实际 lockfile 由 pnpm-lock.yaml 管理）
 /package-lock.json
-/package.json
 
 # C# / .NET
 bin/
@@ -21,7 +20,13 @@ obj/
 *.user
 *.suo
 .vs/
-packages/
+# packages/ is a source directory; ignore only NuGet metadata
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite.js
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-frontend.css
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-player-enhancer.css
+packages/JellyfinSuite.Plugin/bin/
+packages/JellyfinSuite.Plugin/obj/
 *.nupkg
 publish/
 *.DotSettings.user
@@ -41,14 +46,14 @@ Thumbs.db
 # IDE
 .idea/
 *.swp
-src/frontend/node_modules/
-src/frontend/dist/
-src/JellyfinSuite.Plugin/Web/jellyfin-suite.js
-src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js
-src/JellyfinSuite.Plugin/Web/jellyfin-suite-frontend.css
-src/JellyfinSuite.Plugin/Web/jellyfin-suite-player-enhancer.css
-src/JellyfinSuite.Plugin/bin/
-src/JellyfinSuite.Plugin/obj/
+apps/frontend/node_modules/
+apps/frontend/dist/
+apps/player-enhancer/node_modules/
+apps/player-enhancer/dist/
+packages/i18n/node_modules/
+packages/api-types/node_modules/
+tests/JellyfinSuite.Tests/bin/
+tests/JellyfinSuite.Tests/obj/
 tests/JellyfinRecents.Tests/bin/
 tests/JellyfinRecents.Tests/obj/
 
@@ -61,26 +66,25 @@ tests/JellyfinRecents.Tests/obj/
 .opencode/tmp/
 
 # Rust
-src/poster-gen/target/
-src/seek-preview/target/
-src/frame-forge/target/
+crates/poster-gen/target/
+crates/seek-preview/target/
+crates/frame-forge/target/
+target/
 
 # poster-gen 编译产物（运行时从 Docker 构建，不入仓库）
-src/poster-gen/poster-gen-linux-x64
-src/poster-gen/poster-gen-win-x64.exe
-src/JellyfinRecents.Plugin/poster-gen-linux-x64
-src/JellyfinSuite.Plugin/poster-gen-linux-x64
-src/JellyfinRecents.Plugin/poster-gen-win-x64.exe
-src/JellyfinSuite.Plugin/poster-gen-win-x64.exe
+crates/poster-gen/poster-gen-linux-x64
+crates/poster-gen/poster-gen-win-x64.exe
+packages/JellyfinSuite.Plugin/poster-gen-linux-x64
+packages/JellyfinSuite.Plugin/poster-gen-win-x64.exe
 
 # seek-preview 编译产物
-src/JellyfinSuite.Plugin/seek-preview-linux-x64
+packages/JellyfinSuite.Plugin/seek-preview-linux-x64
 
 # frame-forge 编译产物
-src/JellyfinSuite.Plugin/frame-forge-linux-x64
+packages/JellyfinSuite.Plugin/frame-forge-linux-x64
 
 # Vite 构建缓存
-src/frontend/.vite/
+apps/frontend/.vite/
 
 # speckit 当前功能指针（每次切换功能分支自动更新，属临时状态）
 .specify/feature.json
