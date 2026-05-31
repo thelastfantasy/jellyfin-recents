@@ -56,10 +56,10 @@ public sealed class MyDto
 - 新增任何 DTO 类 → 所有属性加 `[JsonPropertyName]`，不得遗漏
 - C# DTO 变更后**必须**重新生成 TypeScript 类型：
   ```
-  mise run gen-types   ← 需要 jellyfin-dev 容器正在运行（spec: http://localhost:8600/api-docs/openapi.json）
-  ```
-  生成的文件：`src/player-enhancer/src/jellyfin-api.ts`、`src/frontend/src/jellyfin-api.ts`
-- 前端从 `jellyfin-api.ts` 中的 `components['schemas']['XxxDto']` 取类型，不手写接口
+   mise run gen-types   ← 需要 jellyfin-dev 容器正在运行（spec: http://localhost:8600/api-docs/openapi.json）
+   ```
+   生成的文件：`packages/api-types/src/jellyfin-api.ts`
+- 前端从 `jellyfin-api.ts` 中的 `components['schemas']['XxxDto']` 取类型，通过 `@jfs/api-types` 包引用
 - 前端直接读 camelCase key，不得使用 `d.foo ?? d.Foo` 兜底写法
 
 ### Jellyfin 原生 API：适应 PascalCase
@@ -76,11 +76,11 @@ const fps = vid?.RealFrameRate ?? vid?.AverageFrameRate ?? 24
 
 **修改 Rust 代码后，必须先通过 `cargo check` 再执行 build，不得跳过直接构建。**
 
-- `src/frame-forge` 含 `#[cfg(feature = "opencv")]` 代码，Windows 本地无 OpenCV，必须在 Docker 中 check：
+- `crates/frame-forge` 含 `#[cfg(feature = "opencv")]` 代码，Windows 本地无 OpenCV，必须在 Docker 中 check：
   ```
   mise run check-frame-forge
   ```
-- 其他纯 Rust crate（`poster-gen`、`seek-preview`）可在本地直接 `cargo check`
+- 其他纯 Rust crate（`poster-gen`、`seek-preview`）可在本地直接 `cargo check -p <crate>`
 - 只有 `check` 全部通过（0 errors）才允许触发完整 build（`mise run build-frame-forge` / `mise run update`）
 - 每次修改后先跑 check，根据错误修复后再跑 check，确认 clean 再 build，**不得以 full build 做试错工具**
 
