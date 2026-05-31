@@ -1,6 +1,7 @@
-import type { FrameEntry } from '../state'
-import { sPrefetchDone, sPrefetchTotal } from '../state'
-import { formatTime } from '../utils'
+import type { FrameEntry } from '../core/state'
+import { sPrefetchDone, sPrefetchTotal } from '../core/state'
+import { formatTime } from '../lib/utils'
+import { t } from '../lib/i18n'
 
 const ICON_VIEW = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
   <path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>
@@ -33,9 +34,9 @@ export function FrameCard({
   const imgContent = f.loadError
     ? (
       <div class="jfs-fe-err-ph">
-        <span>加载失败</span>
+        <span>{t('frameExport.loadError')}</span>
         <button class="jfs-fe-retry-btn" onClick={e => { e.stopPropagation(); onRetry(idx) }}>
-          重试
+          {t('frameExport.retry')}
         </button>
       </div>
     )
@@ -58,24 +59,24 @@ export function FrameCard({
       style={{ cursor: 'pointer' }}
       onMouseDown={e => onMouseDown(idx, e)}
     >
-      {f.isJunk && <span class="jfs-fe-badge">{f.junkReason || '垃圾帧'}</span>}
+      {f.isJunk && <span class="jfs-fe-badge">{f.junkReason || t('frameExport.junk')}</span>}
       {imgContent}
       <div class="jfs-fe-card-acts">
         <button
           class="jfs-fe-card-act jfs-fe-view-btn"
-          title="查看大图"
+          title={t('card.view')}
           dangerouslySetInnerHTML={{ __html: ICON_VIEW }}
           onClick={e => { e.stopPropagation(); onView(idx) }}
         />
         <button
           class="jfs-fe-card-act jfs-fe-dl-btn"
-          title="下载原图"
+          title={t('card.download')}
           dangerouslySetInnerHTML={{ __html: ICON_DOWNLOAD }}
           onClick={e => { e.stopPropagation(); onDownload(idx) }}
         />
         <button
           class="jfs-fe-card-act jfs-fe-rm-btn"
-          title="移除此帧"
+          title={t('card.remove')}
           dangerouslySetInnerHTML={{ __html: ICON_TRASH }}
           onClick={e => { e.stopPropagation(); onRemove(idx) }}
         />

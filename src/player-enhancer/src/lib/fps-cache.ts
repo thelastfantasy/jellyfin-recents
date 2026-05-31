@@ -1,4 +1,4 @@
-import './types/jellyfin';
+import '../types/jellyfin';
 
 interface ItemResponse {
   MediaSources?: Array<{

@@ -1,10 +1,7 @@
-// frame-export: public API + business logic (modal lifecycle, frame loading)
-// UI components live in ./components/; API calls in ./api/frameExportApi.ts
-
 import { render } from 'preact'
-import { setGesturesSuspended } from './gestures'
-import { t } from './i18n'
-import type { components } from './jellyfin-api'
+import { setGesturesSuspended } from '../hooks/useGestures'
+import { t } from '../lib/i18n'
+import type { components } from '../types/jellyfin-suite-api'
 
 import {
   sPage, sFrames, sExportType, sPrefetchTotal, sPrefetchDone,
@@ -23,14 +20,13 @@ import {
 import {
   fetchVideoFps, fetchFrameIndex, prefetch, openPrefetchStream,
   fetchFrameBlob, frameUrl, generateExport, buildResultUrl,
-} from './api/frameExportApi'
+} from '../api/frameExportApi'
 
-import { GridPage }     from './components/GridPage'
-import { ProgressPage } from './components/ProgressPage'
-import { ResultPage }   from './components/ResultPage'
-import { Lightbox }     from './components/Lightbox'
-import { CropPopover }  from './components/CropPopover'
-import { Toast }        from './components/Toast'
+import { GridPage }     from '../components/GridPage'
+import { ProgressPage } from '../components/ProgressPage'
+import { ResultPage }   from '../components/ResultPage'
+import { Lightbox }     from '../components/Lightbox'
+import { CropPopover }  from '../components/CropPopover'
 
 void t  // i18n is imported by child components; keep the import for side effects
 
@@ -233,8 +229,8 @@ async function submitGenerate(): Promise<void> {
     seenKey.add(key)
     return true
   })
-  if (selected.length < 2) { alert('至少需要选择 2 帧'); return }
-  if (selected.length > 240 && !confirm(`选中 ${selected.length} 帧，文件可能较大。继续？`)) return
+  if (selected.length < 2) { alert(t('export.minFrames')); return }
+  if (selected.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(selected.length)))) return
 
   const format = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
   const body: GenerateRequest = {
@@ -262,7 +258,7 @@ async function submitGenerate(): Promise<void> {
     const taskId = await generateExport(body)
     showProgressPage(taskId)
   } catch (e) {
-    alert(`生成失败: ${e instanceof Error ? e.message : e}`)
+    alert(t('export.failed').replace('{msg}', e instanceof Error ? e.message : String(e)))
   }
 }
 
@@ -331,7 +327,6 @@ function FrameExportModal() {
       )}
       <Lightbox />
       <CropPopover />
-      <Toast />
     </>
   )
 }

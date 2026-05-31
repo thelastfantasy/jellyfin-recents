@@ -1,4 +1,5 @@
-import { t } from './i18n';
+import { t } from '../lib/i18n';
+import { showToast } from '../components/Toast';
 
 function getApiBase(): string {
   const ac = (window as any).ApiClient;
@@ -36,18 +37,6 @@ async function fetchFrameStartMs(itemId: string, posMs: number): Promise<number 
 
 function sanitize(name: string): string {
   return name.replace(/[^\w一-鿿぀-ヿ가-힯\- ]/g, '_').trim() || 'screenshot';
-}
-
-function showToast(msg: string): void {
-  const el = document.createElement('div');
-  el.style.cssText = `
-    position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,0.8);color:#fff;padding:10px 18px;border-radius:6px;
-    font-size:14px;z-index:99999;pointer-events:none;
-  `;
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
 }
 
 function downloadBlob(blob: Blob, filename: string): void {

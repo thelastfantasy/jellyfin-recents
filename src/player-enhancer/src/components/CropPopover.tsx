@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'preact/hooks'
-import { sCropOpen, sSettings, _frames, _videoEl, updateSettings } from '../state'
-import { formatTime } from '../utils'
+import { sCropOpen, sSettings, _frames, _videoEl, updateSettings } from '../core/state'
+import { formatTime } from '../lib/utils'
 import { showToast } from './Toast'
+import { t } from '../lib/i18n'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ export function CropPopover() {
   useEffect(() => {
     if (open && loadedFrames.length === 0) {
       sCropOpen.value = false
-      showToast('没有已加载的帧，请先加载再裁切')
+      showToast(t('crop.noFrames'))
     }
   }, [open, loadedFrames.length])
 
@@ -93,10 +94,11 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
   })()
 
   const [curIdx, setCurIdx]   = useState(initialIdx)
-  const [infoText, setInfoText] = useState('选择裁切区域')
+  const [infoText, setInfoText] = useState(() => t('crop.hint'))
 
   const imgRef    = useRef<HTMLImageElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stageRef  = useRef<HTMLDivElement>(null)
 
   // Drag state in refs — no re-render needed during pointer move
   const draftRef        = useRef<CropRect>(st.cropRect ? { ...st.cropRect } : { x: 0, y: 0, w: 1, h: 1 })
@@ -108,9 +110,10 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
   const positionCanvas = useCallback(() => {
     const img    = imgRef.current
     const canvas = canvasRef.current
-    if (!img || !canvas) return
+    const stage  = stageRef.current
+    if (!img || !canvas || !stage) return
     const iRect = img.getBoundingClientRect()
-    const sRect = canvas.parentElement!.getBoundingClientRect()
+    const sRect = stage.getBoundingClientRect()
     canvas.style.left   = `${iRect.left - sRect.left}px`
     canvas.style.top    = `${iRect.top  - sRect.top}px`
     canvas.style.width  = `${iRect.width}px`
@@ -173,8 +176,9 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
       else { outH = targetPx; outW = Math.round(cropW * targetPx / cropH) }
     }
     setInfoText((outW === cropW && outH === cropH)
-      ? `选区 ${cropW}×${cropH} px`
-      : `选区 ${cropW}×${cropH} → 输出 ${outW}×${outH} px`
+      ? t('crop.infoSize').replace('{w}', String(cropW)).replace('{h}', String(cropH))
+      : t('crop.infoResized').replace('{w}', String(cropW)).replace('{h}', String(cropH))
+          .replace('{ow}', String(outW)).replace('{oh}', String(outH))
     )
   }, [])
 
@@ -325,11 +329,11 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
       if (currentSt.resizeMode === 'width' && currentSt.customWidth > 0) {
         const hRatio = newCrop ? (newCrop.h * vh) / (newCrop.w * vw) : vh / vw
         patch.customHeight = Math.round(currentSt.customWidth * hRatio)
-        showToast('已根据裁切比例自动调整高度')
+        showToast(t('crop.autoAdjH'))
       } else if (currentSt.resizeMode === 'height' && currentSt.customHeight > 0) {
         const wRatio = newCrop ? (newCrop.w * vw) / (newCrop.h * vh) : vw / vh
         patch.customWidth = Math.round(currentSt.customHeight * wRatio)
-        showToast('已根据裁切比例自动调整宽度')
+        showToast(t('crop.autoAdjW'))
       }
     }
     updateSettings(patch)
@@ -346,7 +350,7 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
       onClick={e => { if (e.target === e.currentTarget) sCropOpen.value = false }}
     >
       <div class="jfs-fe-crop-dialog">
-        <div class="jfs-fe-crop-stage" id="jfs-cp-stage">
+        <div ref={stageRef} class="jfs-fe-crop-stage" id="jfs-cp-stage">
           <img ref={imgRef} id="jfs-cp-img" alt="" />
           <canvas ref={canvasRef} class="jfs-fe-crop-canvas" />
           <button
@@ -365,9 +369,9 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
         </div>
         <div class="jfs-fe-row sep-t" style={{ gap: '6px' }}>
           <span class="jfs-fe-muted" style={{ flex: '1', fontSize: '11px' }}>{infoText}</span>
-          <button class="jfs-fe-btn g" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleReset}>重置</button>
-          <button class="jfs-fe-btn"   style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => { sCropOpen.value = false }}>取消</button>
-          <button class="jfs-fe-btn p" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleApply}>应用</button>
+          <button class="jfs-fe-btn g" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleReset}>{t('crop.reset')}</button>
+          <button class="jfs-fe-btn"   style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => { sCropOpen.value = false }}>{t('crop.cancel')}</button>
+          <button class="jfs-fe-btn p" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleApply}>{t('crop.apply')}</button>
         </div>
       </div>
     </div>

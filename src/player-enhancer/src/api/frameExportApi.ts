@@ -1,4 +1,4 @@
-import type { components } from '../jellyfin-api'
+import type { components } from '../types/jellyfin-suite-api'
 
 type GenerateRequest = components['schemas']['GenerateRequest']
 type GenerateResponse = components['schemas']['GenerateResponse']

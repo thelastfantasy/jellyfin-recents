@@ -6,11 +6,11 @@ import {
   set_dragMode, set_dragSelectValue, set_lastClickedIdx, set_suppressNextMousedown,
   set_longPressCard, set_longPressTimer, set_autoScrollRaf, set_lastTouchXY,
   renderGrid,
-} from '../state'
+} from '../core/state'
 import { frameUrl } from '../api/frameExportApi'
-import { _itemId } from '../state'
+import { _itemId } from '../core/state'
 import { FrameCard } from './FrameCard'
-import { sLightboxIdx } from '../state'
+import { sLightboxIdx } from '../core/state'
 
 // ── applyDragToPoint: direct DOM updates for drag perf, no renderGrid ─────────
 function applyDragToPoint(x: number, y: number): void {
@@ -68,7 +68,7 @@ export function FrameGrid() {
     if (!f) return
     const url = frameUrl(_itemId, f.fiIdx, f.posMs, 0)
     const title = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'frame'
-    const ts = import('../utils').then(({ formatTime }) => {
+    const ts = import('../lib/utils').then(({ formatTime }) => {
       const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
       const a = document.createElement('a')
       a.href = url
@@ -90,7 +90,7 @@ export function FrameGrid() {
     _frames[idx].loadError = false
     if (_frames[idx].blobUrl) { URL.revokeObjectURL(_frames[idx].blobUrl!); _frames[idx].blobUrl = undefined }
     renderGrid()
-    import('../frame-export').then(m => m.updateFrameImage(idx))
+    import('../core/frame-export').then(m => m.updateFrameImage(idx))
   }, [])
 
   const handleToggle = useCallback((idx: number, checked: boolean) => {

@@ -3,8 +3,8 @@ import {
   updateSettings, renderGrid,
   _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
   frameInterval,
-} from '../state'
-import { t } from '../i18n'
+} from '../core/state'
+import { t } from '../lib/i18n'
 import { FrameGrid } from './FrameGrid'
 import { ParamsPanel } from './ParamsPanel'
 
@@ -70,23 +70,23 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
       <FrameGrid />
       {paramsOpen && <ParamsPanel />}
       <div class="jfs-fe-row sep-t" id="jfs-fe-tbar">
-        <span class="jfs-fe-title">剪辑工坊</span>
+        <span class="jfs-fe-title">{t('frameExport.title')}</span>
         <div class="jfs-fe-seg">
-          <button class={`jfs-fe-seg-btn${exportType === 'animate' ? ' active' : ''}`} onClick={() => { sExportType.value = 'animate' }}>动画</button>
-          <button class={`jfs-fe-seg-btn${exportType === 'stitch'  ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch'  }}>全景图</button>
+          <button class={`jfs-fe-seg-btn${exportType === 'animate' ? ' active' : ''}`} onClick={() => { sExportType.value = 'animate' }}>{t('grid.animate')}</button>
+          <button class={`jfs-fe-seg-btn${exportType === 'stitch'  ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch'  }}>{t('grid.stitch')}</button>
         </div>
         <select class="jfs-fe-sel" value={fmt} onChange={handleFormatChange}>
           {formatOpts.map(o => <option key={o} value={o}>{o.toUpperCase()}</option>)}
         </select>
-        <select class="jfs-fe-sel" title="稀疏选择" style={{ minWidth: '0' }} onChange={handleSparseChange}>
-          <option value="0">稀疏▾</option>
+        <select class="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
+          <option value="0">{t('grid.sparse')}</option>
           <option value="1">全</option>
           <option value="2">½</option>
           <option value="3">⅓</option>
           <option value="4">¼</option>
         </select>
         <button class="jfs-fe-btn g" onClick={() => { sParamsOpen.value = !sParamsOpen.value }}>
-          {paramsOpen ? '参数 ▾' : '参数 ▴'}
+          {paramsOpen ? `${t('grid.params')} ▾` : `${t('grid.params')} ▴`}
         </button>
         <span class="jfs-fe-tbar-break" />
         <div class="jfs-fe-spacer" />
@@ -97,7 +97,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
           </button>
           {removedCount > 0 && (
             <button class="jfs-fe-btn" style={{ fontSize: '11px', padding: '2px 7px', marginLeft: '4px', background: 'rgba(239,68,68,0.75)' }} onClick={handleRestore}>
-              还原 {removedCount} 帧
+              {t('grid.restore').replace('{n}', String(removedCount))}
             </button>
           )}
         </span>
@@ -108,7 +108,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
           {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
         </button>
         <button class="jfs-fe-btn p" onClick={onGenerate}>
-          {exportType === 'animate' ? '生成动画' : '导出全景图'}
+          {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}
         </button>
         <button class="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>

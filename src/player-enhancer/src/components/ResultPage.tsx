@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks'
-import { sResultUrl, sFileSize, sExportType, _frames, _activeTaskId } from '../state'
+import { sResultUrl, sFileSize, sExportType, _frames, _activeTaskId } from '../core/state'
 import { buildResultUrl, deleteResult } from '../api/frameExportApi'
-import { formatTime } from '../utils'
+import { formatTime } from '../lib/utils'
+import { t } from '../lib/i18n'
 
 const ICON_CCW = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 const ICON_CW  = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`
@@ -40,9 +41,9 @@ export function ResultPage({ onBack, onClose }: {
   return (
     <div class="jfs-fe-osd" style={{ maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
       <div class="jfs-fe-row sep-b">
-        <button class="jfs-fe-btn g" style={{ flex: '0 0 auto' }} onClick={onBack}>← 返回</button>
+        <button class="jfs-fe-btn g" style={{ flex: '0 0 auto' }} onClick={onBack}>{t('result.back')}</button>
         <div style={{ flex: '1' }} />
-        <span class="jfs-fe-title">预览 · {sizeStr}</span>
+        <span class="jfs-fe-title">{t('result.preview').replace('{size}', sizeStr)}</span>
         <div style={{ flex: '1' }} />
         <button class="jfs-fe-btn g" style={{ flex: '0 0 auto', padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>
@@ -64,8 +65,8 @@ export function ResultPage({ onBack, onClose }: {
         <button class="jfs-fe-btn g" onClick={() => setRotation(r => r + 1)} dangerouslySetInnerHTML={{ __html: '1° ' + ICON_CW }} />
         <button class="jfs-fe-btn g" onClick={() => setRotation(r => r + 5)} dangerouslySetInnerHTML={{ __html: '5° ' + ICON_CW }} />
         <div class="jfs-fe-spacer" />
-        <button class="jfs-fe-btn p" onClick={handleDownload}>下载</button>
-        <button class="jfs-fe-btn"   onClick={handleDelete}>删除</button>
+        <button class="jfs-fe-btn p" onClick={handleDownload}>{t('result.download')}</button>
+        <button class="jfs-fe-btn"   onClick={handleDelete}>{t('result.delete')}</button>
       </div>
     </div>
   )

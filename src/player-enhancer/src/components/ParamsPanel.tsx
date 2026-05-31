@@ -1,5 +1,6 @@
-import { sSettings, sExportType, sCropOpen, updateSettings, _videoEl } from '../state'
-import type { ExportSettings } from '../state'
+import { sSettings, sExportType, sCropOpen, updateSettings, _videoEl } from '../core/state'
+import type { ExportSettings } from '../core/state'
+import { t } from '../lib/i18n'
 
 const ICON_CROP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 2 6 17 21 17"/><polyline points="2 6 17 6 17 21"/></svg>`
 
@@ -75,9 +76,9 @@ export function ParamsPanel() {
   }
 
   const qualityOptions = [
-    { v: 0.85, label: '高质量 85%' },
-    { v: 0.75, label: '标准 75%' },
-    { v: 0.60, label: '普通 60%' },
+    { v: 0.85, label: t('params.quality85') },
+    { v: 0.75, label: t('params.quality75') },
+    { v: 0.60, label: t('params.quality60') },
   ]
   const qualVal = isLossless ? 0.75 : curQuality
 
@@ -87,25 +88,25 @@ export function ParamsPanel() {
         <div class="jfs-fe-pgroup">
           <div class="jfs-fe-pgroup-body">
             <label class="jfs-fe-lbl" style={{ gap: '5px', whiteSpace: 'nowrap' }}>
-              <span class="jfs-fe-muted" style={{ fontSize: '11px' }}>预设</span>
+              <span class="jfs-fe-muted" style={{ fontSize: '11px' }}>{t('params.preset')}</span>
               <input type="checkbox" class="jfs-fe-toggle-chk" checked={st.useCustomResolution} onChange={handleCustomToggle} />
               <span class="jfs-fe-toggle-track" />
-              <span class="jfs-fe-muted" style={{ fontSize: '11px' }}>自定义</span>
+              <span class="jfs-fe-muted" style={{ fontSize: '11px' }}>{t('params.custom')}</span>
             </label>
             {!st.useCustomResolution
               ? <select class="jfs-fe-sel" value={st.resolutionPreset} onChange={handlePresetChange}>
-                  {presets.map(p => <option key={p} value={p}>{p === 'original' ? '原始' : p}</option>)}
+                  {presets.map(p => <option key={p} value={p}>{p === 'original' ? t('params.original') : p}</option>)}
                 </select>
               : <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span class="jfs-fe-muted" style={{ width: '16px' }}>宽</span>
+                    <span class="jfs-fe-muted" style={{ width: '16px' }}>{t('params.width')}</span>
                     <input type="number" value={st.customWidth || ''} placeholder="px" class="jfs-fe-inp" style={{ width: '56px' }}
                       onInput={handleWidthInput}
                       onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
                       onWheel={(e: WheelEvent) => e.stopPropagation()} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span class="jfs-fe-muted" style={{ width: '16px' }}>高</span>
+                    <span class="jfs-fe-muted" style={{ width: '16px' }}>{t('params.height')}</span>
                     <input type="number" value={st.customHeight || ''} placeholder="auto" class="jfs-fe-inp" style={{ width: '56px' }}
                       onInput={handleHeightInput}
                       onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
@@ -114,20 +115,20 @@ export function ParamsPanel() {
                 </>
             }
           </div>
-          <div class="jfs-fe-pgroup-label">分辨率</div>
+          <div class="jfs-fe-pgroup-label">{t('params.resolution')}</div>
         </div>
         <div class="jfs-fe-pgroup-sep" />
 
         <div class="jfs-fe-pgroup">
           <div class="jfs-fe-pgroup-body">
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span class="jfs-fe-muted" style={{ width: '28px' }}>倍速</span>
+              <span class="jfs-fe-muted" style={{ width: '28px' }}>{t('params.speed')}</span>
               <select class="jfs-fe-sel" value={String(st.speed)} onChange={handleSpeedChange}>
                 {[0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4].map(v => <option key={v} value={String(v)}>{v}x</option>)}
               </select>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span class="jfs-fe-muted" style={{ width: '28px' }}>循环</span>
+              <span class="jfs-fe-muted" style={{ width: '28px' }}>{t('params.loop')}</span>
               <input type="number" min={0} max={99} value={st.loopCount} class="jfs-fe-inp" style={{ width: '44px' }}
                 onInput={handleLoopInput}
                 onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
@@ -135,7 +136,7 @@ export function ParamsPanel() {
               <span class="jfs-fe-muted">(0=∞)</span>
             </div>
           </div>
-          <div class="jfs-fe-pgroup-label">动效</div>
+          <div class="jfs-fe-pgroup-label">{t('params.animation')}</div>
         </div>
         <div class="jfs-fe-pgroup-sep" />
 
@@ -144,12 +145,12 @@ export function ParamsPanel() {
             <button
               class={`jfs-fe-btn${st.cropRect ? ' p' : ''}`}
               onClick={() => { sCropOpen.value = true }}
-              title={st.cropRect ? '已裁切 (点击修改)' : '设置裁切区域'}
+              title={st.cropRect ? t('params.cropActive') : t('params.cropSet')}
               style={{ padding: '5px', width: '30px', height: '30px', fontSize: '0' }}
               dangerouslySetInnerHTML={{ __html: ICON_CROP }}
             />
           </div>
-          <div class="jfs-fe-pgroup-label">裁切</div>
+          <div class="jfs-fe-pgroup-label">{t('params.crop')}</div>
         </div>
         <div class="jfs-fe-pgroup-sep" />
       </>}
@@ -158,13 +159,13 @@ export function ParamsPanel() {
         <div class="jfs-fe-pgroup-body">
           <label class="jfs-fe-lbl">
             <input type="checkbox" checked={isLossless} onChange={handleLosslessChange} style={{ cursor: 'pointer' }} />
-            无损
+            {t('params.lossless')}
           </label>
           <select class="jfs-fe-sel" disabled={isLossless} value={String(qualVal)} onChange={handleQualityChange}>
             {qualityOptions.map(o => <option key={o.v} value={String(o.v)}>{o.label}</option>)}
           </select>
         </div>
-        <div class="jfs-fe-pgroup-label">质量</div>
+        <div class="jfs-fe-pgroup-label">{t('params.quality')}</div>
       </div>
     </div>
   )
