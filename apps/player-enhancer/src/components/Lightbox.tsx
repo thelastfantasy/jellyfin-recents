@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { sLightboxIdx, _frames, lightboxIdxAtom } from '../core/state'
+import { sLightboxIdx, _frames, _itemId, lightboxIdxAtom } from '../core/state'
+import { frameUrl } from '../api/frameExportApi'
 
 const ICON_PREV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`
 const ICON_NEXT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
@@ -26,6 +27,8 @@ export function Lightbox() {
 
   if (idx === null || !frame?.blobUrl) return null
 
+  const fullUrl = frameUrl(_itemId, frame.fiIdx, frame.posMs, 0)
+
   return (
     <div className="jfs-fe-lb" onClick={() => { sLightboxIdx.value = null }}>
       <button className="jfs-fe-lb-close" onClick={e => { e.stopPropagation(); sLightboxIdx.value = null }}>✕</button>
@@ -39,7 +42,7 @@ export function Lightbox() {
             dangerouslySetInnerHTML={{ __html: ICON_NEXT }} />
         </>
       )}
-      <img src={frame.blobUrl} style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '4px', pointerEvents: 'auto' }}
+      <img src={fullUrl} style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '4px', pointerEvents: 'auto' }}
         onClick={e => e.stopPropagation()} />
     </div>
   )

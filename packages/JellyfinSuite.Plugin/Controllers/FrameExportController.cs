@@ -182,11 +182,15 @@ public class FrameExportController : ControllerBase
         {
             _ = Task.Run(async () =>
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var done = 0;
                 foreach (var posMs in req.Positions)
                 {
-                    try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); }
+                    try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); done++; }
                     catch { /* individual failures ignored */ }
                 }
+                _logger.LogInformation("[FrameExport] Prefetch done: {Done}/{Total} frames cached in {Elapsed}ms",
+                    done, req.Positions.Count, sw.ElapsedMilliseconds);
             });
             return Accepted();
         }

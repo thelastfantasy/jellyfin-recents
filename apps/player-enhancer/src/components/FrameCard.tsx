@@ -43,10 +43,10 @@ export function FrameCard({
         </button>
       </div>
     )
-    : f.blobUrl
+    : f.jpegUrl
       ? (
         <img
-          src={f.blobUrl}
+          src={f.jpegUrl}
           alt={formatTime(f.posMs)}
           onError={() => onLoadError(idx)}
         />
