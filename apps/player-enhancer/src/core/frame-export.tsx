@@ -202,6 +202,7 @@ async function prefetchAndStream(items: Array<{ fiIdx: number; posMs: number }>,
     evSrc.onmessage = (e) => {
       const posMs = parseInt(e.data); if (isNaN(posMs) || !pending.delete(posMs)) return
       sPrefetchDone.value = sPrefetchTotal.value - pending.size
+      jstore.set(modalPhaseAtom, 'loading')
       for (let i = 0; i < _frames.length; i++) {
         if (_frames[i].posMs === posMs) { _frames[i].jpegUrl = frameUrl(_itemId, _frames[i].fiIdx, _frames[i].posMs, width); _frames[i].loadError = false; updateFrameImage(i) }
       }
