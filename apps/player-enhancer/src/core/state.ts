@@ -192,7 +192,7 @@ export function set_itemId(v: string)                         { _itemId = v }
 export function set_activeTaskId(v: string)                   { _activeTaskId = v }
 
 export let _frames:         FrameEntry[] = []
-export let _minPosMs        = 0
+export let _minPosMs        = 1
 export let _maxPosMs        = 0
 export let _fpsFrac:        FpsFrac = { num: 24, den: 1 }
 export let _lastClickedIdx  = -1
@@ -219,7 +219,7 @@ export function set_autoScrollRaf(v: number | null)            { _autoScrollRaf 
 export function set_lastTouchXY(x: number, y: number)          { _lastTouchX = x; _lastTouchY = y }
 
 export let _frameIndex: Array<{ ms: number; isKey: boolean }> | null = null
-export let _fiMinIdx = 0
+export let _fiMinIdx = 1
 export let _fiMaxIdx = -1
 
 export function set_frameIndex(v: Array<{ ms: number; isKey: boolean }> | null) { _frameIndex = v }
