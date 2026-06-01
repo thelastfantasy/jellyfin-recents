@@ -4,11 +4,10 @@ import { atom, getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import {
   sPage, sExportType, sResultUrl, sFileSize, sLightboxIdx,
-  sSettings, pageAtom, sModalPhase, modalPhaseAtom,
+  sSettings, pageAtom, sModalPhase, modalPhaseAtom, modalMinimizedAtom,
   sPrefetchTotal, sPrefetchDone, sProgressTaskId,
 } from './state'
 import { useFrameExport } from '../hooks/useFrameExport'
-import { t } from '../lib/i18n'
 import { GridPage }     from '../components/GridPage'
 import { ProgressPage } from '../components/ProgressPage'
 import { ResultPage }   from '../components/ResultPage'
@@ -17,33 +16,31 @@ import { CropPopover }  from '../components/CropPopover'
 
 const jstore = getDefaultStore()
 
-// ── FrameExport modal atom ───────────────────────────────────────────────────
-
 export const _feOpen = atom<{ videoEl: HTMLVideoElement; itemId: string } | null>(null)
 
 export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
-  const root = document.querySelector<HTMLElement>('[data-jfs-modal-root]')
-  if (root) root.style.display = ''
-  sPage.value = 'grid'
+  jstore.set(modalMinimizedAtom, false)
   jstore.set(_feOpen, { videoEl, itemId })
 }
 
-// ── Modal container ─────────────────────────────────────────────────────────
-
 function FrameExportModalApp() {
   const feInfo = useAtomValue(_feOpen)
+  const minimized = useAtomValue(modalMinimizedAtom)
   if (!feInfo) return null
-  return <FrameExportModalInner videoEl={feInfo.videoEl} itemId={feInfo.itemId} />
+  return <FrameExportModalInner videoEl={feInfo.videoEl} itemId={feInfo.itemId} minimized={minimized} />
 }
 
-function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement; itemId: string }) {
+function FrameExportModalInner({ videoEl, itemId, minimized }: {
+  videoEl: HTMLVideoElement
+  itemId: string
+  minimized: boolean
+}) {
   const setFE = useSetAtom(_feOpen)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const dragRef = useRef<{ ox: number; oy: number; startX: number; startY: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const { loadInitialFrames, expandFrames, submitGenerate } = useFrameExport(videoEl, itemId)
 
-  // ESC handler
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'Escape') return; e.stopPropagation()
     if (sLightboxIdx.value !== null) sLightboxIdx.value = null
@@ -59,7 +56,11 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
     setFE(null)
   }
 
-  // Video disconnect guard
+  function handleMinimize() {
+    setGesturesSuspended(false)
+    jstore.set(modalMinimizedAtom, true)
+  }
+
   useEffect(() => {
     const obs = new MutationObserver(() => { if (!videoEl?.isConnected) handleClose() })
     obs.observe(document.body, { childList: true, subtree: true })
@@ -67,7 +68,6 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Drag
   const onDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button,select,input,label,a,.jfs-fe-pbar,[id$="tbar"]')) return
     const rect = rootRef.current?.getBoundingClientRect()
@@ -92,19 +92,17 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
   }, [pos])
 
   const page = useAtomValue(pageAtom)
-  const ps = pos
 
   return createPortal(
     <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} onMouseDown={onDragStart}
-      data-jfs-modal-root="true"
       style={{
-        position: 'fixed', zIndex: 99999, display: 'flex', flexDirection: 'column',
+        position: 'fixed', zIndex: 99999, display: minimized ? 'none' : 'flex', flexDirection: 'column',
         width: 'min(92vw, 960px)', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
         pointerEvents: 'auto',
-        ...(ps ? { left: ps.x, top: ps.y, bottom: 'auto', marginLeft: 0 } : { bottom: 12, left: '50%', marginLeft: 'calc(-1 * min(46vw, 480px))' }),
+        ...(pos ? { left: pos.x, top: pos.y, bottom: 'auto', marginLeft: 0 } : { bottom: 12, left: '50%', marginLeft: 'calc(-1 * min(46vw, 480px))' }),
       }}>
       {page === 'grid' && <GridPage onClose={handleClose} onExpand={dir => expandFrames(dir)} onGenerate={() => submitGenerate()} />}
-      {page === 'progress' && <ProgressPage onClose={handleClose} onResult={(url, size) => { sResultUrl.value = url; sFileSize.value = size; sPage.value = 'result' }} />}
+      {page === 'progress' && <ProgressPage onClose={handleClose} onMinimize={handleMinimize} onResult={(url, size) => { sResultUrl.value = url; sFileSize.value = size; sPage.value = 'result' }} />}
       {page === 'result' && <ResultPage onClose={handleClose} onBack={() => { sPage.value = 'grid' }} />}
       <Lightbox />
       <CropPopover />
@@ -114,6 +112,4 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
 }
 
 export { FrameExportModalApp }
-
-// Re-export for backward compat (used by FrameGrid retry)
 export { updateFrameImage } from '../hooks/useFrameExport'

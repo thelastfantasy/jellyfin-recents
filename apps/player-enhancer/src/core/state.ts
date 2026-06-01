@@ -107,6 +107,9 @@ const _fiMinIdxAtom          = atom(0)
 const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
 const _modalPhaseAtom        = atom<'skeleton' | 'loading'>('skeleton')
+const _modalMinimizedAtom     = atom(false)
+export const modalMinimizedAtom = _modalMinimizedAtom
+export const sModalMinimized   = ref(_modalMinimizedAtom)
 
 // ── React hook-friendly atom exports ─────────────────────────────────────────
 export const pageAtom         = _pageAtom

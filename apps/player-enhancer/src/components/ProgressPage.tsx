@@ -7,22 +7,17 @@ import type { TaskProgressEvent } from '../types/api'
 import { sProgressPercent, sProgressVisible } from '../components/OsdButtons'
 import { t } from '../lib/i18n'
 
-export function ProgressPage({ onClose, onResult }: {
-  onClose:  () => void
-  onResult: (resultUrl: string, fileSize: number) => void
+export function ProgressPage({ onClose, onMinimize, onResult }: {
+  onClose:     () => void
+  onMinimize:  () => void
+  onResult:    (resultUrl: string, fileSize: number) => void
 }) {
   const taskId = useAtomValue(progressTaskIdAtom)
   const [pct, setPct]         = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const modalRootRef          = useRef<HTMLElement | null>(null)
 
-  useEffect(() => {
-    modalRootRef.current = document.querySelector<HTMLElement>('[data-jfs-modal-root]')
-  }, [])
-
-  function hideIndicator() {
+  function clearIndicator() {
     sProgressVisible.value = false
-    if (modalRootRef.current) modalRootRef.current.style.display = ''
   }
 
   useEffect(() => {
@@ -36,18 +31,18 @@ export function ProgressPage({ onClose, onResult }: {
         setPct(data.percent)
         sProgressPercent.value = roundedPct
         if (data.status === 'complete' && data.resultUrl) {
-          evSrc.close(); hideIndicator(); onResult(data.resultUrl, data.fileSize ?? 0)
+          evSrc.close(); clearIndicator(); onResult(data.resultUrl, data.fileSize ?? 0)
         } else if (data.status === 'error') {
-          evSrc.close(); hideIndicator(); setErrorMsg(data.error ?? t('progress.failed'))
+          evSrc.close(); clearIndicator(); setErrorMsg(data.error ?? t('progress.failed'))
         } else if (data.status === 'cancelled') {
-          evSrc.close(); hideIndicator(); onClose()
+          evSrc.close(); clearIndicator(); onClose()
         }
       } catch { /* ignore */ }
     }
 
     evSrc.onerror = () => {
       if (retries++ < 3) return
-      evSrc.close(); hideIndicator(); setErrorMsg(t('progress.disconnected'))
+      evSrc.close(); clearIndicator(); setErrorMsg(t('progress.disconnected'))
     }
 
     return () => { evSrc.close() }
@@ -56,16 +51,13 @@ export function ProgressPage({ onClose, onResult }: {
   }, [taskId])
 
   function handleMinimize() {
-    const root = modalRootRef.current
-    if (!root) return
-    root.style.display = 'none'
-    setGesturesSuspended(false)
-
     sProgressPercent.value = Math.round(pct)
     sProgressVisible.value = true
+    onMinimize()
   }
 
   function handleCancel() {
+    clearIndicator()
     cancelExport(taskId)
     onClose()
   }
