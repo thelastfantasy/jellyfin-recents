@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'preact/hooks'
-import { sProgressTaskId } from '../core/state'
+import { useState, useEffect, useRef } from 'react'
+import { useAtomValue } from 'jotai'
+import { sProgressTaskId, progressTaskIdAtom } from '../core/state'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import { openProgressStream, cancelExport } from '../api/frameExportApi'
 import type { TaskProgressEvent } from '../types/api'
@@ -10,7 +11,7 @@ export function ProgressPage({ onClose, onResult }: {
   onClose:  () => void
   onResult: (resultUrl: string, fileSize: number) => void
 }) {
-  const taskId = sProgressTaskId.value
+  const taskId = useAtomValue(progressTaskIdAtom)
   const [pct, setPct]         = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const modalRootRef          = useRef<HTMLElement | null>(null)
@@ -70,20 +71,20 @@ export function ProgressPage({ onClose, onResult }: {
   }
 
   return (
-    <div class="jfs-fe-osd" style={{ minWidth: '480px', maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
-      <div class="jfs-fe-row sep-b">
-        <span class="jfs-fe-title">{t('progress.generating')}</span>
-        <div class="jfs-fe-spacer" />
-        <button class="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '15px', lineHeight: '1' }} title={t('progress.minimize')} onClick={handleMinimize}>−</button>
-        <button class="jfs-fe-btn" onClick={handleCancel}>{errorMsg ? t('progress.close') : t('progress.cancel')}</button>
+    <div className="jfs-fe-osd" style={{ minWidth: '480px', maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
+      <div className="jfs-fe-row sep-b">
+        <span className="jfs-fe-title">{t('progress.generating')}</span>
+        <div className="jfs-fe-spacer" />
+        <button className="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '15px', lineHeight: '1' }} title={t('progress.minimize')} onClick={handleMinimize}>−</button>
+        <button className="jfs-fe-btn" onClick={handleCancel}>{errorMsg ? t('progress.close') : t('progress.cancel')}</button>
       </div>
       <div style={{ padding: '16px 16px 20px' }}>
-        <div class="jfs-fe-progress">
+        <div className="jfs-fe-progress">
           <div
-            class="jfs-fe-bar"
+            className="jfs-fe-bar"
             style={{ width: `${errorMsg ? 100 : pct}%`, background: errorMsg ? 'rgba(239,68,68,0.8)' : undefined }}
           />
-          <span class="jfs-fe-progress-label">
+          <span className="jfs-fe-progress-label">
             {errorMsg ? errorMsg.substring(0, 40) : `${Math.round(pct)}%`}
           </span>
         </div>

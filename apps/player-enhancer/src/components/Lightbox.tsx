@@ -1,53 +1,46 @@
-import { useEffect } from 'preact/hooks'
-import { sLightboxIdx, _frames, _itemId } from '../core/state'
-import { frameUrl } from '../api/frameExportApi'
-import { formatTime } from '../lib/utils'
+import { useEffect } from 'react'
+import { useAtomValue } from 'jotai'
+import { sLightboxIdx, _frames, lightboxIdxAtom } from '../core/state'
 
 const ICON_PREV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`
 const ICON_NEXT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
 
 export function Lightbox() {
-  const idx = sLightboxIdx.value
+  const idx = useAtomValue(lightboxIdxAtom)
+  const frame = idx !== null ? _frames[idx] : null
 
   useEffect(() => {
-    if (idx === null) return
+    if (idx === null || !frame?.blobUrl) return
     const handler = (ev: KeyboardEvent) => {
-      ev.stopPropagation()
-      if (ev.key === 'Escape')                                      sLightboxIdx.value = null
-      else if (ev.key === 'ArrowLeft'  && idx > 0)                  sLightboxIdx.value = idx - 1
+      if (ev.key === 'Escape') sLightboxIdx.value = null
+      else if (ev.key === 'ArrowLeft' && idx > 0) sLightboxIdx.value = idx - 1
       else if (ev.key === 'ArrowRight' && idx < _frames.length - 1) sLightboxIdx.value = idx + 1
     }
     document.addEventListener('keydown', handler, { capture: true })
-    return () => document.removeEventListener('keydown', handler, { capture: true })
-  }, [idx])
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handler, { capture: true })
+      document.body.style.overflow = ''
+    }
+  }, [idx, frame?.blobUrl])
 
-  if (idx === null) return null
-  const f = _frames[idx]
-  if (!f) return null
-
-  const close   = () => { sLightboxIdx.value = null }
-  const hasPrev = idx > 0
-  const hasNext = idx < _frames.length - 1
+  if (idx === null || !frame?.blobUrl) return null
 
   return (
-    <div class="jfs-fe-lb" onClick={e => { if (e.target === e.currentTarget) close() }}>
-      <button
-        class="jfs-fe-lb-nav jfs-fe-lb-prev"
-        title="上一帧（←）"
-        disabled={!hasPrev}
-        onClick={e => { e.stopPropagation(); if (hasPrev) sLightboxIdx.value = idx - 1 }}
-        dangerouslySetInnerHTML={{ __html: ICON_PREV }}
-      />
-      <img src={frameUrl(_itemId, f.fiIdx, f.posMs, 0)} alt={formatTime(f.posMs)} />
-      <button
-        class="jfs-fe-lb-nav jfs-fe-lb-next"
-        title="下一帧（→）"
-        disabled={!hasNext}
-        onClick={e => { e.stopPropagation(); if (hasNext) sLightboxIdx.value = idx + 1 }}
-        dangerouslySetInnerHTML={{ __html: ICON_NEXT }}
-      />
-      <button class="jfs-fe-lb-close" title="关闭" onClick={close}>✕</button>
-      <div class="jfs-fe-lb-info">{idx + 1} / {_frames.length} · {formatTime(f.posMs)}</div>
+    <div className="jfs-fe-lb" onClick={() => { sLightboxIdx.value = null }}>
+      <button className="jfs-fe-lb-close" onClick={e => { e.stopPropagation(); sLightboxIdx.value = null }}>✕</button>
+      {_frames.length > 1 && (
+        <>
+          <button className="jfs-fe-cp-nav jfs-fe-cp-nav-l" disabled={idx <= 0}
+            onClick={e => { e.stopPropagation(); sLightboxIdx.value = idx - 1 }}
+            dangerouslySetInnerHTML={{ __html: ICON_PREV }} />
+          <button className="jfs-fe-cp-nav jfs-fe-cp-nav-r" disabled={idx >= _frames.length - 1}
+            onClick={e => { e.stopPropagation(); sLightboxIdx.value = idx + 1 }}
+            dangerouslySetInnerHTML={{ __html: ICON_NEXT }} />
+        </>
+      )}
+      <img src={frame.blobUrl} style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: '4px', pointerEvents: 'auto' }}
+        onClick={e => e.stopPropagation()} />
     </div>
   )
 }

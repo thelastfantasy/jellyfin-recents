@@ -1,11 +1,12 @@
-import { sThumbState } from '../services/trickplay'
+import { useAtomValue } from 'jotai'
+import { thumbStateAtom } from '../services/trickplay'
 
 export function TrickplayThumb() {
-  const state = sThumbState.value
+  const state = useAtomValue(thumbStateAtom)
   if (!state.visible || !state.src) return null
   return (
-    <div class="jfs-speed-osd__thumb-wrap" style={{ display: 'block', top: state.top, transform: state.transform }}>
-      <img class="jfs-speed-osd__thumb-img" src={state.src} />
+    <div className="jfs-speed-osd__thumb-wrap" style={{ display: 'block', top: state.top, transform: state.transform }}>
+      <img className="jfs-speed-osd__thumb-img" src={state.src} />
     </div>
   )
 }

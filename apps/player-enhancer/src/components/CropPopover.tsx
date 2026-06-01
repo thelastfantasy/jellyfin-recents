@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'preact/hooks'
-import { sCropOpen, sSettings, _frames, _videoEl, updateSettings } from '../core/state'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useAtomValue } from 'jotai'
+import { sCropOpen, sSettings, _frames, _videoEl, updateSettings, cropOpenAtom, settingsAtom } from '../core/state'
 import { formatTime } from '../lib/utils'
 import { showToast } from './Toast'
 import { t } from '../lib/i18n'
@@ -65,7 +66,7 @@ function applyHandleResize(handle: HandleId, orig: CropRect, dx: number, dy: num
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function CropPopover() {
-  const open = sCropOpen.value
+  const open = useAtomValue(cropOpenAtom)
   const loadedFrames = useMemo(
     () => _frames.filter(f => !f.removed && f.jpegUrl),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,7 +85,7 @@ export function CropPopover() {
 }
 
 function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
-  const st = sSettings.value
+  const st = useAtomValue(settingsAtom)
   const currentMs = (_videoEl?.currentTime ?? 0) * 1000
 
   const initialIdx = (() => {
@@ -294,7 +295,7 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     img.src = loadedFrames[idx].jpegUrl
   }, [loadedFrames, positionCanvas, drawCanvas, updateInfo])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { loadFrame(initialIdx) }, [])
 
   // ── keyboard ──────────────────────────────────────────────────────────────
@@ -346,32 +347,32 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
 
   return (
     <div
-      class="jfs-fe-crop-overlay"
+      className="jfs-fe-crop-overlay"
       onClick={e => { if (e.target === e.currentTarget) sCropOpen.value = false }}
     >
-      <div class="jfs-fe-crop-dialog">
-        <div ref={stageRef} class="jfs-fe-crop-stage" id="jfs-cp-stage">
+      <div className="jfs-fe-crop-dialog">
+        <div ref={stageRef} className="jfs-fe-crop-stage" id="jfs-cp-stage">
           <img ref={imgRef} id="jfs-cp-img" alt="" />
-          <canvas ref={canvasRef} class="jfs-fe-crop-canvas" />
+          <canvas ref={canvasRef} className="jfs-fe-crop-canvas" />
           <button
-            class="jfs-fe-cp-nav jfs-fe-cp-nav-l"
+            className="jfs-fe-cp-nav jfs-fe-cp-nav-l"
             disabled={!hasPrev}
             onClick={() => hasPrev && loadFrame(curIdx - 1)}
           >‹</button>
           <button
-            class="jfs-fe-cp-nav jfs-fe-cp-nav-r"
+            className="jfs-fe-cp-nav jfs-fe-cp-nav-r"
             disabled={!hasNext}
             onClick={() => hasNext && loadFrame(curIdx + 1)}
           >›</button>
-          <div class="jfs-fe-cp-label">
+          <div className="jfs-fe-cp-label">
             {curIdx + 1} / {loadedFrames.length} · {formatTime(f.posMs)}
           </div>
         </div>
-        <div class="jfs-fe-row sep-t" style={{ gap: '6px' }}>
-          <span class="jfs-fe-muted" style={{ flex: '1', fontSize: '11px' }}>{infoText}</span>
-          <button class="jfs-fe-btn g" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleReset}>{t('crop.reset')}</button>
-          <button class="jfs-fe-btn"   style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => { sCropOpen.value = false }}>{t('crop.cancel')}</button>
-          <button class="jfs-fe-btn p" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleApply}>{t('crop.apply')}</button>
+        <div className="jfs-fe-row sep-t" style={{ gap: '6px' }}>
+          <span className="jfs-fe-muted" style={{ flex: '1', fontSize: '11px' }}>{infoText}</span>
+          <button className="jfs-fe-btn g" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleReset}>{t('crop.reset')}</button>
+          <button className="jfs-fe-btn"   style={{ padding: '3px 10px', fontSize: '12px' }} onClick={() => { sCropOpen.value = false }}>{t('crop.cancel')}</button>
+          <button className="jfs-fe-btn p" style={{ padding: '3px 10px', fontSize: '12px' }} onClick={handleApply}>{t('crop.apply')}</button>
         </div>
       </div>
     </div>

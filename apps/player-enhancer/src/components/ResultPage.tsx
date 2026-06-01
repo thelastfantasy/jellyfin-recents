@@ -1,5 +1,6 @@
-import { useState } from 'preact/hooks'
-import { sResultUrl, sFileSize, sExportType, _frames, _activeTaskId } from '../core/state'
+import { useState } from 'react'
+import { useAtomValue } from 'jotai'
+import { sResultUrl, sFileSize, sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
 import { buildResultUrl, deleteResult } from '../api/frameExportApi'
 import { formatTime } from '../lib/utils'
 import { t } from '../lib/i18n'
@@ -11,8 +12,8 @@ export function ResultPage({ onBack, onClose }: {
   onBack:  () => void
   onClose: () => void
 }) {
-  const resultUrl = sResultUrl.value
-  const fileSize  = sFileSize.value
+  const resultUrl = useAtomValue(resultUrlAtom)
+  const fileSize  = useAtomValue(fileSizeAtom)
   const [rotation, setRotation] = useState(0)
 
   const fullUrl = buildResultUrl('', resultUrl)
@@ -39,13 +40,13 @@ export function ResultPage({ onBack, onClose }: {
   }
 
   return (
-    <div class="jfs-fe-osd" style={{ maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
-      <div class="jfs-fe-row sep-b">
-        <button class="jfs-fe-btn g" style={{ flex: '0 0 auto' }} onClick={onBack}>{t('result.back')}</button>
+    <div className="jfs-fe-osd" style={{ maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
+      <div className="jfs-fe-row sep-b">
+        <button className="jfs-fe-btn g" style={{ flex: '0 0 auto' }} onClick={onBack}>{t('result.back')}</button>
         <div style={{ flex: '1' }} />
-        <span class="jfs-fe-title">{t('result.preview').replace('{size}', sizeStr)}</span>
+        <span className="jfs-fe-title">{t('result.preview').replace('{size}', sizeStr)}</span>
         <div style={{ flex: '1' }} />
-        <button class="jfs-fe-btn g" style={{ flex: '0 0 auto', padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
+        <button className="jfs-fe-btn g" style={{ flex: '0 0 auto', padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>
       <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
         <img
@@ -58,15 +59,15 @@ export function ResultPage({ onBack, onClose }: {
           alt="result"
         />
       </div>
-      <div class="jfs-fe-row sep-t" style={{ flexWrap: 'wrap', gap: '6px' }}>
-        <button class="jfs-fe-btn g" onClick={() => setRotation(r => r - 5)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 5°' }} />
-        <button class="jfs-fe-btn g" onClick={() => setRotation(r => r - 1)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 1°' }} />
-        <span class="jfs-fe-muted" style={{ minWidth: '28px', textAlign: 'center' }}>{rotation}°</span>
-        <button class="jfs-fe-btn g" onClick={() => setRotation(r => r + 1)} dangerouslySetInnerHTML={{ __html: '1° ' + ICON_CW }} />
-        <button class="jfs-fe-btn g" onClick={() => setRotation(r => r + 5)} dangerouslySetInnerHTML={{ __html: '5° ' + ICON_CW }} />
-        <div class="jfs-fe-spacer" />
-        <button class="jfs-fe-btn p" onClick={handleDownload}>{t('result.download')}</button>
-        <button class="jfs-fe-btn"   onClick={handleDelete}>{t('result.delete')}</button>
+      <div className="jfs-fe-row sep-t" style={{ flexWrap: 'wrap', gap: '6px' }}>
+        <button className="jfs-fe-btn g" onClick={() => setRotation(r => r - 5)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 5°' }} />
+        <button className="jfs-fe-btn g" onClick={() => setRotation(r => r - 1)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 1°' }} />
+        <span className="jfs-fe-muted" style={{ minWidth: '28px', textAlign: 'center' }}>{rotation}°</span>
+        <button className="jfs-fe-btn g" onClick={() => setRotation(r => r + 1)} dangerouslySetInnerHTML={{ __html: '1° ' + ICON_CW }} />
+        <button className="jfs-fe-btn g" onClick={() => setRotation(r => r + 5)} dangerouslySetInnerHTML={{ __html: '5° ' + ICON_CW }} />
+        <div className="jfs-fe-spacer" />
+        <button className="jfs-fe-btn p" onClick={handleDownload}>{t('result.download')}</button>
+        <button className="jfs-fe-btn"   onClick={handleDelete}>{t('result.delete')}</button>
       </div>
     </div>
   )

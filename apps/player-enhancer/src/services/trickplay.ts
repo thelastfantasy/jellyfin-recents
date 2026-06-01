@@ -1,4 +1,8 @@
-import { signal } from '@preact/signals'
+import { atom, getDefaultStore } from 'jotai'
+const jstore = getDefaultStore()
+function $val<T>(a: ReturnType<typeof atom<T>>) {
+  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v as any) }, peek(): T { return jstore.get(a) } }
+}
 
 interface ThumbState {
   visible: boolean
@@ -7,12 +11,14 @@ interface ThumbState {
   transform: string
 }
 
-export const sThumbState = signal<ThumbState>({
+const _sThumbState = atom<ThumbState>({
   visible: false,
   src: '',
   top: '0px',
   transform: 'translate(-50%, -50%)',
 })
+export const thumbStateAtom = _sThumbState
+export const sThumbState = $val(_sThumbState)
 
 interface SeekPreviewMeta {
   base: string;

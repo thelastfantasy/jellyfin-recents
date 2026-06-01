@@ -1,5 +1,7 @@
+import { useAtomValue } from 'jotai'
 import type { FrameEntry } from '../core/state'
-import { sPrefetchDone, sPrefetchTotal } from '../core/state'
+import { sPrefetchDone, sPrefetchTotal, _itemId, prefetchTotalAtom, prefetchDoneAtom } from '../core/state'
+import { frameUrl } from '../api/frameExportApi'
 import { formatTime } from '../lib/utils'
 import { t } from '../lib/i18n'
 
@@ -27,15 +29,17 @@ export function FrameCard({
   frame: f, idx,
   onMouseDown, onView, onDownload, onRemove, onRetry, onToggle, onLoadError,
 }: FrameCardProps) {
-  const prefetchPct = sPrefetchTotal.value > 0
-    ? sPrefetchDone.value / sPrefetchTotal.value * 100
+  const prefTotal = useAtomValue(prefetchTotalAtom)
+  const prefDone  = useAtomValue(prefetchDoneAtom)
+  const prefetchPct = prefTotal > 0
+    ? prefDone / prefTotal * 100
     : 100
 
   const imgContent = f.loadError
     ? (
-      <div class="jfs-fe-err-ph">
+      <div className="jfs-fe-err-ph">
         <span>{t('frameExport.loadError')}</span>
-        <button class="jfs-fe-retry-btn" onClick={e => { e.stopPropagation(); onRetry(idx) }}>
+        <button className="jfs-fe-retry-btn" onClick={e => { e.stopPropagation(); onRetry(idx) }}>
           {t('frameExport.retry')}
         </button>
       </div>
@@ -48,49 +52,49 @@ export function FrameCard({
           onError={() => onLoadError(idx)}
         />
       )
-      : <div class="jfs-fe-loading"><div class="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
+      : <div className="jfs-fe-loading"><div className="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
 
   const displayMs = f.actualPtsMs ?? f.posMs
 
   return (
     <div
-      class={`jfs-fe-card${f.selected ? ' sel' : ''}${f.isJunk ? ' junk' : ''}`}
+      className={`jfs-fe-card${f.selected ? ' sel' : ''}${f.isJunk ? ' junk' : ''}`}
       data-idx={String(idx)}
       style={{ cursor: 'pointer' }}
-      onMouseDown={e => onMouseDown(idx, e)}
+      onMouseDown={e => onMouseDown(idx, e.nativeEvent as any)}
     >
-      {f.isJunk && <span class="jfs-fe-badge">{f.junkReason || t('frameExport.junk')}</span>}
+      {f.isJunk && <span className="jfs-fe-badge">{f.junkReason || t('frameExport.junk')}</span>}
       {imgContent}
-      <div class="jfs-fe-card-acts">
+      <div className="jfs-fe-card-acts">
         <button
-          class="jfs-fe-card-act jfs-fe-view-btn"
+          className="jfs-fe-card-act jfs-fe-view-btn"
           title={t('card.view')}
           dangerouslySetInnerHTML={{ __html: ICON_VIEW }}
           onClick={e => { e.stopPropagation(); onView(idx) }}
         />
         <button
-          class="jfs-fe-card-act jfs-fe-dl-btn"
+          className="jfs-fe-card-act jfs-fe-dl-btn"
           title={t('card.download')}
           dangerouslySetInnerHTML={{ __html: ICON_DOWNLOAD }}
           onClick={e => { e.stopPropagation(); onDownload(idx) }}
         />
         <button
-          class="jfs-fe-card-act jfs-fe-rm-btn"
+          className="jfs-fe-card-act jfs-fe-rm-btn"
           title={t('card.remove')}
           dangerouslySetInnerHTML={{ __html: ICON_TRASH }}
           onClick={e => { e.stopPropagation(); onRemove(idx) }}
         />
       </div>
-      <div class="jfs-fe-card-foot">
+      <div className="jfs-fe-card-foot">
         <input
           type="checkbox"
           checked={f.selected}
-          class="jfs-fe-cb"
+          className="jfs-fe-cb"
           style={{ cursor: 'pointer' }}
           onChange={e => { e.stopPropagation(); onToggle(idx, (e.target as HTMLInputElement).checked) }}
         />
         {formatTime(displayMs)}
-        {f.fiIdx >= 0 && <span class="jfs-fe-frnum">#{f.fiIdx}</span>}
+        {f.fiIdx >= 0 && <span className="jfs-fe-frnum">#{f.fiIdx}</span>}
       </div>
     </div>
   )

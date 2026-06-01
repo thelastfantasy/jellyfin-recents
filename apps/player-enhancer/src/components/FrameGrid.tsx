@@ -1,11 +1,12 @@
-import { useEffect, useCallback, useRef } from 'preact/hooks'
+import { useEffect, useCallback, useRef } from 'react'
+import { useAtomValue } from 'jotai'
 import {
   sFrames,
   _frames, _dragMode, _dragSelectValue, _lastClickedIdx, _suppressNextMousedown,
   _longPressCard, _longPressTimer, _autoScrollRaf, _lastTouchX, _lastTouchY,
   set_dragMode, set_dragSelectValue, set_lastClickedIdx, set_suppressNextMousedown,
   set_longPressCard, set_longPressTimer, set_autoScrollRaf, set_lastTouchXY,
-  renderGrid,
+  renderGrid, framesAtom,
 } from '../core/state'
 import { frameUrl } from '../api/frameExportApi'
 import { _itemId } from '../core/state'
@@ -30,7 +31,7 @@ function stopAutoScroll(): void {
 }
 
 export function FrameGrid() {
-  const frames   = sFrames.value
+  const frames   = useAtomValue(framesAtom)
   const gridRef  = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -211,8 +212,8 @@ export function FrameGrid() {
   }, [])
 
   return (
-    <div class="jfs-fe-scroll" ref={scrollRef}>
-      <div id="jfs-fe-grid" class="jfs-fe-grid" ref={gridRef}>
+    <div className="jfs-fe-scroll" ref={scrollRef}>
+      <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
         {frames.map((f, i) => f.removed ? null : (
           <FrameCard
             key={f.posMs}
