@@ -72,7 +72,10 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
       sPage.value = 'grid'; sLightboxIdx.value = null
       renderGrid()
       for (let i = 0; i < _frames.length; i++) {
-        if (_frames[i].jpegUrl && !_frames[i].blobUrl && !_frames[i].loadError) updateFrameImage(i)
+        if (_frames[i].jpegUrl && !_frames[i].blobUrl) {
+          _frames[i].loadError = false
+          updateFrameImage(i)
+        }
       }
       return
     }
@@ -183,6 +186,7 @@ export function updateFrameImage(idx: number): void {
     const f2 = _frames[idx]; if (!f2) return
     if (ptsMs !== null) f2.actualPtsMs = ptsMs
     if (f2.blobUrl) URL.revokeObjectURL(f2.blobUrl)
+    f2.loadError = false
     f2.blobUrl = URL.createObjectURL(blob)
     jstore.set(modalPhaseAtom, 'loading')
     renderGrid()
@@ -199,7 +203,7 @@ async function prefetchAndStream(items: Array<{ fiIdx: number; posMs: number }>,
       const posMs = parseInt(e.data); if (isNaN(posMs) || !pending.delete(posMs)) return
       sPrefetchDone.value = sPrefetchTotal.value - pending.size
       for (let i = 0; i < _frames.length; i++) {
-        if (_frames[i].posMs === posMs) { _frames[i].jpegUrl = frameUrl(_itemId, _frames[i].fiIdx, _frames[i].posMs, width); updateFrameImage(i) }
+        if (_frames[i].posMs === posMs) { _frames[i].jpegUrl = frameUrl(_itemId, _frames[i].fiIdx, _frames[i].posMs, width); _frames[i].loadError = false; updateFrameImage(i) }
       }
       if (pending.size === 0) { evSrc.close(); resolve(undefined) }
     }
