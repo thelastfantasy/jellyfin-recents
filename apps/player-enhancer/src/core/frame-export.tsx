@@ -32,6 +32,8 @@ const jstore = getDefaultStore()
 export const _feOpen = atom<{ videoEl: HTMLVideoElement; itemId: string } | null>(null)
 
 export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
+  const root = document.querySelector<HTMLElement>('[data-jfs-modal-root]')
+  if (root) root.style.display = ''
   sPage.value = 'grid'
   jstore.set(_feOpen, { videoEl, itemId })
 }
@@ -159,6 +161,7 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
 
   return createPortal(
     <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} onMouseDown={onDragStart}
+      data-jfs-modal-root="true"
       style={{
         position: 'fixed', zIndex: 99999, display: 'flex', flexDirection: 'column',
         width: 'min(92vw, 960px)', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
