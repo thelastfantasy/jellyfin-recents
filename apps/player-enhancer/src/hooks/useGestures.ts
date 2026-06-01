@@ -1,4 +1,4 @@
-import { useEffect } from 'preact/hooks'
+import { useEffect } from 'react'
 import { showRipple, showValueOsd, showSeekOsd, hideSeekOsd } from '../components/OsdOverlay'
 import { cancelPendingLongPress, isLongPressActive } from './useLongPress'
 import { showTrickplayThumb, hideTrickplayThumb, prefetchFrame } from '../services/trickplay'

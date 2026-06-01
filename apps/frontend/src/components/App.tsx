@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'preact/hooks'
+import { useEffect, useState, useRef } from 'react'
 import type { TimeGroup, ViewSettings } from '../types'
 import type { Locale } from '../i18n'
 import { getTranslations } from '../i18n'
@@ -141,7 +141,7 @@ export function App({ locale }: Props) {
 
   return (
     <LocaleContext.Provider value={{ locale, t }}>
-      <div class="jfs-app">
+      <div className="jfs-app">
         <Toolbar
           settings={settings}
           onSettingsChange={handleSettingsChange}
@@ -156,21 +156,21 @@ export function App({ locale }: Props) {
         />
 
         {loading && (
-          <div class="jfs-status jfs-status--loading">
-            <span class="jfs-spinner" />
+          <div className="jfs-status jfs-status--loading">
+            <span className="jfs-spinner" />
             {t.loading}
           </div>
         )}
 
         {error && !loading && (
-          <div class="jfs-status jfs-status--error">
+          <div className="jfs-status jfs-status--error">
             <p>⚠️ {error}</p>
-            <button class="jfs-btn" onClick={() => fetchData(settings, pageIndex)}>{t.retry}</button>
+            <button className="jfs-btn" onClick={() => fetchData(settings, pageIndex)}>{t.retry}</button>
           </div>
         )}
 
         {!loading && !error && groups.length === 0 && (
-          <div class="jfs-status jfs-status--empty">
+          <div className="jfs-status jfs-status--empty">
             <p>{t.empty}</p>
           </div>
         )}
@@ -200,8 +200,10 @@ export function App({ locale }: Props) {
           />
         )}
       </div>
-      {posterUnlocked && <PosterQueueWidget />}
-      <FrameExportQueueWidget />
+      <div className="jfs-queue-dock">
+        {posterUnlocked && <PosterQueueWidget />}
+        <FrameExportQueueWidget />
+      </div>
     </LocaleContext.Provider>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'preact/hooks'
+import React, { useState, useRef, useCallback } from 'react'
 import { MdFolder } from 'react-icons/md'
 import type { AncestorEntry } from '../api/foldersApi'
 import { getItemAncestors } from '../api/foldersApi'
@@ -62,7 +62,7 @@ export function FolderViewPopover({ itemId, showTypeLabel, viewMode }: Props) {
     setStyle(computeStyle(btnRef.current, count, viewMode === 'list'))
   }
 
-  async function handleToggle(e: MouseEvent) {
+  async function handleToggle(e: React.MouseEvent<HTMLButtonElement>) {
     e.preventDefault()
     e.stopPropagation()
     if (open) { close(); return }
@@ -90,40 +90,40 @@ export function FolderViewPopover({ itemId, showTypeLabel, viewMode }: Props) {
   const isList = viewMode === 'list'
 
   return (
-    <div class={`jfs-folder-btn-wrap${showTypeLabel && !isList ? ' jfs-folder-btn-wrap--with-type' : ''}${isList ? ' jfs-folder-btn-wrap--list' : ''}`}>
+    <div className={`jfs-folder-btn-wrap${showTypeLabel && !isList ? ' jfs-folder-btn-wrap--with-type' : ''}${isList ? ' jfs-folder-btn-wrap--list' : ''}`}>
       <button
         ref={btnRef}
-        class={`jfs-folder-btn${isList ? ' jfs-folder-btn--list' : ''}`}
+        className={`jfs-folder-btn${isList ? ' jfs-folder-btn--list' : ''}`}
         onClick={handleToggle}
         title={t.folderViewTitle}
       >
         {loading ? (
-          <span class="jfs-folder-btn__spinner" />
+          <span className="jfs-folder-btn__spinner" />
         ) : (
           <MdFolder size={24} />
         )}
       </button>
       <Popover open={open} onClose={close}>
-        <div class="jfs-folder-popover" style={style}>
-            <div class="jfs-folder-popover__title">{t.folderViewTitle}</div>
+        <div className="jfs-folder-popover" style={style}>
+            <div className="jfs-folder-popover__title">{t.folderViewTitle}</div>
             {loading ? (
-              <div class="jfs-folder-popover__loading">
-                <span class="jfs-folder-popover__sk" />
-                <span class="jfs-folder-popover__sk" />
-                <span class="jfs-folder-popover__sk" />
+              <div className="jfs-folder-popover__loading">
+                <span className="jfs-folder-popover__sk" />
+                <span className="jfs-folder-popover__sk" />
+                <span className="jfs-folder-popover__sk" />
               </div>
             ) : (
-              <ul class="jfs-folder-popover__list">
+              <ul className="jfs-folder-popover__list">
                 {ancestors.map((a, i) => (
-                  <li key={a.Id} class={`jfs-folder-popover__item jfs-folder-popover__item--l${i}`}>
+                  <li key={a.Id} className={`jfs-folder-popover__item jfs-folder-popover__item--l${i}`}>
                     <a
-                      class="jfs-folder-popover__link"
+                      className="jfs-folder-popover__link"
                       href={`#!/list.html?parentId=${a.Id}&serverId=${a.ServerId}`}
                       onClick={close}
                       title={a.Name}
                     >
-                      <span class="jfs-folder-popover__lvl" />
-                      <span class="jfs-folder-popover__text">{a.Name}</span>
+                      <span className="jfs-folder-popover__lvl" />
+                      <span className="jfs-folder-popover__text">{a.Name}</span>
                     </a>
                   </li>
                 ))}

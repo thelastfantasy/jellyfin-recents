@@ -13,7 +13,7 @@ import {
   set_dragController, set_domObserver, set_savedState,
   set_lastClickedIdx, set_dragMode, set_activeTaskId,
   set_suppressNextMousedown, renderGrid, samplePositionsInRange,
-  sSettings, pageAtom,
+  sSettings, pageAtom, sModalPhase, modalPhaseAtom,
 } from './state'
 import { fetchVideoFps, fetchFrameIndex, prefetch, openPrefetchStream,
   fetchFrameBlob, frameUrl, generateExport,
@@ -137,6 +137,7 @@ function FrameExportModalInner({ videoEl, itemId }: { videoEl: HTMLVideoElement;
     document.body.classList.remove('jfs-fe-open'); setGesturesSuspended(false)
     set_lastClickedIdx(-1); set_dragMode(false); set_suppressNextMousedown(false)
     sLightboxIdx.value = null
+    sModalPhase.value = 'skeleton'
     setFE(null)
   }
 
@@ -181,7 +182,9 @@ export function updateFrameImage(idx: number): void {
     const f2 = _frames[idx]; if (!f2) return
     if (ptsMs !== null) f2.actualPtsMs = ptsMs
     if (f2.blobUrl) URL.revokeObjectURL(f2.blobUrl)
-    f2.blobUrl = URL.createObjectURL(blob); renderGrid()
+    f2.blobUrl = URL.createObjectURL(blob)
+    jstore.set(modalPhaseAtom, 'loading')
+    renderGrid()
   }).catch(() => { _frames[idx].loadError = true; renderGrid() })
 }
 
@@ -287,7 +290,8 @@ async function submitGenerate(): Promise<void> {
   const body: any = {
     itemId: _itemId, itemTitle: document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'export', type: exportType,
     frames: selected.map(f => f.fiIdx >= 0 ? { frameIdx: f.fiIdx } : { positionMs: Math.round(f.posMs) }),
-    params: { format, resizeMode: st.resizeMode, customWidth: st.customWidth || null, customHeight: st.customHeight || null,
+    params: { format, resizeMode: st.width.mode === 'userInput' ? 'width' : 'height',
+      customWidth: st.width.value || null, customHeight: st.height.value || null,
       resolutionPreset: st.resolutionPreset, speed: st.speed, loopCount: st.loopCount, cropX: st.cropRect?.x ?? 0,
       cropY: st.cropRect?.y ?? 0, cropW: st.cropRect?.w ?? 0, cropH: st.cropRect?.h ?? 0,
       quality: exportType === 'animate' ? st.animateQuality : st.stitchQuality },

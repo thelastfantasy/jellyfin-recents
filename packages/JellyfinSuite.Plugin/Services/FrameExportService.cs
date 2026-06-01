@@ -14,6 +14,8 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgSingleFrame = 0x10;
     private const byte MsgPrefetchFrame = 0x13;
     private const byte MsgListCached = 0x14;
+    private const byte MsgIndexFrames = 0x15;
+    private const byte MsgPrefetchRange = 0x16;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -248,6 +250,57 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
+    public async Task PrefetchRangeAsync(
+        string filePath,
+        long startIdx,
+        double beforeSeconds,
+        double afterSeconds,
+        bool includeStart,
+        int width,
+        Guid itemId,
+        CancellationToken ct = default)
+    {
+        if (!IsAvailable) return;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
+
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before(8)] [after(8)] [include(1)] [width(4)]
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4];
+            var pos = 0;
+            buf[pos++] = MsgPrefetchRange;
+            itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
+            pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), startIdx); pos += 8;
+            BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), beforeSeconds); pos += 8;
+            BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), afterSeconds); pos += 8;
+            buf[pos++] = includeStart ? (byte)1 : (byte)0;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width);
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // ACK: [4 request_id][4 jpeg_len=0]
+            var ack = new byte[8];
+            await ReceiveExactAsync(sock, ack, 8, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] prefetch_range socket error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<long>> ListCachedAsync(
         Guid itemId,
         int width,
@@ -305,7 +358,7 @@ public sealed class FrameExportService : IDisposable
     public async Task<byte[]?> SubmitAnimateTaskAsync(
         TaskState task,
         List<string> filePaths,
-        List<long> positionsMs,
+        List<long> frameIndices,
         string format,   // "gif" or "webp"
         string resizeMode, int targetPx, float speed, int loopCount,
         float cropX = 0f, float cropY = 0f, float cropW = 0f, float cropH = 0f,
@@ -328,7 +381,7 @@ public sealed class FrameExportService : IDisposable
 
         for (int i = 0; i < frameCount; i++)
         {
-            ms.Write(BitConverter.GetBytes(positionsMs[i]), 0, 8);
+            ms.Write(BitConverter.GetBytes(frameIndices[i]), 0, 8);
             var pathBytes = Encoding.UTF8.GetBytes(filePaths[i]);
             ms.Write(BitConverter.GetBytes((uint)pathBytes.Length), 0, 4);
             ms.Write(pathBytes, 0, pathBytes.Length);

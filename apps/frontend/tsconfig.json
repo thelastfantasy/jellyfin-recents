@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "jsxImportSource": "preact",
+    "jsxImportSource": "react",
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

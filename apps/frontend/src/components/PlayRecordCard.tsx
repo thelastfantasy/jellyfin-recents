@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'preact/hooks'
+import React, { useState, useEffect, useRef } from 'react'
 import { MdPlayArrow, MdReplay, MdFavorite, MdFavoriteBorder, MdGridView, MdKeyboardArrowDown, MdContentCut } from 'react-icons/md'
 import type { PlayRecord, ViewMode } from '../types'
 import { getCurrentUserId } from '../api/jellyfinClient'
@@ -97,7 +97,7 @@ function PosterBtnHover({ record, enableFolderView, thumbRef }: PosterBtnHoverPr
   const [sheetPos, setSheetPos] = useState<{ top: number; left: number } | null>(null)
   const off = enableFolderView && record.hasAncestors
 
-  function handlePosterClick(e: MouseEvent) {
+  function handlePosterClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     if (thumbRef.current) flyToQueue(thumbRef.current)
@@ -114,13 +114,13 @@ function PosterBtnHover({ record, enableFolderView, thumbRef }: PosterBtnHoverPr
     })
   }
 
-  function handleSkipClick(e: MouseEvent) {
+  function handleSkipClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     setSkipOpen(true)
   }
 
-  function openTouchSheet(e: MouseEvent) {
+  function openTouchSheet(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     const btn = e.currentTarget as HTMLButtonElement
@@ -150,29 +150,29 @@ function PosterBtnHover({ record, enableFolderView, thumbRef }: PosterBtnHoverPr
   return (
     <>
       <button
-        class={`jfs-card__poster-btn${off ? ' jfs-card__poster-btn--offset' : ''}`}
+        className={`jfs-card__poster-btn${off ? ' jfs-card__poster-btn--offset' : ''}`}
         title={t.posterGenerate2}
         onClick={handlePosterClick}
       >
         <MdGridView size={16} />
       </button>
       <button
-        class={`jfs-card__poster-skip-btn${off ? ' jfs-card__poster-skip-btn--offset' : ''}`}
+        className={`jfs-card__poster-skip-btn${off ? ' jfs-card__poster-skip-btn--offset' : ''}`}
         title={t.skipAndGenerate}
         onClick={handleSkipClick}
       >
         <MdKeyboardArrowDown size={14} />
-        <span class="jfs-card__poster-skip-label">{t.skipSegments}</span>
+        <span className="jfs-card__poster-skip-label">{t.skipSegments}</span>
       </button>
       <button
-        class={`jfs-card__poster-touch-btn${off ? ' jfs-card__poster-touch-btn--offset' : ''}`}
+        className={`jfs-card__poster-touch-btn${off ? ' jfs-card__poster-touch-btn--offset' : ''}`}
         onClick={openTouchSheet}
       >
         <MdGridView size={16} />
       </button>
       {touchSheetOpen && sheetPos && (
         <Popover open={true} onClose={() => setTouchSheetOpen(false)}>
-          <div class="jfs-card__touch-sheet" style={{ position: 'fixed', top: `${sheetPos.top}px`, left: `${sheetPos.left}px` }}>
+          <div className="jfs-card__touch-sheet" style={{ position: 'fixed', top: `${sheetPos.top}px`, left: `${sheetPos.left}px` }}>
             <button onClick={e => { e.stopPropagation(); handlePosterClick(e as any); setTouchSheetOpen(false) }}>
               <MdGridView size={14} />
               {t.generateNow}
@@ -209,7 +209,7 @@ function PosterBtnMenu({ record, thumbRef }: PosterBtnMenuProps) {
   const [touchSheetOpen, setTouchSheetOpen] = useState(false)
   const [sheetPos, setSheetPos] = useState<{ top: number; left: number } | null>(null)
 
-  function openTouchSheet(e: MouseEvent) {
+  function openTouchSheet(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     const btn = e.currentTarget as HTMLButtonElement
@@ -220,7 +220,7 @@ function PosterBtnMenu({ record, thumbRef }: PosterBtnMenuProps) {
     setTouchSheetOpen(o => !o)
   }
 
-  function handlePosterClick(e: MouseEvent) {
+  function handlePosterClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     if (thumbRef.current) flyToQueue(thumbRef.current)
@@ -237,7 +237,7 @@ function PosterBtnMenu({ record, thumbRef }: PosterBtnMenuProps) {
     })
   }
 
-  function handleSkipClick(e: MouseEvent) {
+  function handleSkipClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     setSkipOpen(true)
@@ -262,7 +262,7 @@ function PosterBtnMenu({ record, thumbRef }: PosterBtnMenuProps) {
   return (
     <>
       <button
-        class="jfs-card__list-poster-btn"
+        className="jfs-card__list-poster-btn"
         title={t.posterGenerate2}
         onClick={openTouchSheet}
       >
@@ -270,7 +270,7 @@ function PosterBtnMenu({ record, thumbRef }: PosterBtnMenuProps) {
       </button>
       {touchSheetOpen && sheetPos && (
         <Popover open={true} onClose={() => setTouchSheetOpen(false)}>
-          <div class="jfs-card__touch-sheet" style={{ position: 'fixed', top: `${sheetPos.top}px`, left: `${sheetPos.left}px` }}>
+          <div className="jfs-card__touch-sheet" style={{ position: 'fixed', top: `${sheetPos.top}px`, left: `${sheetPos.left}px` }}>
             <button onClick={e => { e.stopPropagation(); handlePosterClick(e as any); setTouchSheetOpen(false) }}>
               <MdGridView size={14} />
               {t.generateNow}
@@ -320,19 +320,19 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
   const detailUrl = `#!/details?id=${record.itemId}`
   const seriesUrl = record.seriesId ? `#!/details?id=${record.seriesId}` : null
 
-  function handlePlayClick(e: MouseEvent) {
+  function handlePlayClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     playItem(record.itemId)
   }
 
-  function handleResumeClick(e: MouseEvent) {
+  function handleResumeClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     playItem(record.itemId, resumeTicks)
   }
 
-  async function handleFavClick(e: MouseEvent) {
+  async function handleFavClick(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
     if (favLoading) return
@@ -359,8 +359,8 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
 
   if (viewMode === 'list') {
     return (
-      <div class="jfs-card jfs-card--list" data-jfs-id={`${record.itemId}-${record.playedDate.getTime()}`}>
-        <a class="jfs-card__thumb jfs-card__thumb--list" href={detailUrl} ref={thumbRef as any}>
+      <div className="jfs-card jfs-card--list" data-jfs-id={`${record.itemId}-${record.playedDate.getTime()}`}>
+        <a className="jfs-card__thumb jfs-card__thumb--list" href={detailUrl} ref={thumbRef as any}>
           <img
             src={imageUrl}
             alt={record.title}
@@ -371,34 +371,34 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
               img.nextElementSibling?.classList.remove('jfs-card__thumb-placeholder--hidden')
             }}
           />
-          <div class="jfs-card__thumb-placeholder jfs-card__thumb-placeholder--hidden">🎬</div>
+          <div className="jfs-card__thumb-placeholder jfs-card__thumb-placeholder--hidden">🎬</div>
         </a>
-        <div class="jfs-card__info jfs-card__info--list">
-          <div class="jfs-card__title-block">
+        <div className="jfs-card__info jfs-card__info--list">
+          <div className="jfs-card__title-block">
             {record.seriesName && (
               seriesUrl
-                ? <a class="jfs-card__series-name" href={seriesUrl}>{record.seriesName}</a>
-                : <div class="jfs-card__series-name">{record.seriesName}</div>
+                ? <a className="jfs-card__series-name" href={seriesUrl}>{record.seriesName}</a>
+                : <div className="jfs-card__series-name">{record.seriesName}</div>
             )}
-            <a class="jfs-card__title" href={detailUrl} title={record.title}>
-              {episodeCode && <span class="jfs-card__ep-code">{episodeCode}</span>}
+            <a className="jfs-card__title" href={detailUrl} title={record.title}>
+              {episodeCode && <span className="jfs-card__ep-code">{episodeCode}</span>}
               {record.title}
             </a>
-            <span class="jfs-card__played-date">{formatPlayedDate(record.playedDate, locale)}</span>
+            <span className="jfs-card__played-date">{formatPlayedDate(record.playedDate, locale)}</span>
           </div>
         </div>
-        <div class="jfs-card__meta jfs-card__meta--list">
+        <div className="jfs-card__meta jfs-card__meta--list">
           {showTypeLabel && (
-            <span class={`jfs-card__type-badge jfs-card__type-badge--${record.mediaType}`}>
+            <span className={`jfs-card__type-badge jfs-card__type-badge--${record.mediaType}`}>
               {record.mediaType === 'video' ? t.video : t.audio}
             </span>
           )}
           {canResume && (
             <>
-              <button class="jfs-card__resume-btn jfs-card__resume-btn--sm" onClick={handleResumeClick} title={t.resume}>
+              <button className="jfs-card__resume-btn jfs-card__resume-btn--sm" onClick={handleResumeClick} title={t.resume}>
                 <MdPlayArrow size={16} />
               </button>
-              <button class="jfs-card__fromstart-btn" onClick={handlePlayClick} title={t.play}>
+              <button className="jfs-card__fromstart-btn" onClick={handlePlayClick} title={t.play}>
                 <MdReplay size={18} />
               </button>
             </>
@@ -407,7 +407,7 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
             <PosterBtnMenu record={record} thumbRef={thumbRef} />
           )}
           <button
-            class={`jfs-card__fav-btn${isFav ? ' jfs-card__fav-btn--active' : ''}`}
+            className={`jfs-card__fav-btn${isFav ? ' jfs-card__fav-btn--active' : ''}`}
             onClick={handleFavClick}
             title={isFav ? t.unfavorite : t.favorite}
           >
@@ -422,10 +422,10 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
   }
 
   return (
-    <div class="jfs-card" data-jfs-id={`${record.itemId}-${record.playedDate.getTime()}`}>
-      <div class="jfs-card__thumb-link-wrap">
-        <a class="jfs-card__thumb-link" href={detailUrl}>
-          <div class="jfs-card__thumb" ref={thumbRef as any}>
+    <div className="jfs-card" data-jfs-id={`${record.itemId}-${record.playedDate.getTime()}`}>
+      <div className="jfs-card__thumb-link-wrap">
+        <a className="jfs-card__thumb-link" href={detailUrl}>
+          <div className="jfs-card__thumb" ref={thumbRef as any}>
             <img
               src={imageUrl}
               alt={record.title}
@@ -436,35 +436,35 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
                 img.nextElementSibling?.classList.remove('jfs-card__thumb-placeholder--hidden')
               }}
             />
-            <div class="jfs-card__thumb-placeholder jfs-card__thumb-placeholder--hidden">🎬</div>
+            <div className="jfs-card__thumb-placeholder jfs-card__thumb-placeholder--hidden">🎬</div>
             {episodeCode && (
-              <div class="jfs-card__ep-badge">{episodeCode}</div>
+              <div className="jfs-card__ep-badge">{episodeCode}</div>
             )}
             {showTypeLabel && (
-              <span class={`jfs-card__type-badge jfs-card__type-badge--${record.mediaType}`}>
+              <span className={`jfs-card__type-badge jfs-card__type-badge--${record.mediaType}`}>
                 {record.mediaType === 'video' ? t.video : t.audio}
               </span>
             )}
-            <div class="jfs-card__overlay">
+            <div className="jfs-card__overlay">
               {canResume ? (
-                <div class="jfs-card__overlay-center">
-                  <button class="jfs-card__resume-btn" onClick={handleResumeClick} title={t.resume}>
+                <div className="jfs-card__overlay-center">
+                  <button className="jfs-card__resume-btn" onClick={handleResumeClick} title={t.resume}>
                     <MdPlayArrow size={28} />
                   </button>
-                  <button class="jfs-card__play-btn jfs-card__play-btn--small" onClick={handlePlayClick} title={t.play}>
+                  <button className="jfs-card__play-btn jfs-card__play-btn--small" onClick={handlePlayClick} title={t.play}>
                     <MdReplay size={15} />
                   </button>
                 </div>
               ) : (
-                <button class="jfs-card__play-btn" onClick={handlePlayClick} title={t.play}>
+                <button className="jfs-card__play-btn" onClick={handlePlayClick} title={t.play}>
                   <MdPlayArrow size={28} />
                 </button>
               )}
             </div>
             {isFav && (
-              <div class="jfs-card__actions jfs-card__actions--sticky">
+              <div className="jfs-card__actions jfs-card__actions--sticky">
                 <button
-                  class="jfs-card__fav-btn jfs-card__fav-btn--active"
+                  className="jfs-card__fav-btn jfs-card__fav-btn--active"
                   onClick={handleFavClick}
                   title={t.unfavorite}
                 >
@@ -472,10 +472,10 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
                 </button>
               </div>
             )}
-            <div class="jfs-card__overlay jfs-card__overlay--actions">
-              <div class="jfs-card__actions">
+            <div className="jfs-card__overlay jfs-card__overlay--actions">
+              <div className="jfs-card__actions">
                 <button
-                  class={`jfs-card__fav-btn${isFav ? ' jfs-card__fav-btn--active' : ''}`}
+                  className={`jfs-card__fav-btn${isFav ? ' jfs-card__fav-btn--active' : ''}`}
                   onClick={handleFavClick}
                   title={isFav ? t.unfavorite : t.favorite}
                 >
@@ -492,14 +492,14 @@ export function PlayRecordCard({ record, showTypeLabel = false, viewMode = 'thum
           <PosterBtnHover record={record} enableFolderView={enableFolderView} thumbRef={thumbRef} />
         )}
       </div>
-      <div class="jfs-card__info">
+      <div className="jfs-card__info">
         {record.seriesName && (
           seriesUrl
-            ? <a class="jfs-card__series-name" href={seriesUrl}>{record.seriesName}</a>
-            : <div class="jfs-card__series-name">{record.seriesName}</div>
+            ? <a className="jfs-card__series-name" href={seriesUrl}>{record.seriesName}</a>
+            : <div className="jfs-card__series-name">{record.seriesName}</div>
         )}
-        <a class="jfs-card__title" href={detailUrl} title={record.title}>{record.title}</a>
-        <div class="jfs-card__played-date">{formatPlayedDate(record.playedDate, locale)}</div>
+        <a className="jfs-card__title" href={detailUrl} title={record.title}>{record.title}</a>
+        <div className="jfs-card__played-date">{formatPlayedDate(record.playedDate, locale)}</div>
       </div>
     </div>
   )

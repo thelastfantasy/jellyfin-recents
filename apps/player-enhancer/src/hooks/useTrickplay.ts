@@ -1,4 +1,4 @@
-import { useEffect } from 'preact/hooks'
+import { useEffect } from 'react'
 import { initTrickplay, closeTrickplayStream } from '../services/trickplay'
 
 export function useTrickplay(

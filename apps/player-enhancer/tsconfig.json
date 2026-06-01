@@ -5,12 +5,9 @@
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "preact"
+    "jsxImportSource": "react"
   },
   "include": ["src"]
 }

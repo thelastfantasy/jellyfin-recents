@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use tokio::net::UnixStream;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
 use jfs_common::DiskCache;
-use crate::protocol::{read_msg_type, read_single_frame_req, write_ack, write_jpeg_response};
+use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
 const MSG_SINGLE_FRAME: u8 = 0x10;
@@ -17,6 +17,8 @@ const MSG_ANIMATE: u8 = 0x11;
 const MSG_STITCH: u8 = 0x12;
 const MSG_PREFETCH_FRAME: u8 = 0x13;
 const MSG_LIST_CACHED: u8 = 0x14;
+const MSG_INDEX_FRAMES: u8 = 0x15;
+const MSG_PREFETCH_RANGE: u8 = 0x16;
 
 const RAM_CACHE_CAP: usize = 100;
 const PREFETCH_WORKERS: usize = 2;
@@ -32,12 +34,16 @@ struct PrefetchJob {
     width: u32,
 }
 
+/// Cached frame index per video path: (pts_ms, is_keyframe)[], fps_num, fps_den
+type FrameIndexCache = Arc<(Vec<(i64, bool)>, i64, i64)>;
+
 pub struct State {
     pub ram: Mutex<LruCache<RamKey, Vec<u8>>>,
     pub disk: Arc<DiskCache>,
     decode_sem: Arc<Semaphore>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
+    frame_index: Mutex<HashMap<PathBuf, FrameIndexCache>>,
 }
 
 impl State {
@@ -50,6 +56,7 @@ impl State {
             decode_sem: Arc::new(Semaphore::new(1)),
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
+            frame_index: Mutex::new(HashMap::new()),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -138,6 +145,18 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
             MSG_LIST_CACHED => {
                 if let Err(e) = handle_list_cached(&mut stream, &state).await {
                     eprintln!("[frame-forge] list_cached error: {e}");
+                    break;
+                }
+            }
+            MSG_INDEX_FRAMES => {
+                if let Err(e) = handle_index_frames(&mut stream, &state).await {
+                    eprintln!("[frame-forge] index_frames error: {e}");
+                    break;
+                }
+            }
+            MSG_PREFETCH_RANGE => {
+                if let Err(e) = handle_prefetch_range(&mut stream, &state).await {
+                    eprintln!("[frame-forge] prefetch_range error: {e}");
                     break;
                 }
             }
@@ -266,7 +285,7 @@ async fn handle_list_cached(stream: &mut UnixStream, state: &Arc<State>) -> anyh
     Ok(())
 }
 
-async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow::Result<()> {
+async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
     use tokio::sync::mpsc;
 
@@ -278,35 +297,52 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
 
     let total_input = req.paths.len();
     send_progress(stream, "running", "decoding", 0, total_input as u32, 0.0).await?;
+    eprintln!("[frame-forge] ANIMATE progress sent, loading frame index...");
+
+    // Load frame index for the first path (all frames share the same video)
+    let fi = if let Some((path, _)) = req.paths.first() {
+        let cache = state.frame_index.lock().await;
+        cache.get(path).cloned()
+    } else { None };
+    let fi = match fi {
+        Some(i) => i,
+        None => {
+            let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
+            let p_clone = p.clone();
+            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
+                jfs_common::index_frames(&p_clone)
+            }).await??;
+            let i = Arc::new((frames, fps_num, fps_den));
+            state.frame_index.lock().await.insert(p, i.clone());
+            i
+        }
+    };
+    let (fi_frames, _, _) = fi.as_ref();
+    eprintln!("[frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
 
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(total_input);
     let mut actual_pts_vec: Vec<i64> = Vec::with_capacity(total_input);
-    let mut last_pts: Option<i64> = None;
 
-    for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
+    for (i, (path, frame_idx)) in req.paths.iter().enumerate() {
         let p = path.clone();
-        let pm = *pos_ms;
-        let (bytes, pts_ms, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pm, 0)).await??;
+        let pos_ms = if *frame_idx >= 0 && (*frame_idx as usize) < fi_frames.len() {
+            fi_frames[*frame_idx as usize].0
+        } else {
+            0
+        };
+        eprintln!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
+        let (bytes, pts_ms, _fps_num, _fps_den) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
 
-        // Skip duplicate frames (same actual pts as previous, e.g. two posMs values decode to same frame)
-        if last_pts == Some(pts_ms) {
-            send_progress(
-                stream, "running", "decoding",
-                (i + 1) as u32, total_input as u32,
-                (i + 1) as f64 / total_input as f64 * 50.0,
-            ).await?;
-            continue;
-        }
-
-        last_pts = Some(pts_ms);
         images.push(image::load_from_memory(&bytes)?);
         actual_pts_vec.push(pts_ms);
+        if i == 0 { eprintln!("[frame-forge] ANIMATE first frame decoded"); }
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, total_input as u32,
             (i + 1) as f64 / total_input as f64 * 50.0,
         ).await?;
     }
+    eprintln!("[frame-forge] ANIMATE decode done, {} images", images.len());
 
     if images.is_empty() {
         anyhow::bail!("no unique frames after deduplication");
@@ -340,20 +376,18 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
 
     let n = images.len();
     let speed = req.speed.max(0.01);
-    // Compute delays from actual decoded pts differences (accurate for both CFR and VFR)
-    let delays_ms: Vec<u32> = (0..n).map(|i| {
-        let gap_ms = if i + 1 < n {
-            (actual_pts_vec[i + 1] - actual_pts_vec[i]).unsigned_abs() as f32
-        } else if i > 0 {
-            (actual_pts_vec[i] - actual_pts_vec[i - 1]).unsigned_abs() as f32
-        } else {
-            200.0
-        };
-        ((gap_ms / speed).max(10.0)) as u32
-    }).collect();
+    let default_interval = if actual_pts_vec.len() >= 2 {
+        let total_ms = actual_pts_vec.last().unwrap() - actual_pts_vec.first().unwrap();
+        let total_ms = total_ms.max(1) as f64;
+        (total_ms / (n - 1) as f64).max(10.0)
+    } else {
+        42.0
+    };
+    let delays_ms: Vec<u32> = vec![((default_interval / speed as f64).max(10.0).min(2000.0)) as u32; n];
 
-    // Per-frame scale+encode with progress reported via channel (50%→100%)
-    let (prog_tx, mut prog_rx) = mpsc::channel::<f64>(n + 4);
+    // Per-frame scale+encode with progress reported via channel (50%→99%)
+    // Use unbounded channel to prevent deadlock if progress consumer is blocked on socket write
+    let (prog_tx, mut prog_rx) = mpsc::unbounded_channel::<f64>();
     let format = req.format;
     let loop_count = req.loop_count;
     let quality = req.quality;
@@ -362,26 +396,48 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
         let n = images.len();
         if format == 0x02 {
             use image::imageops;
-            let lossless = quality <= 0.0;
-            let quality_val: u32 = if lossless { 0 } else { (quality.clamp(0.01, 1.0) * 100.0) as u32 };
-            let mut encoder = webpx::AnimationEncoder::with_options(tw, th, lossless, quality_val)
+            use webpx::AnimationEncoder;
+            use enough::Unstoppable;
+
+            let mut encoder = AnimationEncoder::with_options(tw, th, false, 0)
                 .map_err(|e| anyhow::anyhow!("webp encoder: {e}"))?;
+            let lossless = quality <= 0.0;
+            if lossless {
+                encoder.set_lossless(true);
+            } else {
+                encoder.set_quality((quality.clamp(0.01, 1.0) * 100.0) as f32);
+            }
+            eprintln!("[frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
+
+            // Workaround: libwebp's minimize_size (default true) merges too-similar frames.
+            // Flip the last byte of each frame's RGBA data to guarantee uniqueness,
+            // preventing minimize_size from dropping frames.
+            let bypass_min = true;
             let mut cursor_ms = 0i32;
             for (i, img) in images.iter().enumerate() {
                 let scaled = crate::animate::scale_frame(img, tw, th);
-                let rgba = if scaled.width() == tw && scaled.height() == th {
+                let mut rgba = if scaled.width() == tw && scaled.height() == th {
                     scaled.to_rgba8().into_raw()
                 } else {
                     let mut padded = image::RgbaImage::new(tw, th);
                     imageops::overlay(&mut padded, &scaled.to_rgba8(), 0, 0);
                     padded.into_raw()
                 };
+                if bypass_min && !rgba.is_empty() {
+                    let last = rgba.len() - 1;
+                    rgba[last] ^= 1;
+                }
+                eprintln!("[frame-forge] ANIMATE add_frame {} cursor_ms={} rgba_bytes={}", i, cursor_ms, rgba.len());
                 encoder.add_frame_rgba(&rgba, cursor_ms)
                     .map_err(|e| anyhow::anyhow!("add_frame: {e}"))?;
-                cursor_ms += delays_ms.get(i).map(|&ms| ms.max(10) as i32).unwrap_or(200);
-                let _ = prog_tx.blocking_send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
+                cursor_ms += delays_ms.get(i).map(|&ms| ms as i32).unwrap_or(200);
+                let _ = prog_tx.send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
             }
-            Ok(encoder.finish(cursor_ms).map_err(|e| anyhow::anyhow!("finish: {e}"))?)
+
+            eprintln!("[frame-forge] ANIMATE webp finish start, {} frames added, {} input images", n, n);
+            let output = encoder.finish(cursor_ms).map_err(|e| anyhow::anyhow!("finish: {e}"))?;
+            eprintln!("[frame-forge] ANIMATE webp finish done, {} bytes", output.len());
+            Ok(output)
         } else {
             use gif::{Encoder as GifEnc, Frame as GifFrame, Repeat};
             let gif_speed = if quality <= 0.0 { 1 } else {
@@ -397,14 +453,14 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
                     let mut frame = GifFrame::from_rgba_speed(tw as u16, th as u16, &mut rgba, gif_speed);
                     frame.delay = delays_ms.get(i).map(|&ms| (ms / 10).max(2) as u16).unwrap_or(20);
                     encoder.write_frame(&frame)?;
-                    let _ = prog_tx.blocking_send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
+                    let _ = prog_tx.send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
                 }
             }
             Ok(buf.into_inner())
         }
     });
 
-    // Forward per-frame encoding progress to stream while waiting for completion
+    // Forward progress while encoding completes
     tokio::pin!(encode_handle);
     let output = loop {
         tokio::select! {
@@ -420,8 +476,10 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
         }
     };
 
-    send_progress(stream, "running", "done", 1, 1, 100.0).await?;
+    eprintln!("[frame-forge] ANIMATE encoding done, output {} bytes", output.len());
 
+    // Skip "done" progress — it can block the final output write on Unix socket.
+    // C# detects completion via statusCode=2 in the final output.
     let mut header = Vec::with_capacity(8 + output.len());
     header.extend_from_slice(&2u32.to_le_bytes());
     header.extend_from_slice(&(output.len() as u32).to_le_bytes());
@@ -431,18 +489,42 @@ async fn handle_animate(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow:
     Ok(())
 }
 
-async fn handle_stitch(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow::Result<()> {
+async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
     let req = crate::protocol::read_animate_req(stream).await?;
     eprintln!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
 
+    // Load frame index (same pattern as animate)
+    let fi = if let Some((path, _)) = req.paths.first() {
+        let cache = state.frame_index.lock().await;
+        cache.get(path).cloned()
+    } else { None };
+    let fi = match fi {
+        Some(i) => i,
+        None => {
+            let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
+            let p_clone = p.clone();
+            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
+                jfs_common::index_frames(&p_clone)
+            }).await??;
+            let i = Arc::new((frames, fps_num, fps_den));
+            state.frame_index.lock().await.insert(p, i.clone());
+            i
+        }
+    };
+    let (fi_frames, _, _) = fi.as_ref();
+
     send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
-    for (i, (path, pos_ms)) in req.paths.iter().enumerate() {
+    for (i, (path, frame_idx)) in req.paths.iter().enumerate() {
         let p = path.clone();
-        let pm = *pos_ms;
-        let (bytes, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pm, 0)).await??;
+        let pos_ms = if *frame_idx >= 0 && (*frame_idx as usize) < fi_frames.len() {
+            fi_frames[*frame_idx as usize].0
+        } else {
+            0
+        };
+        let (bytes, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
         images.push(image::load_from_memory(&bytes)?);
         send_progress(
             stream, "running", "decoding",
@@ -516,8 +598,9 @@ async fn handle_stitch(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow::
         }
     }).await??;
 
-    send_progress(stream, "running", "done", 1, 1, 100.0).await?;
+    eprintln!("[frame-forge] STITCH encoding done, output {} bytes", output.len());
 
+    // Skip "done" progress — C# detects completion via statusCode=2
     let mut header = Vec::with_capacity(8 + output.len());
     header.extend_from_slice(&2u32.to_le_bytes());
     header.extend_from_slice(&(output.len() as u32).to_le_bytes());
@@ -550,3 +633,133 @@ async fn send_progress(
     stream.write_all(&buf).await?;
     Ok(())
 }
+
+// ── MSG_INDEX_FRAMES (0x15): return frame index for a video ─────────
+/// Request: [path_len(4)][path(N)]
+/// Response: [frame_count(4)][fps_num(8)][fps_den(8)] × [pts_ms(8)][is_key(1)]
+
+async fn handle_index_frames(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
+    use crate::protocol::write_frame_index;
+
+    let mut pl_buf = [0u8; 4];
+    stream.read_exact(&mut pl_buf).await?;
+    let path_len = u32::from_le_bytes(pl_buf) as usize;
+    let mut pbytes = vec![0u8; path_len];
+    stream.read_exact(&mut pbytes).await?;
+    let path = PathBuf::from(String::from_utf8(pbytes)?);
+
+    // Check cache
+    {
+        let cache = state.frame_index.lock().await;
+        if let Some(idx) = cache.get(&path) {
+    let (frames, fps_num, fps_den) = idx.as_ref();
+            return write_frame_index(stream, frames, *fps_num, *fps_den).await;
+        }
+    }
+
+    // Load frame index
+    let path_clone = path.clone();
+    let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
+        jfs_common::index_frames(&path_clone)
+    }).await??;
+
+    let idx = Arc::new((frames.clone(), fps_num, fps_den));
+    state.frame_index.lock().await.insert(path, idx);
+
+    write_frame_index(stream, &frames, fps_num, fps_den).await
+}
+
+// ── MSG_PREFETCH_RANGE (0x16): decode frames by index range ──────────
+/// Uses PTS comparison to select frames, not frame counts.
+/// Backward: frames where pts_ms ∈ [center_ms - before_seconds*1000, center_ms]
+/// Forward:  frames where pts_ms ∈ (center_ms, center_ms + after_seconds*1000]
+/// include_start controls whether frame at start_idx is included.
+
+async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
+    let req = read_prefetch_range_req(stream).await?;
+
+    // Load/cache frame index
+    let idx = {
+        let cache = state.frame_index.lock().await;
+        cache.get(&req.path).cloned()
+    };
+    let idx = match idx {
+        Some(i) => i,
+        None => {
+            let path_clone = req.path.clone();
+            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
+                jfs_common::index_frames(&path_clone)
+            }).await??;
+            let i = Arc::new((frames, fps_num, fps_den));
+            state.frame_index.lock().await.insert(req.path.clone(), i.clone());
+            i
+        }
+    };
+
+    let (frames, _, _) = idx.as_ref();
+    let si = req.start_idx.max(0) as usize;
+    if si >= frames.len() { return write_ack(stream, 0).await; }
+
+    let center_ms = frames[si].0;
+    let before_ms = (req.before_seconds * 1000.0).round() as i64;
+    let after_ms  = (req.after_seconds  * 1000.0).round() as i64;
+
+    // Backward: pts_ms ∈ [center_ms - before_ms, center_ms)
+    // Skip start frame if !include_start
+    if before_ms > 0 {
+        let mut i = si;
+        loop {
+            if !req.include_start && i == si { if i == 0 { break; } i -= 1; continue; }
+            let pts = frames[i].0;
+            if pts < center_ms - before_ms { break; }
+            let job = PrefetchJob {
+                item_id: req.item_id.clone(), path: req.path.clone(),
+                pos_ms: pts, width: req.width,
+            };
+            state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
+            if state.prefetch_tx.try_send(job).is_err() {
+                state.in_progress.lock().await.remove(&(req.item_id.clone(), pts, req.width));
+            }
+            if i == 0 { break; }
+            i -= 1;
+        }
+    }
+
+    // Forward: pts_ms ∈ (center_ms, center_ms + after_ms]
+    // Skip start frame if !include_start
+    if after_ms > 0 {
+        let upper = center_ms + after_ms;
+        let mut i = si;
+        loop {
+            if !req.include_start && i == si { i += 1; if i >= frames.len() { break; } continue; }
+            let pts = frames[i].0;
+            if pts > upper { break; }
+            let job = PrefetchJob {
+                item_id: req.item_id.clone(), path: req.path.clone(),
+                pos_ms: pts, width: req.width,
+            };
+            state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
+            if state.prefetch_tx.try_send(job).is_err() {
+                state.in_progress.lock().await.remove(&(req.item_id.clone(), pts, req.width));
+            }
+            i += 1;
+            if i >= frames.len() { break; }
+        }
+    }
+
+    // includeStart=true, before_seconds=0, after_seconds=0: decode just the start frame
+    if req.include_start && before_ms == 0 && after_ms == 0 {
+        let pts = frames[si].0;
+        let job = PrefetchJob {
+            item_id: req.item_id.clone(), path: req.path.clone(),
+            pos_ms: pts, width: req.width,
+        };
+        state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
+        if state.prefetch_tx.try_send(job).is_err() {
+            state.in_progress.lock().await.remove(&(req.item_id.clone(), pts, req.width));
+        }
+    }
+
+    write_ack(stream, 0).await
+}
+

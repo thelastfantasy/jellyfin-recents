@@ -5,12 +5,13 @@ import { atom, getDefaultStore } from 'jotai'
 export interface CropRect { x: number; y: number; w: number; h: number }
 export interface FpsFrac  { num: number; den: number }
 
+export interface DimSetting { value: number; mode: 'userInput' | 'autoAdjust' }
+
 export interface ExportSettings {
   animateFormat:      'gif' | 'webp'
   stitchFormat:       'png' | 'webp'
-  resizeMode:         'width' | 'height'
-  customWidth:        number
-  customHeight:       number
+  width:              DimSetting
+  height:             DimSetting
   resolutionPreset:   string
   useCustomResolution: boolean
   speed:              number
@@ -51,9 +52,8 @@ export interface SavedModalState {
 export const DEFAULT_SETTINGS: ExportSettings = {
   animateFormat:       'gif',
   stitchFormat:        'png',
-  resizeMode:          'width',
-  customWidth:         0,
-  customHeight:        0,
+  width:               { value: 0, mode: 'autoAdjust' },
+  height:              { value: 0, mode: 'autoAdjust' },
   resolutionPreset:    'original',
   useCustomResolution: false,
   speed:               1.0,
@@ -66,13 +66,16 @@ export const DEFAULT_SETTINGS: ExportSettings = {
 function loadSettingsOnce(): ExportSettings {
   try {
     const raw = localStorage.getItem('jfs-frameexport-settings')
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), cropRect: null }
   } catch { /* ignore */ }
   return { ...DEFAULT_SETTINGS }
 }
 
 export function saveSettings(s: ExportSettings): void {
-  try { localStorage.setItem('jfs-frameexport-settings', JSON.stringify(s)) } catch { /* ignore */ }
+  try {
+    const { cropRect: _, ...rest } = s
+    localStorage.setItem('jfs-frameexport-settings', JSON.stringify(rest))
+  } catch { /* ignore */ }
 }
 
 // ── Jotai atoms ──────────────────────────────────────────────────────────────
@@ -103,6 +106,7 @@ const _frameIndexAtom        = atom<Array<{ ms: number; isKey: boolean }> | null
 const _fiMinIdxAtom          = atom(0)
 const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
+const _modalPhaseAtom        = atom<'skeleton' | 'loading'>('skeleton')
 
 // ── React hook-friendly atom exports ─────────────────────────────────────────
 export const pageAtom         = _pageAtom
@@ -130,6 +134,7 @@ export const fiMaxIdxAtom     = _fiMaxIdxAtom
 export const savedStateAtom   = _savedStateAtom
 export const settingsAtom     = _settingsAtom
 export const paramsOpenAtom   = _paramsOpenAtom
+export const modalPhaseAtom   = _modalPhaseAtom
 
 // ── Backward-compatible .value proxies for imperative code ────────────────────
 const store = getDefaultStore()
@@ -168,6 +173,7 @@ export const s_frameIndex       = ref(_frameIndexAtom)
 export const s_fiMinIdx         = ref(_fiMinIdxAtom)
 export const s_fiMaxIdx         = ref(_fiMaxIdxAtom)
 export const s_savedState       = ref(_savedStateAtom)
+export const sModalPhase         = ref(_modalPhaseAtom)
 
 // ── Module-level mutable vars (imperative code continues to use these) ────────
 

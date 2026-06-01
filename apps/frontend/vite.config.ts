@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import preact from '@preact/preset-vite'
+import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import type { Plugin, OutputAsset, OutputChunk } from 'rollup'
 
@@ -27,13 +27,16 @@ function inlineCssPlugin(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
   resolve: {
     alias: {
       '@jfs/api-types': resolve(__dirname, '../../packages/api-types/src/jellyfin-api.ts'),
       '@jfs/i18n': resolve(__dirname, '../../packages/i18n/src/index.ts'),
     },
   },
-  plugins: [preact()],
+  plugins: [react()],
   build: {
     lib: {
       entry: resolve(__dirname, 'src/main.tsx'),

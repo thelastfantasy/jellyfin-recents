@@ -162,14 +162,16 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     const cropW = Math.round(w * img.naturalWidth)
     const cropH = Math.round(h * img.naturalHeight)
     const currentSt = sSettings.value
-    let targetPx = 0, resizeMode = currentSt.resizeMode
-    if (currentSt.resizeMode === 'height' && currentSt.customHeight > 0) {
-      targetPx = currentSt.customHeight
-    } else if (currentSt.customWidth > 0) {
-      targetPx = currentSt.customWidth; resizeMode = 'width'
+    const dimW = currentSt.width
+    const dimH = currentSt.height
+    let targetPx = 0, resizeMode: 'width' | 'height' = 'width'
+    if (dimH.mode === 'userInput' && dimH.value > 0) {
+      targetPx = dimH.value; resizeMode = 'height'
+    } else if (dimW.value > 0) {
+      targetPx = dimW.value
     } else if (currentSt.resolutionPreset !== 'original') {
       const pm: Record<string, number> = { '1080p': 1080, '720p': 720, '480p': 480, '360p': 360 }
-      targetPx = pm[currentSt.resolutionPreset] ?? 0; resizeMode = 'width'
+      targetPx = pm[currentSt.resolutionPreset] ?? 0
     }
     let outW = cropW, outH = cropH
     if (targetPx > 0) {
@@ -323,17 +325,19 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     const newCrop = isFullFrame ? null : { ...draftRef.current }
     const currentSt = sSettings.value
     const changed = JSON.stringify(newCrop) !== JSON.stringify(currentSt.cropRect)
-    const patch: Parameters<typeof updateSettings>[0] = { cropRect: newCrop }
-    if (changed && (currentSt.customWidth > 0 || currentSt.customHeight > 0)) {
+    const w = currentSt.width
+    const h = currentSt.height
+    const patch: any = { cropRect: newCrop }
+    if (changed && (w.value > 0 || h.value > 0)) {
       const vw = _videoEl?.videoWidth  || 1
       const vh = _videoEl?.videoHeight || 1
-      if (currentSt.resizeMode === 'width' && currentSt.customWidth > 0) {
+      if (w.mode === 'userInput' && w.value > 0) {
         const hRatio = newCrop ? (newCrop.h * vh) / (newCrop.w * vw) : vh / vw
-        patch.customHeight = Math.round(currentSt.customWidth * hRatio)
+        patch.height = { value: Math.round(w.value * hRatio), mode: 'autoAdjust' }
         showToast(t('crop.autoAdjH'))
-      } else if (currentSt.resizeMode === 'height' && currentSt.customHeight > 0) {
+      } else if (h.mode === 'userInput' && h.value > 0) {
         const wRatio = newCrop ? (newCrop.w * vw) / (newCrop.h * vh) : vw / vh
-        patch.customWidth = Math.round(currentSt.customHeight * wRatio)
+        patch.width = { value: Math.round(h.value * wRatio), mode: 'autoAdjust' }
         showToast(t('crop.autoAdjW'))
       }
     }

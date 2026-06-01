@@ -1,9 +1,21 @@
+import { useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { sSettings, sExportType, sCropOpen, updateSettings, _videoEl, settingsAtom, exportTypeAtom } from '../core/state'
-import type { ExportSettings } from '../core/state'
+import { sCropOpen, updateSettings, _videoEl, settingsAtom, exportTypeAtom } from '../core/state'
 import { t } from '../lib/i18n'
 
 const ICON_CROP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 2 6 17 21 17"/><polyline points="2 6 17 6 17 21"/></svg>`
+
+function computeAutoDim(video: HTMLVideoElement | null, crop: { w: number; h: number } | null, userDim: number, isWidth: boolean): number {
+  if (!video || userDim <= 0) return 0
+  const vw = video.videoWidth  || 1
+  const vh = video.videoHeight || 1
+  if (crop && crop.w > 0 && crop.h > 0) {
+    const cw = crop.w * vw
+    const ch = crop.h * vh
+    return Math.round(isWidth ? userDim * cw / ch : userDim * ch / cw)
+  }
+  return Math.round(isWidth ? userDim * vw / vh : userDim * vh / vw)
+}
 
 export function ParamsPanel() {
   const st      = useAtomValue(settingsAtom)
@@ -12,44 +24,63 @@ export function ParamsPanel() {
   const isLossless  = curQuality <= 0
   const presets     = ['original', '1080p', '720p', '480p', '360p']
 
+  const w = st.width
+  const h = st.height
+  const widthIsUser  = w.mode === 'userInput'
+  const heightIsUser = h.mode === 'userInput'
+
+  const autoWidth  = heightIsUser && h.value > 0 ? computeAutoDim(_videoEl, st.cropRect, h.value, true) : 0
+  const autoHeight = widthIsUser  && w.value > 0 ? computeAutoDim(_videoEl, st.cropRect, w.value, false) : 0
+
+  useEffect(() => {
+    if (widthIsUser && w.value > 0) {
+      const ah = computeAutoDim(_videoEl, st.cropRect, w.value, false)
+      if (ah && ah !== h.value) updateSettings({ height: { value: ah, mode: 'autoAdjust' } })
+    } else if (heightIsUser && h.value > 0) {
+      const aw = computeAutoDim(_videoEl, st.cropRect, h.value, true)
+      if (aw && aw !== w.value) updateSettings({ width: { value: aw, mode: 'autoAdjust' } })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.width.mode, st.width.value, st.height.mode, st.height.value, st.cropRect, _videoEl?.videoWidth, _videoEl?.videoHeight])
+
   function handleCustomToggle(e: any) {
     const checked = (e.target as HTMLInputElement).checked
-    if (!checked) updateSettings({ useCustomResolution: false, customWidth: 0, customHeight: 0 })
-    else          updateSettings({ useCustomResolution: true, resolutionPreset: 'original' })
+    if (!checked) updateSettings({
+      useCustomResolution: false,
+      width:  { value: 0, mode: 'autoAdjust' },
+      height: { value: 0, mode: 'autoAdjust' },
+    })
+    else updateSettings({ useCustomResolution: true, resolutionPreset: 'original' })
   }
 
   function handlePresetChange(e: any) {
     const val = (e.target as HTMLSelectElement).value
-    if (val !== 'original') updateSettings({ resolutionPreset: val, resizeMode: 'width', customWidth: 0, customHeight: 0 })
-    else                    updateSettings({ resolutionPreset: val })
+    if (val !== 'original') updateSettings({
+      resolutionPreset: val,
+      width:  { value: 0, mode: 'autoAdjust' },
+      height: { value: 0, mode: 'autoAdjust' },
+    })
+    else updateSettings({ resolutionPreset: val })
   }
 
   function handleWidthInput(e: any) {
     const v = parseInt((e.target as HTMLInputElement).value) || 0
-    const patch: Partial<ExportSettings> = { customWidth: v, resizeMode: 'width', resolutionPreset: 'original' }
+    const patch: any = { width: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
     if (v > 0 && _videoEl) {
-      const cr = st.cropRect
-      const hRatio = cr
-        ? (cr.h * (_videoEl.videoHeight || 1)) / (cr.w * (_videoEl.videoWidth || 1))
-        : (_videoEl.videoHeight || 1) / (_videoEl.videoWidth || 1)
-      patch.customHeight = Math.round(v * hRatio)
+      patch.height = { value: computeAutoDim(_videoEl, st.cropRect, v, false), mode: 'autoAdjust' as const }
     } else {
-      patch.customHeight = 0
+      patch.height = { value: 0, mode: 'autoAdjust' as const }
     }
     updateSettings(patch)
   }
 
   function handleHeightInput(e: any) {
     const v = parseInt((e.target as HTMLInputElement).value) || 0
-    const patch: Partial<ExportSettings> = { customHeight: v, resizeMode: 'height', resolutionPreset: 'original' }
+    const patch: any = { height: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
     if (v > 0 && _videoEl) {
-      const cr = st.cropRect
-      const wRatio = cr
-        ? (cr.w * (_videoEl.videoWidth  || 1)) / (cr.h * (_videoEl.videoHeight || 1))
-        : (_videoEl.videoWidth || 1) / (_videoEl.videoHeight || 1)
-      patch.customWidth = Math.round(v * wRatio)
+      patch.width = { value: computeAutoDim(_videoEl, st.cropRect, v, true), mode: 'autoAdjust' as const }
     } else {
-      patch.customWidth = 0
+      patch.width = { value: 0, mode: 'autoAdjust' as const }
     }
     updateSettings(patch)
   }
@@ -101,14 +132,16 @@ export function ParamsPanel() {
               : <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span className="jfs-fe-muted" style={{ width: '16px' }}>{t('params.width')}</span>
-                    <input type="number" value={st.customWidth || ''} placeholder="px" className="jfs-fe-inp" style={{ width: '56px' }}
+                    <input type="number" value={widthIsUser ? (w.value || '') : (autoWidth || '')} placeholder={widthIsUser ? 'px' : 'auto'} className="jfs-fe-inp" style={{ width: '56px' }}
+                      disabled={!widthIsUser}
                       onInput={handleWidthInput}
                       onKeyDown={(e: any) => e.stopPropagation()}
                       onWheel={(e: any) => e.stopPropagation()} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span className="jfs-fe-muted" style={{ width: '16px' }}>{t('params.height')}</span>
-                    <input type="number" value={st.customHeight || ''} placeholder="auto" className="jfs-fe-inp" style={{ width: '56px' }}
+                    <input type="number" value={heightIsUser ? (h.value || '') : (autoHeight || '')} placeholder={heightIsUser ? 'px' : 'auto'} className="jfs-fe-inp" style={{ width: '56px' }}
+                      disabled={!heightIsUser}
                       onInput={handleHeightInput}
                       onKeyDown={(e: any) => e.stopPropagation()}
                       onWheel={(e: any) => e.stopPropagation()} />

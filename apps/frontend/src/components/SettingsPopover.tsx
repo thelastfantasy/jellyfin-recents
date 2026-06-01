@@ -1,4 +1,4 @@
-import { useState, useRef } from 'preact/hooks'
+import React, { useState, useRef } from 'react'
 import { MdSettings } from 'react-icons/md'
 import type { GroupByMode } from '../types'
 import { useLocale } from '../i18n/context'
@@ -51,7 +51,7 @@ export function SettingsPopover({ groupBy, pageSize, onChange }: Props) {
   const label = t.groupPerPage[groupBy]
   const presets = PRESETS[groupBy]
 
-  function handleToggle(e: MouseEvent) {
+  function handleToggle(e: React.MouseEvent<HTMLButtonElement>) {
     e.preventDefault()
     e.stopPropagation()
     if (!open) {
@@ -67,10 +67,10 @@ export function SettingsPopover({ groupBy, pageSize, onChange }: Props) {
   }
 
   return (
-    <div class="jfs-settings-btn-wrap">
+    <div className="jfs-settings-btn-wrap">
       <button
         ref={btnRef}
-        class="jfs-settings-gear-btn"
+        className="jfs-settings-gear-btn"
         onClick={handleToggle}
         title={t.settingsTitle}
       >
@@ -78,29 +78,29 @@ export function SettingsPopover({ groupBy, pageSize, onChange }: Props) {
       </button>
       <Popover open={open} onClose={() => setOpen(false)}>
         <div
-          class="jfs-settings-popover"
+          className="jfs-settings-popover"
           style={{
             position: 'fixed',
             ...style,
             zIndex: '999999',
           }}
         >
-          <div class="jfs-settings-popover__title">{t.settingsTitle}</div>
-          <div class="jfs-settings-popover__mode">{label}</div>
-          <div class="jfs-settings-popover__presets">
+          <div className="jfs-settings-popover__title">{t.settingsTitle}</div>
+          <div className="jfs-settings-popover__mode">{label}</div>
+          <div className="jfs-settings-popover__presets">
             {presets.map((n) => (
               <button
                 key={n}
-                class={`jfs-settings-popover__btn${pageSize === n ? ' jfs-settings-popover__btn--active' : ''}`}
+                className={`jfs-settings-popover__btn${pageSize === n ? ' jfs-settings-popover__btn--active' : ''}`}
                 onClick={() => commitSize(n)}
               >
                 {n}
               </button>
             ))}
           </div>
-          <div class="jfs-settings-popover__row">
+          <div className="jfs-settings-popover__row">
             <input
-              class="jfs-settings-popover__input"
+              className="jfs-settings-popover__input"
               type="number"
               min="1"
               max="999"
@@ -110,7 +110,7 @@ export function SettingsPopover({ groupBy, pageSize, onChange }: Props) {
                 if (v > 0) commitSize(v)
               }}
             />
-            <span class="jfs-settings-popover__unit">{label}</span>
+            <span className="jfs-settings-popover__unit">{label}</span>
           </div>
         </div>
       </Popover>

@@ -1,7 +1,6 @@
 import { useAtomValue } from 'jotai'
 import type { FrameEntry } from '../core/state'
-import { sPrefetchDone, sPrefetchTotal, _itemId, prefetchTotalAtom, prefetchDoneAtom } from '../core/state'
-import { frameUrl } from '../api/frameExportApi'
+import { _itemId, prefetchTotalAtom, prefetchDoneAtom } from '../core/state'
 import { formatTime } from '../lib/utils'
 import { t } from '../lib/i18n'
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect } from 'react'
 import { pollStatus, getImageUrl, JobStatusDto } from '../api/posterSheetApi'
 import { updateJob } from '../state/posterJobStore'
 

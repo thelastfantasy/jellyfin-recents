@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAtomValue } from 'jotai'
-import { sProgressTaskId, progressTaskIdAtom } from '../core/state'
+import { progressTaskIdAtom } from '../core/state'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import { openProgressStream, cancelExport } from '../api/frameExportApi'
 import type { TaskProgressEvent } from '../types/api'

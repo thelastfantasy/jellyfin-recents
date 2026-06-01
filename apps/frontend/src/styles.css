@@ -1862,12 +1862,19 @@ a.jfs-card__series-name:hover {
 .jfs-poster-settings__generate-btn:disabled { opacity: 0.5; cursor: default; }
 .jfs-poster-settings__generate-btn:hover:not(:disabled) { filter: brightness(1.1); }
 
-/* ── Poster Queue Widget ─────────────────────────────────────────────────── */
-
-.jfs-queue-widget {
+/* ── Queue Dock (shared container for poster + export widgets) ─────────────── */
+.jfs-queue-dock {
   position: fixed;
   right: 1.5rem;
   bottom: 1.5rem;
+  z-index: 900;
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Poster Queue Widget ─────────────────────────────────────────────────── */
+
+.jfs-queue-widget {
   z-index: 900;
   width: 44px;
   height: 44px;
@@ -2032,9 +2039,6 @@ a.jfs-card__series-name:hover {
 /* ── Frame Export Queue Widget ───────────────────────────────────────────── */
 
 .jfs-export-widget {
-  position: fixed;
-  right: calc(1.5rem + 52px);
-  bottom: 1.5rem;
   z-index: 900;
   width: 44px;
   height: 44px;
@@ -2070,7 +2074,7 @@ a.jfs-card__series-name:hover {
 
 .jfs-export-popover {
   position: fixed;
-  right: calc(1.5rem + 52px);
+  right: 1.5rem;
   bottom: calc(1.5rem + 56px);
   z-index: 999999;
   width: 320px;
@@ -2099,6 +2103,14 @@ a.jfs-card__series-name:hover {
   margin-right: 5px;
   vertical-align: middle;
   flex-shrink: 0;
+}
+.jfs-export-type-badge--fmt {
+  background: rgba(59,130,246,0.25);
+  color: #93c5fd;
+}
+.jfs-export-type-badge--size {
+  background: rgba(34,197,94,0.25);
+  color: #86efac;
 }
 .jfs-export-download-btn {
   display: block;
@@ -2198,6 +2210,17 @@ a.jfs-card__series-name:hover {
 
 .jfs-lightbox__close:hover { background: rgba(255, 255, 255, 0.15); }
 
+.jfs-lightbox__nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 44px; height: 60px; border: none; border-radius: 8px;
+  background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.jfs-lightbox__nav:hover { background: rgba(255,255,255,0.22); }
+.jfs-lightbox__nav--prev { left: 12px; }
+.jfs-lightbox__nav--next { right: 12px; }
+
 .jfs-lightbox__footer {
   position: absolute;
   bottom: 1rem;
@@ -2265,7 +2288,13 @@ a.jfs-card__series-name:hover {
     width: calc(100vw - 1rem);
     max-width: 360px;
   }
-  .jfs-queue-widget { right: 0.75rem; bottom: 0.75rem; }
+  .jfs-export-popover {
+    right: 0.5rem;
+    bottom: calc(0.5rem + 56px);
+    width: calc(100vw - 1rem);
+    max-width: 360px;
+  }
+  .jfs-queue-dock { right: 0.75rem; bottom: 0.75rem; }
 }
 
 /* ── Timestamp position picker (graphical) ────────────────────────── */

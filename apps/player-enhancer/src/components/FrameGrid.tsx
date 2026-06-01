@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { useAtomValue } from 'jotai'
 import {
-  sFrames,
   _frames, _dragMode, _dragSelectValue, _lastClickedIdx, _suppressNextMousedown,
   _longPressCard, _longPressTimer, _autoScrollRaf, _lastTouchX, _lastTouchY,
   set_dragMode, set_dragSelectValue, set_lastClickedIdx, set_suppressNextMousedown,
@@ -12,6 +11,7 @@ import { frameUrl } from '../api/frameExportApi'
 import { _itemId } from '../core/state'
 import { FrameCard } from './FrameCard'
 import { sLightboxIdx } from '../core/state'
+import { FrameGridPhaseGate } from './FrameGridSkeleton'
 
 // ── applyDragToPoint: direct DOM updates for drag perf, no renderGrid ─────────
 function applyDragToPoint(x: number, y: number): void {
@@ -212,23 +212,25 @@ export function FrameGrid() {
   }, [])
 
   return (
-    <div className="jfs-fe-scroll" ref={scrollRef}>
-      <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
-        {frames.map((f, i) => f.removed ? null : (
-          <FrameCard
-            key={f.posMs}
-            frame={f}
-            idx={i}
-            onMouseDown={handleCardMouseDown}
-            onView={handleView}
-            onDownload={handleDownload}
-            onRemove={handleRemove}
-            onRetry={handleRetry}
-            onToggle={handleToggle}
-            onLoadError={handleLoadError}
-          />
-        ))}
+    <FrameGridPhaseGate>
+      <div className="jfs-fe-scroll" ref={scrollRef}>
+        <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
+          {frames.map((f, i) => f.removed ? null : (
+            <FrameCard
+              key={f.posMs}
+              frame={f}
+              idx={i}
+              onMouseDown={handleCardMouseDown}
+              onView={handleView}
+              onDownload={handleDownload}
+              onRemove={handleRemove}
+              onRetry={handleRetry}
+              onToggle={handleToggle}
+              onLoadError={handleLoadError}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+    </FrameGridPhaseGate>
   )
 }

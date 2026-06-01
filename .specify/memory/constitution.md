@@ -111,14 +111,14 @@ Not permitted in the same commit:
 Each Stage in any restructuring plan MUST define and execute a verification command before
 the Stage is considered complete. Typical gates per domain:
 
-| Domain | Gate command |
-|--------|-------------|
-| Rust | `cargo check -p <crate>` (per crate, not workspace-wide) |
-| TypeScript | `tsc --noEmit` + `pnpm -r build` |
-| C# | `dotnet build packages/JellyfinSuite.Plugin/` |
-| Full stack | `mise run test` |
-| Deployment | `mise run update` |
-| CI | `.github/workflows/` pass (verified via `mise run workflow-test` using `act`) |
+| Domain     | Gate command                                                                  |
+| ---------- | ----------------------------------------------------------------------------- |
+| Rust       | `cargo check -p <crate>` (per crate, not workspace-wide)                      |
+| TypeScript | `tsc --noEmit` + `pnpm -r build` + eslint check                               |
+| C#         | `dotnet build packages/JellyfinSuite.Plugin/`                                 |
+| Full stack | `mise run test`                                                               |
+| Deployment | `mise run update`                                                             |
+| CI         | `.github/workflows/` pass (verified via `mise run workflow-test` using `act`) |
 
 Gates are sequential and non-optional. A failed gate MUST be resolved before moving forward.
 

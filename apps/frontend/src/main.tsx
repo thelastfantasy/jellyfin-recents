@@ -1,6 +1,7 @@
-import { render } from 'preact'
+import { createRoot } from 'react-dom/client'
 import { App } from './components/App'
 import { detectLocale } from './i18n'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
 
 /** Update page title attribute and sidebar link text to match detected locale */
@@ -44,7 +45,11 @@ async function mount() {
 
   if (_mounted) return // second viewshow after already mounted — skip re-render
   _mounted = true
-  render(<App locale={locale} />, root)
+  createRoot(root).render(
+    <ErrorBoundary>
+      <App locale={locale} />
+    </ErrorBoundary>,
+  )
 }
 
 // 立即尝试（桌面端通常直接成功）

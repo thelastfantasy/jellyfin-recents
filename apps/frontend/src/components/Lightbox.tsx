@@ -1,6 +1,6 @@
-import { useEffect, useCallback, useRef, useState } from 'preact/hooks'
-import { createPortal } from 'preact/compat'
-import { MdClose, MdDownload, MdDelete, MdZoomIn, MdZoomOut, MdFitScreen } from 'react-icons/md'
+import React, { useEffect, useCallback, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { MdClose, MdDownload, MdDelete, MdZoomIn, MdZoomOut, MdFitScreen, MdChevronLeft, MdChevronRight } from 'react-icons/md'
 import { useLocale } from '../i18n/context'
 
 interface Props {
@@ -9,9 +9,11 @@ interface Props {
   onClose: () => void
   onDownload?: () => void
   onDelete?: () => void
+  onPrev?: () => void
+  onNext?: () => void
 }
 
-export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props) {
+export function Lightbox({ src, alt = '', onClose, onDownload, onDelete, onPrev, onNext }: Props) {
   const viewRef   = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const imgRef    = useRef<HTMLImageElement>(null)
@@ -76,7 +78,7 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props
   }, [onClose])
 
   // Wheel zoom: keeps the pixel under the cursor stationary
-  const onWheel = useCallback((e: WheelEvent) => {
+  const onWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault()
     const view = viewRef.current
     if (!view) return
@@ -99,7 +101,7 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props
   }, [applyTransform])
 
   // Mouse drag panning
-  const onMouseDown = useCallback((e: MouseEvent) => {
+  const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.preventDefault()
     setDragging(true)
@@ -235,27 +237,39 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props
 
   return createPortal(
     <div
-      class="jfs-lightbox"
+      className="jfs-lightbox"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={alt}
     >
       {/* Zoom toolbar */}
-      <div class="jfs-lightbox__zoombar" onClick={e => e.stopPropagation()}>
-        <button class="jfs-lightbox__zoom-btn" onClick={() => zoomBy(1.3)} title={t.lightboxZoomIn}>
+      <div className="jfs-lightbox__zoombar" onClick={e => e.stopPropagation()}>
+        <button className="jfs-lightbox__zoom-btn" onClick={() => zoomBy(1.3)} title={t.lightboxZoomIn}>
           <MdZoomIn size={20} />
         </button>
-        <button class="jfs-lightbox__zoom-btn" onClick={() => zoomBy(1 / 1.3)} title={t.lightboxZoomOut}>
+        <button className="jfs-lightbox__zoom-btn" onClick={() => zoomBy(1 / 1.3)} title={t.lightboxZoomOut}>
           <MdZoomOut size={20} />
         </button>
-        <button class="jfs-lightbox__zoom-btn" onClick={handleFit} title={t.lightboxFit}>
+        <button className="jfs-lightbox__zoom-btn" onClick={handleFit} title={t.lightboxFit}>
           <MdFitScreen size={18} />
         </button>
       </div>
 
+      {/* Prev / Next navigation */}
+      {onPrev && (
+        <button className="jfs-lightbox__nav jfs-lightbox__nav--prev" onClick={e => { e.stopPropagation(); onPrev() }} title="Previous">
+          <MdChevronLeft size={28} />
+        </button>
+      )}
+      {onNext && (
+        <button className="jfs-lightbox__nav jfs-lightbox__nav--next" onClick={e => { e.stopPropagation(); onNext() }} title="Next">
+          <MdChevronRight size={28} />
+        </button>
+      )}
+
       <button
-        class="jfs-lightbox__close"
+        className="jfs-lightbox__close"
         onClick={e => { e.stopPropagation(); onClose() }}
         aria-label={t.lightboxClose}
       >
@@ -265,16 +279,16 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props
       {/* Pan / zoom viewport */}
       <div
         ref={viewRef}
-        class="jfs-lightbox__view"
+        className="jfs-lightbox__view"
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onClick={e => e.stopPropagation()}
         style={{ cursor: dragging ? 'grabbing' : 'grab' }}
       >
-        <div ref={canvasRef} class="jfs-lightbox__canvas">
+        <div ref={canvasRef} className="jfs-lightbox__canvas">
           <img
             ref={imgRef}
-            class="jfs-lightbox__img"
+            className="jfs-lightbox__img"
             src={src}
             alt={alt}
             onLoad={onImgLoad}
@@ -284,15 +298,15 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete }: Props
       </div>
 
       {hasFooter && (
-        <div class="jfs-lightbox__footer" onClick={e => e.stopPropagation()}>
+        <div className="jfs-lightbox__footer" onClick={e => e.stopPropagation()}>
           {onDownload && (
-            <button class="jfs-lightbox__footer-btn" onClick={onDownload} title={t.lightboxDownload}>
+            <button className="jfs-lightbox__footer-btn" onClick={onDownload} title={t.lightboxDownload}>
               <MdDownload size={20} />
             </button>
           )}
           {onDelete && (
             <button
-              class="jfs-lightbox__footer-btn jfs-lightbox__footer-btn--delete"
+              className="jfs-lightbox__footer-btn jfs-lightbox__footer-btn--delete"
               onClick={onDelete}
               title={t.lightboxDelete}
             >

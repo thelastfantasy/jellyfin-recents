@@ -1,17 +1,17 @@
-import { createPortal } from 'preact/compat'
-import type { ComponentChildren } from 'preact'
+import { createPortal } from 'react-dom'
+import type { ReactNode } from 'react'
 
 interface Props {
   open: boolean
   onClose: () => void
-  children: ComponentChildren
+  children: ReactNode
 }
 
 export function Popover({ open, onClose, children }: Props) {
   if (!open) return null
   return createPortal(
     <div>
-      <div class="jfs-popover-overlay" onClick={onClose} />
+      <div className="jfs-popover-overlay" onClick={onClose} />
       {children}
     </div>,
     document.body,

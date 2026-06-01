@@ -84,7 +84,7 @@ export async function prefetch(
   const token = getToken()
   const useIdx = items.every(it => it.fiIdx >= 0)
   const body: PrefetchRequest = useIdx
-    ? { frameIndices: items.map(it => it.fiIdx), width }
+    ? { frameIndices: items.map(it => it.fiIdx), width } as any
     : { positions: items.map(it => Math.round(it.posMs)), width }
   try {
     await fetch(

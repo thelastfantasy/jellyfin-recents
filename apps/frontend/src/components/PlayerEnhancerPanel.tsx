@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'preact/hooks'
+import { useState, useEffect, useRef } from 'react'
 import { useLocale } from '../i18n/context'
 import {
   getEnhancerStatus,
@@ -90,34 +90,34 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
   }
 
   return (
-    <div class="jfs-poster-settings-modal jfs-enhancer-panel">
-      <div class="jfs-poster-settings-modal__header">
+    <div className="jfs-poster-settings-modal jfs-enhancer-panel">
+      <div className="jfs-poster-settings-modal__header">
         <span>{t.enhancerTitle}</span>
-        <button class="jfs-poster-settings-modal__close" onClick={onClose}>✕</button>
+        <button className="jfs-poster-settings-modal__close" onClick={onClose}>✕</button>
       </div>
-      <div class="jfs-poster-settings-modal__body jfs-enhancer-panel__body">
-        <p class="jfs-enhancer-panel__index-note">{t.enhancerIndexHtmlNote}</p>
-        <p class="jfs-enhancer-panel__browser-note">{t.enhancerBrowserNote}</p>
-        <p class={`jfs-enhancer-panel__status${enabled ? ' jfs-enhancer-panel__status--on' : ''}`}>
+      <div className="jfs-poster-settings-modal__body jfs-enhancer-panel__body">
+        <p className="jfs-enhancer-panel__index-note">{t.enhancerIndexHtmlNote}</p>
+        <p className="jfs-enhancer-panel__browser-note">{t.enhancerBrowserNote}</p>
+        <p className={`jfs-enhancer-panel__status${enabled ? ' jfs-enhancer-panel__status--on' : ''}`}>
           {enabled === null ? '…' : enabled ? t.enhancerStatusEnabled : t.enhancerStatusDisabled}
         </p>
-        <div class="jfs-enhancer-panel__actions">
-          <button class="jfs-btn" disabled={busy} onClick={handleInject}>
+        <div className="jfs-enhancer-panel__actions">
+          <button className="jfs-btn" disabled={busy} onClick={handleInject}>
             {t.enhancerInject}
           </button>
-          <button class="jfs-btn jfs-btn--danger" disabled={busy} onClick={handleRemove}>
+          <button className="jfs-btn jfs-btn--danger" disabled={busy} onClick={handleRemove}>
             {t.enhancerRemove}
           </button>
         </div>
-        {hint === 'reload' && <p class="jfs-enhancer-panel__hint jfs-enhancer-panel__hint--ok">{t.enhancerReloadHint}</p>}
-        {hint === 'error' && <p class="jfs-enhancer-panel__hint jfs-enhancer-panel__hint--err">{t.enhancerErrorHint}</p>}
+        {hint === 'reload' && <p className="jfs-enhancer-panel__hint jfs-enhancer-panel__hint--ok">{t.enhancerReloadHint}</p>}
+        {hint === 'error' && <p className="jfs-enhancer-panel__hint jfs-enhancer-panel__hint--err">{t.enhancerErrorHint}</p>}
 
-        <div class="jfs-enhancer-panel__seek-row">
-          <label class="jfs-enhancer-panel__seek-label">{t.enhancerTrickplayLabel}</label>
-          <div class="jfs-enhancer-panel__seek-input-wrap">
+        <div className="jfs-enhancer-panel__seek-row">
+          <label className="jfs-enhancer-panel__seek-label">{t.enhancerTrickplayLabel}</label>
+          <div className="jfs-enhancer-panel__seek-input-wrap">
             <input
               type="checkbox"
-              class="jfs-enhancer-panel__checkbox"
+              className="jfs-enhancer-panel__checkbox"
               checked={trickplayEnabled}
               onChange={(e) => {
                 const val = (e.target as HTMLInputElement).checked
@@ -127,12 +127,12 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
             />
           </div>
         </div>
-        <div class="jfs-enhancer-panel__seek-row">
-          <label class="jfs-enhancer-panel__seek-label">{t.enhancerSeekLabel}</label>
-          <div class="jfs-enhancer-panel__seek-input-wrap">
+        <div className="jfs-enhancer-panel__seek-row">
+          <label className="jfs-enhancer-panel__seek-label">{t.enhancerSeekLabel}</label>
+          <div className="jfs-enhancer-panel__seek-input-wrap">
             <input
               type="number"
-              class="jfs-enhancer-panel__seek-input"
+              className="jfs-enhancer-panel__seek-input"
               min={0.5}
               max={30}
               step={0.5}
@@ -144,15 +144,15 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
               }}
               onBlur={() => saveConfig({ seekSeconds })}
             />
-            <span class="jfs-enhancer-panel__seek-unit">{t.enhancerSeekUnit}</span>
+            <span className="jfs-enhancer-panel__seek-unit">{t.enhancerSeekUnit}</span>
           </div>
         </div>
-        <div class="jfs-enhancer-panel__seek-row">
-          <label class="jfs-enhancer-panel__seek-label">{t.enhancerSpeedLabel}</label>
-          <div class="jfs-enhancer-panel__seek-input-wrap">
+        <div className="jfs-enhancer-panel__seek-row">
+          <label className="jfs-enhancer-panel__seek-label">{t.enhancerSpeedLabel}</label>
+          <div className="jfs-enhancer-panel__seek-input-wrap">
             <input
               type="number"
-              class="jfs-enhancer-panel__seek-input"
+              className="jfs-enhancer-panel__seek-input"
               min={1.25}
               max={4}
               step={0.25}
@@ -164,7 +164,7 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
               }}
               onBlur={() => saveConfig({ speedRate })}
             />
-            <span class="jfs-enhancer-panel__seek-unit">{t.enhancerSpeedUnit}</span>
+            <span className="jfs-enhancer-panel__seek-unit">{t.enhancerSpeedUnit}</span>
           </div>
         </div>
       </div>

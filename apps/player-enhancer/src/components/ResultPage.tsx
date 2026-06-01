@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { sResultUrl, sFileSize, sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
+import { sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
 import { buildResultUrl, deleteResult } from '../api/frameExportApi'
 import { formatTime } from '../lib/utils'
 import { t } from '../lib/i18n'

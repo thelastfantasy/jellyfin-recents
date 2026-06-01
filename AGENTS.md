@@ -7,19 +7,25 @@
 - **先测试，再部署，部署须确认。**
 - **修改代码前，先同步 spec.md 和 tasks.md。**
 - 所有与用户的交流使用中文。
+- commit要在动作确认无误后才能执行，禁止改完代码就直接 commit。
+- 修改代码后不能马上部署，必须等用户反映没有其他问题了才部署。
+- deploy只要不报错就必须一直等待，禁止在部署途中尝试加速如直接复制文件等。
 
 ## 部署工作流程
 
 ```
 1. make test        — 运行全套测试（Rust + TypeScript + C#）
 2. 报告测试结果     — 等待用户明确确认
-3. make update      — 构建并部署到 jellyfin-dev（破坏性操作，须确认）
+3. mise run deploy — 完整构建并部署到 jellyfin-dev（全量，禁止部分部署）
 ```
 
-**禁止行为**：
-- 未运行测试直接 `make build` / `make update`
-- 未经用户确认执行任何部署操作
-- 跳过 `make test` 直接报告"可以部署了"
+**部署规则**：
+- **始终用 `mise run deploy`**，禁止部分部署（如单独 `docker cp` 个别文件）
+- **每次部署完成后必须自检**，通过 DevTools MCP：
+  - 控制台无 error
+  - Network 面板无 404
+  - DOM 结构与预期一致，页面功能正常
+- **禁止将验证责任转嫁给用户**（如"你去试试"、"刷新看看"）
 
 ## 代码变更工作流程
 
@@ -69,13 +75,13 @@ gh pr merge --squash --delete-branch
 
 **测试应通过 Makefile 运行**（在用户的终端里）：
 
-| 命令                  | 说明                          |
-|----------------------|-------------------------------|
-| `make test`          | 运行全套测试（**推荐**）       |
-| `make test-rust`     | Rust 单元测试（poster-gen）   |
-| `make test-frontend` | TypeScript/Vitest 测试        |
-| `make test-csharp`   | C# xUnit 测试                 |
-| `make workflow-test` | 本地运行 build workflow（需要 Docker，用 `act`） |
+| 命令                         | 说明                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `make test`                  | 运行全套测试（**推荐**）                                                                                         |
+| `make test-rust`             | Rust 单元测试（poster-gen）                                                                                      |
+| `make test-frontend`         | TypeScript/Vitest 测试                                                                                           |
+| `make test-csharp`           | C# xUnit 测试                                                                                                    |
+| `make workflow-test`         | 本地运行 build workflow（需要 Docker，用 `act`）                                                                 |
 | `make workflow-test-release` | 本地运行 release workflow（构建/打包步骤可测；GitHub Release 和 Pages deploy 步骤因需真实 token 会失败，属正常） |
 
 若系统没有 `make`，可用 `mise run test` / `mise make test` 代替（mise 会通过 conda 安装 make）。
@@ -83,6 +89,20 @@ gh pr merge --squash --delete-branch
 Claude 需要运行测试时，**优先调用 `make test`**（或具体套件的 `make test-rust` 等），而不是直接调用 `cargo test`/`vitest`/`dotnet test`。只有在 make 明确不可用时才退而使用各工具链命令。
 
 `vitest.config.ts` 是专用测试配置（root = 项目根，server.fs.allow 包含 tests/），`vite.config.ts` 是构建配置，两者分开。
+
+## TypeScript / ESLint 零报错要求
+
+前端项目（`apps/player-enhancer`、`apps/frontend`）部署前必须通过：
+
+```bash
+cd apps/player-enhancer && npx tsc --noEmit && npx eslint src/
+cd apps/frontend      && npx tsc --noEmit && npx eslint src/
+```
+
+- **tsc --noEmit**：零 error（warning 不算，但 error 必须清零）
+- **eslint**：零 error（warning 可存在，但不建议累积）
+
+此检查应在每次 `mise run deploy` 之前执行，未通过则阻塞部署。
 
 ## 开发环境
 

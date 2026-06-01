@@ -572,6 +572,7 @@ body.jfs-fe-open .upNextContainer {
   align-items: center;
   justify-content: center;
   cursor: zoom-out;
+  pointer-events: auto;
 }
 .jfs-fe-lb img {
   max-width: 92vw;
@@ -754,4 +755,50 @@ body.jfs-fe-open .upNextContainer {
   /* Bigger touch targets */
   .jfs-fe-card-act { width: 44px; height: 44px; }
   .jfs-fe-card-foot { font-size: 9px; padding: 2px 4px; }
+}
+
+/* ── Skeleton loading ───────────────────────────────────────────────────────── */
+
+@keyframes jfs-fe-sk-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.jfs-fe-sk-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+}
+
+.jfs-fe-sk-img {
+  aspect-ratio: 16/9;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,255,255,0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: jfs-fe-sk-shimmer 1.5s ease-in-out infinite;
+}
+
+.jfs-fe-sk-foot {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+.jfs-fe-sk-line {
+  height: 10px;
+  flex: 1;
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,255,255,0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: jfs-fe-sk-shimmer 1.5s ease-in-out infinite;
 }

@@ -9,6 +9,16 @@ pub(crate) struct SingleFrameReq {
     pub item_id: String, // 32-char hex Jellyfin UUID
 }
 
+pub(crate) struct PrefetchRangeReq {
+    pub item_id: String,
+    pub path: std::path::PathBuf,
+    pub start_idx: i64,
+    pub before_seconds: f64,
+    pub after_seconds: f64,
+    pub include_start: bool,
+    pub width: u32,
+}
+
 pub(crate) async fn read_msg_type(
     stream: &mut tokio::net::UnixStream,
 ) -> anyhow::Result<u8> {
@@ -91,7 +101,7 @@ pub(crate) async fn write_ack(
 
 pub(crate) struct AnimateReq {
     pub task_id: String,
-    pub paths: Vec<(std::path::PathBuf, i64)>, // (path, pos_ms)
+    pub paths: Vec<(std::path::PathBuf, i64)>, // (path, frame_idx)
     pub format: u16,      // 0x01=GIF, 0x02=WebP
     pub resize_mode: u16, // 0x01=width, 0x02=height
     pub target_px: u32,   // custom pixel value
@@ -166,4 +176,90 @@ pub(crate) async fn read_animate_req(
     let mut q_buf = [0u8; 4]; stream.read_exact(&mut q_buf).await?; let quality = f32::from_le_bytes(q_buf);
 
     Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality })
+}
+
+// ── MSG_PREFETCH_RANGE (0x16) ───────────────────────────────────────
+// Wire: [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before_seconds(8)] [after_seconds(8)] [include_start(1)] [width(4)]
+
+pub(crate) async fn read_prefetch_range_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<PrefetchRangeReq> {
+    use tokio::io::AsyncReadExt;
+
+    let mut id_buf = [0u8; 32];
+    stream.read_exact(&mut id_buf).await?;
+    let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
+
+    let mut pl_buf = [0u8; 4];
+    stream.read_exact(&mut pl_buf).await?;
+    let path_len = u32::from_le_bytes(pl_buf) as usize;
+    let mut pbytes = vec![0u8; path_len];
+    stream.read_exact(&mut pbytes).await?;
+    let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
+
+    let mut si_buf = [0u8; 8];
+    stream.read_exact(&mut si_buf).await?;
+    let start_idx = i64::from_le_bytes(si_buf);
+
+    let mut bs_buf = [0u8; 8];
+    stream.read_exact(&mut bs_buf).await?;
+    let before_seconds = f64::from_le_bytes(bs_buf);
+
+    let mut as_buf = [0u8; 8];
+    stream.read_exact(&mut as_buf).await?;
+    let after_seconds = f64::from_le_bytes(as_buf);
+
+    let mut is_buf = [0u8; 1];
+    stream.read_exact(&mut is_buf).await?;
+    let include_start = is_buf[0] != 0;
+
+    let mut w_buf = [0u8; 4];
+    stream.read_exact(&mut w_buf).await?;
+    let width = u32::from_le_bytes(w_buf);
+
+    Ok(PrefetchRangeReq { item_id, path, start_idx, before_seconds, after_seconds, include_start, width })
+}
+
+/// Wire: [frame_count(4)][fps_num(8)][fps_den(8)] × frame_count: [pts_ms(8)][is_key(1)]
+pub(crate) async fn write_frame_index(
+    stream: &mut tokio::net::UnixStream,
+    frames: &[(i64, bool)],
+    fps_num: i64,
+    fps_den: i64,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let fc = frames.len() as u32;
+    let mut buf = Vec::with_capacity(20 + fc as usize * 9);
+    buf.extend_from_slice(&fc.to_le_bytes());
+    buf.extend_from_slice(&fps_num.to_le_bytes());
+    buf.extend_from_slice(&fps_den.to_le_bytes());
+    for &(pts_ms, is_key) in frames {
+        buf.extend_from_slice(&pts_ms.to_le_bytes());
+        buf.push(if is_key { 1 } else { 0 });
+    }
+    stream.write_all(&buf).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+// ── MSG_LIST_CACHED (0x14 write) ────────────────────────────────────
+/// Wire: [request_id(4)][count(4)] × [pos_ms(8)]
+
+pub(crate) async fn write_list_cached(
+    stream: &mut tokio::net::UnixStream,
+    request_id: u32,
+    positions: &[i64],
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut buf = Vec::with_capacity(8 + positions.len() * 8);
+    buf.extend_from_slice(&request_id.to_le_bytes());
+    buf.extend_from_slice(&(positions.len() as u32).to_le_bytes());
+    for &pos in positions {
+        buf.extend_from_slice(&pos.to_le_bytes());
+    }
+    stream.write_all(&buf).await?;
+    stream.flush().await?;
+    Ok(())
 }

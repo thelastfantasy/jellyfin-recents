@@ -153,6 +153,9 @@ export interface Translations {
   exportQueue: string
   exportQueueRemove: string
   exportQueueDownload: string
+  clipWorkshopQueue: string
+  exportFormat: string
+  exportSize: string
   // Player Enhancer management panel (admin only)
   enhancerTitle: string
   enhancerStatusEnabled: string

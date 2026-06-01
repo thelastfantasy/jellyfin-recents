@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai'
 import {
-  sFrames, sExportType, sParamsOpen, sSettings, sPrefetchTotal, sPrefetchDone,
+  sExportType, sParamsOpen,
   updateSettings, renderGrid,
   _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
   frameInterval,

@@ -162,12 +162,11 @@ public class FrameExportController : ControllerBase
 
     /// <summary>
     /// POST /FrameExport/Prefetch/{itemId} — enqueue background thumbnail decode.
-    /// Accepts frameIndices (preferred, resolved via FrameInfo) or positions (positionMs fallback).
     /// </summary>
     [HttpPost("Prefetch/{itemId:guid}")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public IActionResult Prefetch([FromRoute] Guid itemId, [FromBody] PrefetchRequest req)
+    public async Task<IActionResult> Prefetch([FromRoute] Guid itemId, [FromBody] PrefetchRequest req)
     {
         if (!_frameExport.IsAvailable)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame-forge not available");
@@ -177,35 +176,32 @@ public class FrameExportController : ControllerBase
             return NotFound(new { error = "Item not found" });
 
         var filePath = item.Path;
-        _ = Task.Run(async () =>
+
+        // Fallback: positions list (FrameInfo unavailable)
+        if (req.Positions is { Count: > 0 })
         {
-            IReadOnlyList<long> posList;
-            if (req.FrameIndices.Count > 0)
+            _ = Task.Run(async () =>
             {
-                var frameResult = await _seekPreview.FrameIndexAsync(filePath, itemId);
-                if (frameResult == null)
+                foreach (var posMs in req.Positions)
                 {
-                    _logger.LogWarning("[FrameExport] Prefetch: FrameInfo unavailable for {ItemId}, skipping", itemId);
-                    return;
+                    try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); }
+                    catch { /* individual failures ignored */ }
                 }
-                var frames = frameResult.Value.Frames;
-                posList = req.FrameIndices
-                    .Where(i => i >= 0 && i < frames.Length)
-                    .Select(i => frames[i].Ms)
-                    .ToList();
-            }
-            else
-            {
-                posList = req.Positions;
-            }
+            });
+            return Accepted();
+        }
 
-            foreach (var posMs in posList)
-            {
-                try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); }
-                catch { /* individual failures ignored */ }
-            }
-        });
-
+        // Main path: forward range to frame-forge. frame-forge loads its own
+        // frame index internally and resolves startFrameIdx → posMs precisely.
+        try
+        {
+            await _frameExport.PrefetchRangeAsync(filePath, req.StartFrameIdx,
+                req.BeforeSeconds, req.AfterSeconds, req.IncludeStart, req.Width, itemId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[FrameExport] Prefetch range error: {Ex}", ex.Message);
+        }
         return Accepted();
     }
 
@@ -269,22 +265,9 @@ public class FrameExportController : ControllerBase
                 task.Status = Services.TaskStatus.Running;
                 var filePaths = req.Frames.Select(_ => item.Path).ToList();
 
-                // Resolve frameIdx → posMs for frames that specify an index.
-                // Fall back to PositionMs for frames that don't.
-                SeekPreviewService.FrameIndexEntryInternal[]? frameIndexFrames = null;
-                if (req.Frames.Any(f => f.FrameIdx.HasValue))
-                {
-                    var fi = await _seekPreview.FrameIndexAsync(item.Path, req.ItemId, task.Cts.Token);
-                    frameIndexFrames = fi?.Frames;
-                }
-
-                var positions = req.Frames.Select(f =>
-                {
-                    if (f.FrameIdx.HasValue && frameIndexFrames != null
-                        && f.FrameIdx.Value >= 0 && f.FrameIdx.Value < frameIndexFrames.Length)
-                        return frameIndexFrames[f.FrameIdx.Value].Ms;
-                    return f.PositionMs ?? 0L;
-                }).ToList();
+                // Pass frameIdx directly to frame-forge (no posMs conversion).
+                // frame-forge resolves frameIdx → posMs via its own frame index.
+                var frameIndices = req.Frames.Select(f => (long)(f.FrameIdx ?? -1)).ToList();
 
                 var resolutionPreset = req.Params.ResolutionPreset;
                 var resizeMode = req.Params.ResizeMode;
@@ -309,13 +292,13 @@ public class FrameExportController : ControllerBase
                 byte[]? output = req.Type switch
                 {
                     "animate" => await _frameExport.SubmitAnimateTaskAsync(
-                        task, filePaths, positions, req.Params.Format,
+                        task, filePaths, frameIndices, req.Params.Format,
                         resizeMode, targetPx, req.Params.Speed, req.Params.LoopCount,
                         req.Params.CropX ?? 0f, req.Params.CropY ?? 0f,
                         req.Params.CropW ?? 0f, req.Params.CropH ?? 0f,
                         req.Params.Quality, task.Cts.Token),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
-                        task, filePaths, positions, req.Params.Format, req.Params.Quality,
+                        task, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
                         task.Cts.Token),
                     _ => null
                 };

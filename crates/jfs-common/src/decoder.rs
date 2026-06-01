@@ -182,8 +182,13 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
     use ffmpeg_next::ffi::*;
 
     let aspect = frame.width() as f64 / frame.height() as f64;
-    let w = ((target_width + 1) & !1) as i32;
-    let h = ((((target_width as f64 / aspect) as u32).max(2) + 1) & !1) as i32;
+    let (w, h) = if target_width == 0 {
+        (frame.width() as i32, frame.height() as i32)
+    } else {
+        let w = ((target_width + 1) & !1) as i32;
+        let h = ((((target_width as f64 / aspect) as u32).max(2) + 1) & !1) as i32;
+        (w, h)
+    };
 
     unsafe {
         let src = frame.as_ptr();

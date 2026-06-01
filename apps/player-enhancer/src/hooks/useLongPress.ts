@@ -1,4 +1,4 @@
-import { useEffect } from 'preact/hooks'
+import { useEffect } from 'react'
 import { showSpeedOsd, hideSpeedOsd } from '../components/OsdOverlay'
 
 const LONG_PRESS_MS   = 500

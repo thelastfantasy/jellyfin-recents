@@ -710,10 +710,16 @@ export interface components {
             createdAt?: number;
         };
         PrefetchRequest: {
-            frameIndices?: number[];
-            positions?: number[];
+            /** Format: int32 */
+            startFrameIdx?: number;
+            /** Format: double */
+            beforeSeconds?: number;
+            /** Format: double */
+            afterSeconds?: number;
+            includeStart?: boolean;
             /** Format: int32 */
             width?: number;
+            positions?: number[] | null;
         };
         PreviewRequestDto: {
             /** Format: int32 */

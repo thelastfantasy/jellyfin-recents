@@ -47,11 +47,13 @@ if ($LASTEXITCODE -ne 0) { throw "frame-forge Docker build failed" }
 Copy-Item -LiteralPath "$RepoRoot/target/release/frame-forge" -Destination "$RepoRoot/packages/JellyfinSuite.Plugin/frame-forge-linux-x64" -Force
 
 Write-Host "=== Building poster-gen (Docker) ==="
+docker volume create poster-cargo-home 2>$null
 docker run --rm `
   -v "${RepoRoot}:/workspace" `
+  -v poster-cargo-home:/root/.cargo `
   -w /workspace `
-  rust:1.88-slim-bookworm `
-  cargo build -p poster-gen --release
+  ubuntu:24.04 `
+  sh -c "DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq curl build-essential ca-certificates && [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && /root/.cargo/bin/rustup default stable 2>/dev/null || true && /root/.cargo/bin/cargo build -p poster-gen --release"
 if ($LASTEXITCODE -ne 0) { throw "poster-gen Docker build failed" }
 Copy-Item -LiteralPath "$RepoRoot/target/release/poster-gen" -Destination "$RepoRoot/packages/JellyfinSuite.Plugin/poster-gen-linux-x64" -Force
 

@@ -1,5 +1,5 @@
-import { Fragment } from 'preact'
-import { useRef, useLayoutEffect } from 'preact/hooks'
+import { Fragment } from 'react'
+import { useRef, useLayoutEffect } from 'react'
 import { RiArrowDropUpFill, RiArrowDropDownFill } from 'react-icons/ri'
 import type { TimeGroup, ViewMode, PlayRecord } from '../types'
 import { PlayRecordCard } from './PlayRecordCard'
@@ -145,11 +145,11 @@ export function GroupSection({
 
   return (
     <Fragment>
-      <h2 class="jfs-group__title">
-        <span class="jfs-group__title-text">{group.label}</span>
-        <span class="jfs-group__nav">
+      <h2 className="jfs-group__title">
+        <span className="jfs-group__title-text">{group.label}</span>
+        <span className="jfs-group__nav">
           <button
-            class="jfs-group__nav-btn"
+            className="jfs-group__nav-btn"
             onClick={handleUp}
             disabled={!canUp}
             title={t.groupPrev}
@@ -157,7 +157,7 @@ export function GroupSection({
             <RiArrowDropUpFill />
           </button>
           <button
-            class="jfs-group__nav-btn"
+            className="jfs-group__nav-btn"
             onClick={handleDown}
             disabled={!canDown}
             title={t.groupNext}
@@ -166,7 +166,7 @@ export function GroupSection({
           </button>
         </span>
       </h2>
-      <div ref={cardsRef} class={`jfs-group__cards jfs-group__cards--${viewMode}`}>
+      <div ref={cardsRef} className={`jfs-group__cards jfs-group__cards--${viewMode}`}>
         {group.records.map((record) => (
           <PlayRecordCard
             key={getRecordKey(record)}

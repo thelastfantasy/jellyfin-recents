@@ -1,4 +1,4 @@
-import { detectLang, createT } from '@jfs/i18n'
+import { detectLang } from '@jfs/i18n'
 
 const TRANSLATIONS = {
   en: {

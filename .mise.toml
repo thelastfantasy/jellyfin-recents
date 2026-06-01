@@ -27,6 +27,14 @@ run = "make check-seek-preview"
 description = "在 Docker 中类型检查 frame-forge（快速，不产出二进制）"
 run = "make check-frame-forge"
 
+[tasks.check-seek-preview-ps1]
+description = "pwsh: Docker 内 check seek-preview"
+run = "pwsh -NoProfile -File scripts/check-seek-preview.ps1"
+
+[tasks.check-frame-forge-ps1]
+description = "pwsh: Docker 内 check frame-forge"
+run = "pwsh -NoProfile -File scripts/check-frame-forge.ps1"
+
 [tasks.update]
 description = "构建并部署到本地 Jellyfin 开发容器（完整）"
 run = "make update"
