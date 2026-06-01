@@ -52,9 +52,11 @@ public sealed class FrameExportService : IDisposable
         await _startLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            _process?.Refresh();
             if (_process is { HasExited: false })
                 return;
 
+            InvalidateSocket();
             if (File.Exists(_socketPath)) File.Delete(_socketPath);
 
             try { File.SetUnixFileMode(_binaryPath, UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute); }
