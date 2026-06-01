@@ -5,6 +5,7 @@ import {
   _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
   frameInterval,
   framesAtom, exportTypeAtom, paramsOpenAtom, settingsAtom, prefetchTotalAtom, prefetchDoneAtom,
+  modalPhaseAtom,
 } from '../core/state'
 import { t } from '../lib/i18n'
 import { FrameGrid } from './FrameGrid'
@@ -21,6 +22,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
   const paramsOpen  = useAtomValue(paramsOpenAtom)
   const prefTotal   = useAtomValue(prefetchTotalAtom)
   const prefDone    = useAtomValue(prefetchDoneAtom)
+  const phase       = useAtomValue(modalPhaseAtom)
 
   const visible      = frames.filter(f => !f.removed)
   const selectedCount = visible.filter(f => f.selected).length
@@ -108,7 +110,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
         <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={() => onExpand(1)}>
           {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
         </button>
-        <button className="jfs-fe-btn p" onClick={onGenerate}>
+        <button className="jfs-fe-btn p" disabled={phase === 'skeleton'} onClick={onGenerate}>
           {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}
         </button>
         <button className="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>

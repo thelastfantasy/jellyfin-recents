@@ -16,10 +16,12 @@ export function FrameGridSkeleton() {
   const frames = useAtomValue(framesAtom)
   const count = frames.length || 80
   return (
-    <div className="jfs-fe-grid">
-      {Array.from({ length: count }, (_, i) => (
-        <SkeletonCard key={i} />
-      ))}
+    <div className="jfs-fe-scroll">
+      <div className="jfs-fe-grid">
+        {Array.from({ length: count }, (_, i) => (
+          <SkeletonCard key={i} />
+        ))}
+      </div>
     </div>
   )
 }

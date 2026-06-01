@@ -32,6 +32,7 @@ const jstore = getDefaultStore()
 export const _feOpen = atom<{ videoEl: HTMLVideoElement; itemId: string } | null>(null)
 
 export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
+  sPage.value = 'grid'
   jstore.set(_feOpen, { videoEl, itemId })
 }
 
