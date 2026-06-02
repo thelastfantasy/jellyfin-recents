@@ -2,8 +2,8 @@ import { useAtomValue } from 'jotai'
 import type { ChangeEvent } from 'react'
 import {
   sExportType, sParamsOpen,
-  updateSettings, renderGrid,
-  _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
+  updateSettings,
+  setFrames, _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
   frameInterval,
   framesAtom, exportTypeAtom, paramsOpenAtom, settingsAtom, prefetchTotalAtom, prefetchDoneAtom,
   modalPhaseAtom,
@@ -34,9 +34,6 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
 
   const dur   = _videoEl?.duration ?? 0
   const maxMs = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
-  // "atStart" means we're at the beginning and can't go back further.
-  // Use _fiMinIdx only when _frameIndex is populated (after full streaming completes).
-  // During streaming, _frameIndex is null → fall back to absolute _minPosMs.
   const atStart = _frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0
   const atEnd   = _frameIndex
     ? _fiMaxIdx >= (_frameIndex.length - 1)
@@ -45,26 +42,22 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
     ? `${t('frameExport.loading')} ${prefDone}/${prefTotal}`
     : `${isMobile ? '' : t('frameExport.selected') + ' '}${selectedCount}/${visible.length}`
 
-  // Generate button: requires >1 selected frame AND all selected have cached JPEGs (no load errors)
   const canGenerate = selectedCount > 1 && visible.filter(f => f.selected).every(f => f.jpegUrl && !f.loadError)
 
   function handleSelectAll() {
-    const shouldSelectAll = !visible.every(f => f.selected)
-    visible.forEach(f => { f.selected = shouldSelectAll })
-    renderGrid()
+    const val = !visible.every(f => f.selected)
+    setFrames(_frames.map(f => f.removed ? f : { ...f, selected: val }))
   }
 
   function handleRestore() {
-    _frames.forEach(f => { if (f.removed) { f.removed = false; f.selected = true } })
-    renderGrid()
+    setFrames(_frames.map(f => f.removed ? { ...f, removed: false, selected: true } : f))
   }
 
   function handleSparseChange(e: ChangeEvent<HTMLSelectElement>) {
     const n = parseInt(e.target.value) || 0
     if (n <= 0) return
-    _frames.forEach((f, i) => { if (!f.removed) f.selected = i % n === 0 });
-    (e.target as HTMLSelectElement).value = '0'
-    renderGrid()
+    setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % n === 0 }))
+    ;(e.target as HTMLSelectElement).value = '0'
   }
 
   function handleFormatChange(e: ChangeEvent<HTMLSelectElement>) {
@@ -84,7 +77,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
         <span className="jfs-fe-title">{t('frameExport.title')}</span>
         <div className="jfs-fe-seg">
           <button className={`jfs-fe-seg-btn${exportType === 'animate' ? ' active' : ''}`} onClick={() => { sExportType.value = 'animate' }}>{t('grid.animate')}</button>
-          <button className={`jfs-fe-seg-btn${exportType === 'stitch'  ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch'  }}>{t('grid.stitch')}</button>
+          <button className={`jfs-fe-seg-btn${exportType === 'stitch' ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch' }}>{t('grid.stitch')}</button>
         </div>
         <select id="jfs-fe-format" className="jfs-fe-sel" value={fmt} onChange={handleFormatChange}>
           {formatOpts.map(o => <option key={o} value={o}>{o.toUpperCase()}</option>)}

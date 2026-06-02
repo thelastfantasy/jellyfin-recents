@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import {
-  set_fpsFrac, set_frameIndex, _itemId as _gItemId,
+  setFpsFrac, setFrameIndex, _itemId as _gItemId,
 } from '../core/state'
 import { openFrameInfoStream } from '../api/frameExportApi'
 
@@ -30,7 +30,7 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
     // Cleanup previous preload
     if (startedRef.current) {
       cancelFrameInfoPreload()
-      if (_gItemId !== preloadState.itemId) set_frameIndex(null)
+      if (_gItemId !== preloadState.itemId) setFrameIndex(null)
     }
 
     startedRef.current = id
@@ -48,8 +48,8 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
       fps => {
         if (preloadState.aborted || done) return
         done = true
-        set_fpsFrac(fps)
-        set_frameIndex(accumulated)
+        setFpsFrac(fps)
+        setFrameIndex(accumulated)
         preloadState.evSrc = null
         evSrc.close()
       },

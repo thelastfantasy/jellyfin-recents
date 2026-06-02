@@ -2,8 +2,8 @@ import { useEffect, useCallback, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import {
   _frames, _dragMode, _dragSelectValue, _lastClickedIdx, _suppressNextMousedown,
-  set_dragMode, set_dragSelectValue, set_lastClickedIdx, set_suppressNextMousedown,
-  renderGrid, framesAtom, modalPhaseAtom,
+  setDragMode, setDragSelectValue, setLastClickedIdx, setSuppressNextMousedown,
+  setFrames, framesAtom, modalPhaseAtom,
 } from '../core/state'
 import { frameUrl } from '../api/frameExportApi'
 import { formatTime } from '../lib/utils'
@@ -43,7 +43,7 @@ export function FrameGrid() {
   // ── Callbacks ──────────────────────────────────────────────────────────────
 
   const handleCardMouseDown = useCallback((idx: number, e: MouseEvent) => {
-    if (_suppressNextMousedown) { set_suppressNextMousedown(false); return }
+    if (_suppressNextMousedown) { setSuppressNextMousedown(false); return }
     if (!_frames[idx]) return
 
     if (e.shiftKey && _lastClickedIdx >= 0 && _lastClickedIdx !== idx) {
@@ -51,17 +51,17 @@ export function FrameGrid() {
       const hi = Math.max(_lastClickedIdx, idx)
       const target = !_frames[idx].selected
       for (let i = lo; i <= hi; i++) { _frames[i].selected = target }
-      set_lastClickedIdx(idx)
-      renderGrid()
+      setLastClickedIdx(idx)
+      setFrames([..._frames])
       e.preventDefault()
       return
     }
 
     _frames[idx].selected = !_frames[idx].selected
-    set_dragSelectValue(_frames[idx].selected)
-    set_dragMode(true)
-    set_lastClickedIdx(idx)
-    renderGrid()
+    setDragSelectValue(_frames[idx].selected)
+    setDragMode(true)
+    setLastClickedIdx(idx)
+    setFrames([..._frames])
     e.preventDefault()
   }, [])
 
@@ -82,25 +82,25 @@ export function FrameGrid() {
     if (!_frames[idx]) return
     _frames[idx].removed  = true
     _frames[idx].selected = false
-    renderGrid()
+    setFrames([..._frames])
   }, [])
 
   const handleRetry = useCallback((idx: number) => {
     if (!_frames[idx]) return
     _frames[idx].loadError = false
-    renderGrid()
+    setFrames([..._frames])
   }, [])
 
   const handleToggle = useCallback((idx: number, checked: boolean) => {
     if (!_frames[idx]) return
     _frames[idx].selected = checked
-    renderGrid()
+    setFrames([..._frames])
   }, [])
 
   const handleLoadError = useCallback((idx: number) => {
     if (!_frames[idx]) return
     _frames[idx].loadError = true
-    renderGrid()
+    setFrames([..._frames])
   }, [])
 
   // ── Drag helper: toggle selection at point (mouse or touch during drag) ───
@@ -108,7 +108,7 @@ export function FrameGrid() {
     const idx = cardIdxAt(x, y)
     if (idx < 0 || _frames[idx].selected === _dragSelectValue) return
     _frames[idx].selected = _dragSelectValue
-    renderGrid()
+    setFrames([..._frames])
   }
 
   // ── Auto-scroll during touch drag ──────────────────────────────────────────
@@ -141,8 +141,8 @@ export function FrameGrid() {
     }
 
     const onMouseUp = () => {
-      if (_dragMode) renderGrid()
-      set_dragMode(false)
+      if (_dragMode) setFrames([..._frames])
+      setDragMode(false)
     }
 
     const onTouchStart = (e: TouchEvent) => {
@@ -154,11 +154,11 @@ export function FrameGrid() {
       pressingTimer.current = setTimeout(() => {
         pressingTimer.current = null
         setPressingIdx(null)
-        set_dragMode(true)
+        setDragMode(true)
         _frames[idx].selected = !_frames[idx].selected
-        set_dragSelectValue(_frames[idx].selected)
-        set_lastClickedIdx(idx)
-        renderGrid()
+        setDragSelectValue(_frames[idx].selected)
+        setLastClickedIdx(idx)
+        setFrames([..._frames])
         if ('vibrate' in navigator) navigator.vibrate(25)
       }, 400)
     }
@@ -196,11 +196,11 @@ export function FrameGrid() {
       setPressingIdx(null)
       cancelAutoScroll()
       if (_dragMode) {
-        renderGrid()
-        set_suppressNextMousedown(true)
-        setTimeout(() => set_suppressNextMousedown(false), 500)
+        setFrames([..._frames])
+        setSuppressNextMousedown(true)
+        setTimeout(() => setSuppressNextMousedown(false), 500)
       }
-      set_dragMode(false)
+      setDragMode(false)
     }
 
     grid.addEventListener('mouseover', onMouseOver)

@@ -187,13 +187,13 @@ export let _itemId  = ''
 export let _itemTitle = ''
 export let _activeTaskId = ''
 
-export function set_modalRoot(v: HTMLDivElement | null)       { _modalRoot = v }
-export function set_dragController(v: AbortController | null) { _dragController = v }
-export function set_domObserver(v: MutationObserver | null)   { _domObserver = v }
-export function set_videoEl(v: HTMLVideoElement | null)       { _videoEl = v }
-export function set_itemId(v: string)                         { _itemId = v }
-export function set_itemTitle(v: string)                      { _itemTitle = v }
-export function set_activeTaskId(v: string)                   { _activeTaskId = v }
+export function setModalRoot(v: HTMLDivElement | null)       { _modalRoot = v }
+export function setDragController(v: AbortController | null) { _dragController = v }
+export function setDomObserver(v: MutationObserver | null)   { _domObserver = v }
+export function setVideoEl(v: HTMLVideoElement | null)       { _videoEl = v }
+export function setItemId(v: string)                         { _itemId = v }
+export function setItemTitle(v: string)                      { _itemTitle = v }
+export function setActiveTaskId(v: string)                   { _activeTaskId = v }
 
 export let _frames:         FrameEntry[] = []
 export let _minPosMs        = 1
@@ -204,32 +204,27 @@ export let _dragMode        = false
 export let _dragSelectValue = false
 export let _suppressNextMousedown = false
 
-export function set_frames(v: FrameEntry[])                    { _frames = v }
-export function set_minPosMs(v: number)                        { _minPosMs = v }
-export function set_maxPosMs(v: number)                        { _maxPosMs = v }
-export function set_fpsFrac(v: FpsFrac)                        { _fpsFrac = v }
-export function set_lastClickedIdx(v: number)                  { _lastClickedIdx = v }
-export function set_dragMode(v: boolean)                       { _dragMode = v }
-export function set_dragSelectValue(v: boolean)                { _dragSelectValue = v }
-export function set_suppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
+export function setFrames(v: FrameEntry[])                    { _frames = v }
+export function setMinPosMs(v: number)                        { _minPosMs = v }
+export function setMaxPosMs(v: number)                        { _maxPosMs = v }
+export function setFpsFrac(v: FpsFrac)                        { _fpsFrac = v }
+export function setLastClickedIdx(v: number)                  { _lastClickedIdx = v }
+export function setDragMode(v: boolean)                       { _dragMode = v }
+export function setDragSelectValue(v: boolean)                { _dragSelectValue = v }
+export function setSuppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
 
 export let _frameIndex: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null = null
 export let _fiMinIdx = 1
 export let _fiMaxIdx = -1
 
-export function set_frameIndex(v: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null) { _frameIndex = v }
-export function set_fiMinIdx(v: number)  { _fiMinIdx = v }
-export function set_fiMaxIdx(v: number)  { _fiMaxIdx = v }
+export function setFrameIndex(v: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null) { _frameIndex = v }
+export function setFiMinIdx(v: number)  { _fiMinIdx = v }
+export function setFiMaxIdx(v: number)  { _fiMaxIdx = v }
 
 export let _savedState: SavedModalState | null = null
-export function set_savedState(v: SavedModalState | null) { _savedState = v }
+export function setSavedState(v: SavedModalState | null) { _savedState = v }
 
 // ── Derived helpers ──────────────────────────────────────────────────────────
-
-export function renderGrid(): void {
-  _frames = [..._frames]
-  sFrames.value = _frames
-}
 
 export function frameInterval(): number {
   return _fpsFrac.den * 1000 / _fpsFrac.num
