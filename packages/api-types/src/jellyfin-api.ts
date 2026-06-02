@@ -63,22 +63,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/JellyfinSuite/FrameExport/Keyframes/{itemId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["GetKeyframes"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/JellyfinSuite/FrameExport/Prefetch/{itemId}": {
         parameters: {
             query?: never;
@@ -918,42 +902,6 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The server is currently starting or is temporarily not available. */
-            503: {
-                headers: {
-                    /** @description A hint for when to retry the operation in full seconds. */
-                    "Retry-After"?: number;
-                    /** @description A short plain-text reason why the server is not available. */
-                    Message?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": unknown;
-                };
-            };
-        };
-    };
-    GetKeyframes: {
-        parameters: {
-            query?: {
-                startMs?: number;
-                endMs?: number;
-            };
-            header?: never;
-            path: {
-                itemId: string;
-            };
             cookie?: never;
         };
         requestBody?: never;

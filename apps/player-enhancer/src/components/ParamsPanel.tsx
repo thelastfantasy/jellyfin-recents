@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, WheelEvent } from 'react'
 import { useAtomValue } from 'jotai'
 import { sCropOpen, updateSettings, _videoEl, settingsAtom, exportTypeAtom } from '../core/state'
+import type { ExportSettings } from '../core/state'
 import { t } from '../lib/i18n'
 
 const ICON_CROP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 2 6 17 21 17"/><polyline points="2 6 17 6 17 21"/></svg>`
@@ -43,8 +45,8 @@ export function ParamsPanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st.width.mode, st.width.value, st.height.mode, st.height.value, st.cropRect, _videoEl?.videoWidth, _videoEl?.videoHeight])
 
-  function handleCustomToggle(e: any) {
-    const checked = (e.target as HTMLInputElement).checked
+  function handleCustomToggle(e: ChangeEvent<HTMLInputElement>) {
+    const checked = e.target.checked
     if (!checked) updateSettings({
       useCustomResolution: false,
       width:  { value: 0, mode: 'autoAdjust' },
@@ -53,8 +55,8 @@ export function ParamsPanel() {
     else updateSettings({ useCustomResolution: true, resolutionPreset: 'original' })
   }
 
-  function handlePresetChange(e: any) {
-    const val = (e.target as HTMLSelectElement).value
+  function handlePresetChange(e: ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value
     if (val !== 'original') updateSettings({
       resolutionPreset: val,
       width:  { value: 0, mode: 'autoAdjust' },
@@ -63,9 +65,9 @@ export function ParamsPanel() {
     else updateSettings({ resolutionPreset: val })
   }
 
-  function handleWidthInput(e: any) {
+  function handleWidthInput(e: FormEvent<HTMLInputElement>) {
     const v = parseInt((e.target as HTMLInputElement).value) || 0
-    const patch: any = { width: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
+    const patch: Partial<ExportSettings> = { width: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
     if (v > 0 && _videoEl) {
       patch.height = { value: computeAutoDim(_videoEl, st.cropRect, v, false), mode: 'autoAdjust' as const }
     } else {
@@ -74,9 +76,9 @@ export function ParamsPanel() {
     updateSettings(patch)
   }
 
-  function handleHeightInput(e: any) {
+  function handleHeightInput(e: FormEvent<HTMLInputElement>) {
     const v = parseInt((e.target as HTMLInputElement).value) || 0
-    const patch: any = { height: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
+    const patch: Partial<ExportSettings> = { height: { value: v, mode: 'userInput' as const }, resolutionPreset: 'original' }
     if (v > 0 && _videoEl) {
       patch.width = { value: computeAutoDim(_videoEl, st.cropRect, v, true), mode: 'autoAdjust' as const }
     } else {
@@ -85,24 +87,24 @@ export function ParamsPanel() {
     updateSettings(patch)
   }
 
-  function handleSpeedChange(e: any) {
-    updateSettings({ speed: parseFloat((e.target as HTMLSelectElement).value) || 1.0 })
+  function handleSpeedChange(e: ChangeEvent<HTMLSelectElement>) {
+    updateSettings({ speed: parseFloat(e.target.value) || 1.0 })
   }
 
-  function handleLoopInput(e: any) {
+  function handleLoopInput(e: FormEvent<HTMLInputElement>) {
     updateSettings({ loopCount: Math.max(0, Math.min(99, parseInt((e.target as HTMLInputElement).value) || 0)) })
   }
 
-  function handleLosslessChange(e: any) {
-    const checked   = (e.target as HTMLInputElement).checked
+  function handleLosslessChange(e: ChangeEvent<HTMLInputElement>) {
+    const checked   = e.target.checked
     const qualVal   = isAnim ? st.animateQuality : st.stitchQuality
     const fallback  = qualVal > 0 ? qualVal : 0.75
     if (isAnim) updateSettings({ animateQuality: checked ? 0 : fallback })
     else        updateSettings({ stitchQuality:  checked ? 0 : fallback })
   }
 
-  function handleQualityChange(e: any) {
-    const v = parseFloat((e.target as HTMLSelectElement).value) || 0.75
+  function handleQualityChange(e: ChangeEvent<HTMLSelectElement>) {
+    const v = parseFloat(e.target.value) || 0.75
     if (isAnim) updateSettings({ animateQuality: v })
     else        updateSettings({ stitchQuality:  v })
   }
@@ -135,16 +137,16 @@ export function ParamsPanel() {
                     <input type="number" value={widthIsUser ? (w.value || '') : (autoWidth || '')} placeholder={widthIsUser ? 'px' : 'auto'} className="jfs-fe-inp" style={{ width: '56px' }}
                       disabled={!widthIsUser}
                       onInput={handleWidthInput}
-                      onKeyDown={(e: any) => e.stopPropagation()}
-                      onWheel={(e: any) => e.stopPropagation()} />
+                      onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
+                      onWheel={(e: WheelEvent) => e.stopPropagation()} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span className="jfs-fe-muted" style={{ width: '16px' }}>{t('params.height')}</span>
                     <input type="number" value={heightIsUser ? (h.value || '') : (autoHeight || '')} placeholder={heightIsUser ? 'px' : 'auto'} className="jfs-fe-inp" style={{ width: '56px' }}
                       disabled={!heightIsUser}
                       onInput={handleHeightInput}
-                      onKeyDown={(e: any) => e.stopPropagation()}
-                      onWheel={(e: any) => e.stopPropagation()} />
+                      onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
+                      onWheel={(e: WheelEvent) => e.stopPropagation()} />
                   </div>
                 </>
             }
@@ -165,8 +167,8 @@ export function ParamsPanel() {
               <span className="jfs-fe-muted" style={{ width: '28px' }}>{t('params.loop')}</span>
               <input type="number" min={0} max={99} value={st.loopCount} className="jfs-fe-inp" style={{ width: '44px' }}
                 onInput={handleLoopInput}
-                onKeyDown={(e: any) => e.stopPropagation()}
-                onWheel={(e: any) => e.stopPropagation()} />
+                onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
+                onWheel={(e: WheelEvent) => e.stopPropagation()} />
               <span className="jfs-fe-muted">(0=∞)</span>
             </div>
           </div>

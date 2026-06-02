@@ -99,14 +99,16 @@ impl DiskCache {
 
     pub fn write(&self, item_id: &str, video_path: &Path, frame_idx: i64, pos_ms: i64, width: u32, data: &[u8]) {
         let p = self.frame_path(item_id, frame_idx, pos_ms, width);
+        let current_mtime = video_mtime(video_path);
         {
             let mut idx = self.index.lock().unwrap();
             let key = (item_id.to_owned(), pos_ms, width);
-            if idx.entries.contains_key(&key) {
-                if p.exists() { return; }
-                if let Some(e) = idx.entries.remove(&key) {
-                    idx.total_bytes = idx.total_bytes.saturating_sub(e.size);
-                }
+            if let Some(e) = idx.entries.get(&key) {
+                // File already cached with current video mtime — nothing to do
+                if e.video_mtime == current_mtime && p.exists() { return; }
+                // Stale mtime or missing file — remove old entry so we rewrite
+                idx.total_bytes = idx.total_bytes.saturating_sub(e.size);
+                idx.entries.remove(&key);
             }
         }
         if let Some(dir) = p.parent() {
@@ -130,12 +132,12 @@ impl DiskCache {
         if over_cap { self.cleanup(); }
     }
 
-    /// Returns all cached pos_ms values for the given item and width.
-    pub fn list_cached(&self, item_id: &str, width: u32) -> Vec<i64> {
+    /// Returns cached (pos_ms, frame_idx) pairs for the given item and width.
+    pub fn list_cached(&self, item_id: &str, width: u32) -> Vec<(i64, i64)> {
         let idx = self.index.lock().unwrap();
         idx.entries.iter()
             .filter(|((id, _, w), _)| id == item_id && *w == width)
-            .map(|((_, pos_ms, _), _)| *pos_ms)
+            .map(|((_, pos_ms, _), e)| (*pos_ms, e.frame_idx))
             .collect()
     }
 

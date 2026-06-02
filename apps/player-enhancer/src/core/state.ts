@@ -23,7 +23,7 @@ export interface ExportSettings {
 
 export interface FrameEntry {
   posMs:        number
-  fiIdx:        number
+  fiIdx:         number
   selected:     boolean
   jpegUrl:      string
   isJunk:       boolean
@@ -31,7 +31,6 @@ export interface FrameEntry {
   loadError?:   boolean
   removed?:     boolean
   actualPtsMs?: number
-  blobUrl?:     string
   skeleton?:    boolean
 }
 
@@ -102,7 +101,7 @@ const _lastClickedIdxAtom    = atom(-1)
 const _dragModeAtom          = atom(false)
 const _dragSelectValueAtom   = atom(false)
 const _suppressNextMousedownAtom = atom(false)
-const _frameIndexAtom        = atom<Array<{ ms: number; isKey: boolean }> | null>(null)
+const _frameIndexAtom        = atom<Array<{ ms: number; isKey: boolean; frameIndex: number }> | null>(null)
 const _fiMinIdxAtom          = atom(0)
 const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
@@ -145,7 +144,7 @@ const store = getDefaultStore()
 function ref<T>(a: ReturnType<typeof atom<T>>) {
   return {
     get value(): T { return store.get(a) },
-    set value(v: T) { store.set(a, v as any) },
+    set value(v: T) { store.set(a, v) },
     peek(): T { return store.get(a) },
   }
 }
@@ -185,6 +184,7 @@ export let _dragController: AbortController | null = null
 export let _domObserver:    MutationObserver | null = null
 export let _videoEl:        HTMLVideoElement | null = null
 export let _itemId  = ''
+export let _itemTitle = ''
 export let _activeTaskId = ''
 
 export function set_modalRoot(v: HTMLDivElement | null)       { _modalRoot = v }
@@ -192,6 +192,7 @@ export function set_dragController(v: AbortController | null) { _dragController 
 export function set_domObserver(v: MutationObserver | null)   { _domObserver = v }
 export function set_videoEl(v: HTMLVideoElement | null)       { _videoEl = v }
 export function set_itemId(v: string)                         { _itemId = v }
+export function set_itemTitle(v: string)                      { _itemTitle = v }
 export function set_activeTaskId(v: string)                   { _activeTaskId = v }
 
 export let _frames:         FrameEntry[] = []
@@ -201,12 +202,7 @@ export let _fpsFrac:        FpsFrac = { num: 24, den: 1 }
 export let _lastClickedIdx  = -1
 export let _dragMode        = false
 export let _dragSelectValue = false
-export let _longPressTimer: ReturnType<typeof setTimeout> | null = null
-export let _longPressCard:  HTMLElement | null = null
 export let _suppressNextMousedown = false
-export let _autoScrollRaf:  number | null = null
-export let _lastTouchX      = 0
-export let _lastTouchY      = 0
 
 export function set_frames(v: FrameEntry[])                    { _frames = v }
 export function set_minPosMs(v: number)                        { _minPosMs = v }
@@ -215,17 +211,13 @@ export function set_fpsFrac(v: FpsFrac)                        { _fpsFrac = v }
 export function set_lastClickedIdx(v: number)                  { _lastClickedIdx = v }
 export function set_dragMode(v: boolean)                       { _dragMode = v }
 export function set_dragSelectValue(v: boolean)                { _dragSelectValue = v }
-export function set_longPressTimer(v: ReturnType<typeof setTimeout> | null) { _longPressTimer = v }
-export function set_longPressCard(v: HTMLElement | null)       { _longPressCard = v }
 export function set_suppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
-export function set_autoScrollRaf(v: number | null)            { _autoScrollRaf = v }
-export function set_lastTouchXY(x: number, y: number)          { _lastTouchX = x; _lastTouchY = y }
 
-export let _frameIndex: Array<{ ms: number; isKey: boolean }> | null = null
+export let _frameIndex: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null = null
 export let _fiMinIdx = 1
 export let _fiMaxIdx = -1
 
-export function set_frameIndex(v: Array<{ ms: number; isKey: boolean }> | null) { _frameIndex = v }
+export function set_frameIndex(v: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null) { _frameIndex = v }
 export function set_fiMinIdx(v: number)  { _fiMinIdx = v }
 export function set_fiMaxIdx(v: number)  { _fiMaxIdx = v }
 
@@ -261,4 +253,14 @@ export function updateSettings(patch: Partial<ExportSettings>): void {
   const next = { ...store.get(_settingsAtom), ...patch }
   saveSettings(next)
   store.set(_settingsAtom, next)
+}
+
+// ── Modal open/close ────────────────────────────────────────────────────────
+
+export const _feOpen = atom<{ videoEl: HTMLVideoElement; itemId: string } | null>(null)
+
+export function openFrameExportModal(videoEl: HTMLVideoElement, itemId: string): void {
+  store.set(modalMinimizedAtom, false)
+  sPage.value = 'grid'
+  store.set(_feOpen, { videoEl, itemId })
 }

@@ -2,6 +2,7 @@
 "conda:make" = "latest"
 "aqua:nektos/act" = "latest"
 bun = "latest"
+lefthook = "latest"
 
 [tasks.build]
 description = "构建前端和插件"

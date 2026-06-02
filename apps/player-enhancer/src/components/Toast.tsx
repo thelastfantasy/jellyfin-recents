@@ -2,7 +2,7 @@ import { atom, getDefaultStore } from 'jotai'
 import { useAtomValue } from 'jotai'
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
-  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v as any) } }
+  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) } }
 }
 
 interface ToastEntry { msg: string; id: number }

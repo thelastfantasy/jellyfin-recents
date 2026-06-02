@@ -15,7 +15,7 @@ export function FrameExportJobRunner({ taskId }: Props) {
 
     const token = window.ApiClient?.accessToken()
     const qs = token ? `&api_key=${encodeURIComponent(token)}` : ''
-    const es = new EventSource(`/JellyfinSuite/FrameExport/Progress?taskId=${encodeURIComponent(taskId)}${qs}`)
+    const es = new EventSource(`/JellyfinSuite/FrameExport/TaskProgress?taskId=${encodeURIComponent(taskId)}${qs}`)
 
     es.onmessage = (event: MessageEvent) => {
       try {

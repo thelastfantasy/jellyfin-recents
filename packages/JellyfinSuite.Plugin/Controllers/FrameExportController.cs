@@ -39,18 +39,6 @@ public class FrameExportController : ControllerBase
     }
 
     /// <summary>
-    /// Resolves a frameIdx (0-based index into FrameInfo) to positionMs.
-    /// Returns null if the frame index is unavailable or frameIdx is out of range.
-    /// </summary>
-    private async Task<long?> ResolveFrameIdxAsync(string filePath, Guid itemId, int frameIdx, CancellationToken ct)
-    {
-        var result = await _seekPreview.FrameIndexAsync(filePath, itemId, ct);
-        if (result == null || frameIdx < 0 || frameIdx >= result.Value.Frames.Length)
-            return null;
-        return result.Value.Frames[frameIdx].Ms;
-    }
-
-    /// <summary>
     /// GET /FrameExport/{itemId}?frameIdx=N&width=W
     /// GET /FrameExport/{itemId}?positionMs=N&width=W  (fallback)
     /// Returns a JPEG frame. width ≤ 320 returns thumbnail; width=0 returns original.
@@ -74,90 +62,14 @@ public class FrameExportController : ControllerBase
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound(new { error = "Item not found or no file path" });
 
-        if (frameIdx.HasValue)
-        {
-            var resolved = await ResolveFrameIdxAsync(item.Path, itemId, frameIdx.Value, ct);
-            if (resolved == null)
-                return NotFound(new { error = $"frameIdx {frameIdx.Value} out of range" });
-            positionMs = resolved.Value;
-        }
-
+        var fi = frameIdx ?? -1;
         await _frameExport.EnsureStartedAsync(ct);
-        var (jpeg, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, positionMs, width, itemId, ct);
+        var (jpeg, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, fi, width, itemId, ct);
         if (jpeg == null || jpeg.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
-
         Response.Headers["X-Frame-Quality"] = System.Text.Json.JsonSerializer.Serialize(new { qualityFlags });
         Response.Headers["X-Frame-Pts-Ms"] = actualPtsMs.ToString();
         return File(jpeg, "image/jpeg");
-    }
-
-    /// <summary>GET /FrameExport/Keyframes/{itemId}?startMs=X&amp;endMs=Y — returns I-frame timestamps via ffprobe.</summary>
-    [HttpGet("Keyframes/{itemId:guid}")]
-    public async Task<IActionResult> GetKeyframes(
-        [FromRoute] Guid itemId,
-        [FromQuery] long startMs = 0,
-        [FromQuery] long endMs = -1,
-        CancellationToken ct = default)
-    {
-        var item = _libraryManager.GetItemById(itemId);
-        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
-            return NotFound(new { error = "Item not found or no file path" });
-
-        var rangeEndMs = endMs < 0 ? startMs + 10000 : Math.Max(startMs + 500, endMs);
-        var startSec = startMs / 1000.0;
-        var durSec = Math.Max(0.5, (rangeEndMs - startMs) / 1000.0);
-
-        var ffprobePath = new[] { "/usr/lib/jellyfin-ffmpeg/ffprobe", "/usr/bin/ffprobe" }
-            .FirstOrDefault(System.IO.File.Exists) ?? "ffprobe";
-
-        // "startSec%+durSec" → read durSec seconds starting at startSec
-        var interval = $"{startSec.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}" +
-                       $"%+{durSec.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}";
-
-        var psi = new ProcessStartInfo(ffprobePath)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        // Use ArgumentList to safely handle paths with spaces
-        psi.ArgumentList.Add("-v");              psi.ArgumentList.Add("quiet");
-        psi.ArgumentList.Add("-select_streams"); psi.ArgumentList.Add("v:0");
-        psi.ArgumentList.Add("-show_entries");   psi.ArgumentList.Add("packet=pts_time,flags");
-        psi.ArgumentList.Add("-of");             psi.ArgumentList.Add("csv=print_section=0");
-        psi.ArgumentList.Add("-read_intervals"); psi.ArgumentList.Add(interval);
-        psi.ArgumentList.Add(item.Path);
-        psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
-
-        try
-        {
-            using var proc = Process.Start(psi)!;
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
-
-            var stdout = await proc.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            await proc.WaitForExitAsync(timeoutCts.Token);
-
-            var keyframes = new List<long>();
-            foreach (var line in stdout.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var comma = line.IndexOf(',');
-                if (comma < 0) continue;
-                // flags field contains 'K' for keyframes (e.g. "K_", "K__" …)
-                if (!line[(comma + 1)..].Contains('K')) continue;
-                if (!double.TryParse(line[..comma], System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out var pts)) continue;
-                keyframes.Add((long)(pts * 1000));
-            }
-
-            return Ok(new { keyframes });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning("[FrameExport] keyframes query failed: {Ex}", ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "ffprobe failed" });
-        }
     }
 
     /// <summary>
@@ -177,26 +89,42 @@ public class FrameExportController : ControllerBase
 
         var filePath = item.Path;
 
-        // Fallback: positions list (FrameInfo unavailable)
-        if (req.Positions is { Count: > 0 })
+        // Decode frames by frameIdx — frame-forge resolves to posMs internally
+        if (req.FramePairs is { Count: > 0 })
         {
+            var pairs = req.FramePairs; // capture
             _ = Task.Run(async () =>
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var done = 0;
-                foreach (var posMs in req.Positions)
+                foreach (var p in pairs)
                 {
-                    try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); done++; }
+                    try { await _frameExport.PrefetchFrameAsync(filePath, p.FiIdx, req.Width, itemId); done++; }
                     catch { /* individual failures ignored */ }
                 }
                 _logger.LogInformation("[FrameExport] Prefetch done: {Done}/{Total} frames cached in {Elapsed}ms",
-                    done, req.Positions.Count, sw.ElapsedMilliseconds);
+                    done, pairs.Count, sw.ElapsedMilliseconds);
             });
             return Accepted();
         }
 
-        // Main path: forward range to frame-forge. frame-forge loads its own
-        // frame index internally and resolves startFrameIdx → posMs precisely.
+        // Positions list — fallback when FramePairs not available
+        if (req.Positions is { Count: > 0 })
+        {
+            var posList = req.Positions;
+            _ = Task.Run(async () =>
+            {
+                var done = 0;
+                foreach (var posMs in posList)
+                {
+                    try { await _frameExport.PrefetchFrameAsync(filePath, posMs, req.Width, itemId); done++; }
+                    catch { /* individual failures ignored */ }
+                }
+            });
+            return Accepted();
+        }
+
+        // Main path: forward range to frame-forge (used when neither framePairs nor positions provided)
         try
         {
             await _frameExport.PrefetchRangeAsync(filePath, req.StartFrameIdx,
@@ -209,31 +137,37 @@ public class FrameExportController : ControllerBase
         return Accepted();
     }
 
-/// <summary>GET /FrameExport/PrefetchReady/{itemId}?width=320 — SSE stream of ready frames.</summary>
+/// <summary>GET /FrameExport/PrefetchReady/{itemId}?width=320&fiIdx=1,2,3 — SSE stream of decoded frames.</summary>
     [HttpGet("PrefetchReady/{itemId:guid}")]
     public async Task PrefetchReady(
         [FromRoute] Guid itemId,
         [FromQuery] int width = 320,
+        [FromQuery] string? fiIdx = null,
         CancellationToken ct = default)
     {
+        if (!_frameExport.IsAvailable)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        var indices = fiIdx?.Split(',').Select(s => long.TryParse(s.Trim(), out var i) ? i : -1).Where(i => i >= 0).ToArray()
+                      ?? Array.Empty<long>();
+
+        await _frameExport.EnsureStartedAsync(ct);
+
         Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
         Response.Headers["Cache-Control"] = "no-cache, no-store";
         Response.Headers["X-Accel-Buffering"] = "no";
 
-        var reported = new HashSet<long>();
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-
-        while (!ct.IsCancellationRequested && DateTime.UtcNow < deadline)
-        {
-            var cached = await _frameExport.ListCachedAsync(itemId, width, ct);
-            foreach (var posMs in cached)
-            {
-                if (!reported.Add(posMs)) continue;
-                await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {posMs}\n\n"), ct);
-                await Response.Body.FlushAsync(ct);
-            }
-            await Task.Delay(200, ct);
-        }
+        await _frameExport.PrefetchStreamAsync(item.Path, itemId, width, indices, Response.Body, ct);
     }
 
     /// <summary>
@@ -356,9 +290,9 @@ public class FrameExportController : ControllerBase
         return Accepted(new GenerateResponse { TaskId = task.TaskId });
     }
 
-    /// <summary>GET /FrameExport/Progress?taskId= → SSE stream</summary>
-    [HttpGet("Progress")]
-    public async Task Progress([FromQuery] string taskId, CancellationToken ct)
+    /// <summary>GET /FrameExport/TaskProgress?taskId= → SSE stream</summary>
+    [HttpGet("TaskProgress")]
+    public async Task TaskProgress([FromQuery] string taskId, CancellationToken ct)
     {
         var task = _taskManager.GetTask(taskId);
         if (task == null)
@@ -406,8 +340,9 @@ public class FrameExportController : ControllerBase
             _ => "application/octet-stream",
         };
 
-        var downloadName = $"{task.ItemTitle}_{task.CreatedAt:yyyyMMddHHmmss}_{task.TaskId[..6]}{Path.GetExtension(filePath)}";
-        Response.Headers["Content-Disposition"] = $"attachment; filename=\"{downloadName}\"";
+        var ext = Path.GetExtension(filePath);
+        var safe = Uri.EscapeDataString($"{task.ItemTitle}_{task.CreatedAt:yyyyMMddHHmmss}_{task.TaskId[..6]}{ext}");
+        Response.Headers["Content-Disposition"] = $"attachment; filename*=UTF-8''{safe}";
 
         return File(System.IO.File.ReadAllBytes(filePath), contentType);
     }

@@ -5,12 +5,14 @@ import { atom, getDefaultStore, useAtomValue } from 'jotai'
 import { useGestures, setSeekSeconds } from '../hooks/useGestures'
 import { useLongPress } from '../hooks/useLongPress'
 import { useTrickplay } from '../hooks/useTrickplay'
+import { useFrameInfoPreload } from '../hooks/useFrameInfoPreload'
 import { setTrickplayEnabled } from '../services/trickplay'
 import { OsdOverlay } from '../components/OsdOverlay'
 import { Toast } from '../components/Toast'
 import { OsdButtons } from '../components/OsdButtons'
 import { TrickplayThumb } from '../components/TrickplayThumb'
-import { openFrameExportModal, FrameExportModalApp } from './frame-export'
+import { openFrameExportModal } from './state'
+import { FrameExportModalApp } from '../components/FrameExportModal'
 
 const ROOT_ID = 'jfs-enhancer-root'
 const jstore = getDefaultStore()
@@ -28,7 +30,7 @@ const _sOsdTarget = atom<HTMLElement | null>(null)
 function $val<T>(a: ReturnType<typeof atom<T>>) {
   return {
     get value(): T { return jstore.get(a) },
-    set value(v: T) { jstore.set(a, v as any) },
+    set value(v: T) { jstore.set(a, v) },
   }
 }
 const sVideoEl = $val(_sVideoEl)
@@ -43,6 +45,7 @@ function PlayerRoot() {
   useGestures(videoEl, getItemId)
   useLongPress(videoEl, getRate)
   useTrickplay(videoEl, getItemId, trickEnabled)
+  useFrameInfoPreload(videoEl, getItemId)
   return null
 }
 
@@ -121,11 +124,11 @@ function updateOsdTarget(): void {
 // ── Config loading ───────────────────────────────────────────────────────────
 
 async function loadGestureConfig(): Promise<void> {
-  let ac = (window as any).ApiClient
+  let ac = window.ApiClient
   let token: string = (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
   for (let i = 0; i < 10 && !token; i++) {
     await new Promise<void>(r => setTimeout(r, 500))
-    ac = (window as any).ApiClient
+    ac = window.ApiClient
     token = (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
   }
   if (!token) return

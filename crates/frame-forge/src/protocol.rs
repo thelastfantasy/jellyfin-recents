@@ -3,10 +3,10 @@
 
 pub(crate) struct SingleFrameReq {
     pub request_id: u32,
-    pub pos_ms: i64,
+    pub frame_idx: i64,
     pub width: u32,
     pub path: std::path::PathBuf,
-    pub item_id: String, // 32-char hex Jellyfin UUID
+    pub item_id: String,
 }
 
 pub(crate) struct PrefetchRangeReq {
@@ -39,7 +39,7 @@ pub(crate) async fn read_single_frame_req(
 
     let mut pos_buf = [0u8; 8];
     stream.read_exact(&mut pos_buf).await?;
-    let pos_ms = i64::from_le_bytes(pos_buf);
+    let frame_idx = i64::from_le_bytes(pos_buf);
 
     let mut w_buf = [0u8; 4];
     stream.read_exact(&mut w_buf).await?;
@@ -58,7 +58,7 @@ pub(crate) async fn read_single_frame_req(
     stream.read_exact(&mut id_buf).await?;
     let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
 
-    Ok(SingleFrameReq { request_id, pos_ms, width, path, item_id })
+    Ok(SingleFrameReq { request_id, frame_idx, width, path, item_id })
 }
 
 /// Wire: [request_id(4)] [jpeg_len(4)] [jpeg_data(N)] [quality_flags(2)] [actual_pts_ms(8)]
@@ -262,4 +262,41 @@ pub(crate) async fn write_list_cached(
     stream.write_all(&buf).await?;
     stream.flush().await?;
     Ok(())
+}
+
+// ── MSG_INDEX_FRAMES_STREAM (0x17) ──────────────────────────────────
+// Wire: [request_id(4)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)]
+
+pub(crate) struct IndexFramesStreamReq {
+    pub request_id: u32,
+    pub item_id: String,
+    pub path: std::path::PathBuf,
+    pub current_time_ms: i64,
+}
+
+pub(crate) async fn read_index_frames_stream_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<IndexFramesStreamReq> {
+    use tokio::io::AsyncReadExt;
+
+    let mut id_buf = [0u8; 4];
+    stream.read_exact(&mut id_buf).await?;
+    let request_id = u32::from_le_bytes(id_buf);
+
+    let mut item_buf = [0u8; 32];
+    stream.read_exact(&mut item_buf).await?;
+    let item_id = String::from_utf8(item_buf.to_vec()).unwrap_or_default();
+
+    let mut pl_buf = [0u8; 4];
+    stream.read_exact(&mut pl_buf).await?;
+    let path_len = u32::from_le_bytes(pl_buf) as usize;
+    let mut pbytes = vec![0u8; path_len];
+    stream.read_exact(&mut pbytes).await?;
+    let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
+
+    let mut ct_buf = [0u8; 8];
+    stream.read_exact(&mut ct_buf).await?;
+    let current_time_ms = i64::from_le_bytes(ct_buf);
+
+    Ok(IndexFramesStreamReq { request_id, item_id, path, current_time_ms })
 }

@@ -1,4 +1,5 @@
 import { useAtomValue } from 'jotai'
+import type { ChangeEvent } from 'react'
 import {
   sExportType, sParamsOpen,
   updateSettings, renderGrid,
@@ -11,10 +12,11 @@ import { t } from '../lib/i18n'
 import { FrameGrid } from './FrameGrid'
 import { ParamsPanel } from './ParamsPanel'
 
-export function GridPage({ onClose, onExpand, onGenerate }: {
-  onClose:    () => void
-  onExpand:   (dir: number) => void
-  onGenerate: () => void
+export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }: {
+  onClose:        () => void
+  onExpandBack:   () => void
+  onExpandForward: () => void
+  onGenerate:     () => void
 }) {
   const frames      = useAtomValue(framesAtom)
   const exportType  = useAtomValue(exportTypeAtom)
@@ -32,6 +34,9 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
 
   const dur   = _videoEl?.duration ?? 0
   const maxMs = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
+  // "atStart" means we're at the beginning and can't go back further.
+  // Use _fiMinIdx only when _frameIndex is populated (after full streaming completes).
+  // During streaming, _frameIndex is null → fall back to absolute _minPosMs.
   const atStart = _frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0
   const atEnd   = _frameIndex
     ? _fiMaxIdx >= (_frameIndex.length - 1)
@@ -40,7 +45,8 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
     ? `${t('frameExport.loading')} ${prefDone}/${prefTotal}`
     : `${isMobile ? '' : t('frameExport.selected') + ' '}${selectedCount}/${visible.length}`
 
-  const canGenerate = selectedCount > 1 && visible.filter(f => f.selected).every(f => f.blobUrl)
+  // Generate button: requires >1 selected frame AND all selected have cached JPEGs (no load errors)
+  const canGenerate = selectedCount > 1 && visible.filter(f => f.selected).every(f => f.jpegUrl && !f.loadError)
 
   function handleSelectAll() {
     const shouldSelectAll = !visible.every(f => f.selected)
@@ -53,16 +59,16 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
     renderGrid()
   }
 
-  function handleSparseChange(e: any) {
-    const n = parseInt((e.target as HTMLSelectElement).value) || 0
+  function handleSparseChange(e: ChangeEvent<HTMLSelectElement>) {
+    const n = parseInt(e.target.value) || 0
     if (n <= 0) return
     _frames.forEach((f, i) => { if (!f.removed) f.selected = i % n === 0 });
     (e.target as HTMLSelectElement).value = '0'
     renderGrid()
   }
 
-  function handleFormatChange(e: any) {
-    const val = (e.target as HTMLSelectElement).value
+  function handleFormatChange(e: ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value
     if (exportType === 'animate') updateSettings({ animateFormat: val as 'gif' | 'webp' })
     else                          updateSettings({ stitchFormat:  val as 'png' | 'webp' })
   }
@@ -80,7 +86,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
           <button className={`jfs-fe-seg-btn${exportType === 'animate' ? ' active' : ''}`} onClick={() => { sExportType.value = 'animate' }}>{t('grid.animate')}</button>
           <button className={`jfs-fe-seg-btn${exportType === 'stitch'  ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch'  }}>{t('grid.stitch')}</button>
         </div>
-        <select className="jfs-fe-sel" value={fmt} onChange={handleFormatChange}>
+        <select id="jfs-fe-format" className="jfs-fe-sel" value={fmt} onChange={handleFormatChange}>
           {formatOpts.map(o => <option key={o} value={o}>{o.toUpperCase()}</option>)}
         </select>
         <select className="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
@@ -90,7 +96,7 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
           <option value="3">⅓</option>
           <option value="4">¼</option>
         </select>
-        <button className="jfs-fe-btn g" onClick={() => { sParamsOpen.value = !sParamsOpen.value }}>
+        <button id="jfs-fe-params-toggle" className="jfs-fe-btn g" onClick={() => { sParamsOpen.value = !sParamsOpen.value }}>
           {paramsOpen ? `${t('grid.params')} ▾` : `${t('grid.params')} ▴`}
         </button>
         <span className="jfs-fe-tbar-break" />
@@ -106,10 +112,10 @@ export function GridPage({ onClose, onExpand, onGenerate }: {
             </button>
           )}
         </span>
-        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart} onClick={() => onExpand(-1)}>
+        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart} onClick={onExpandBack}>
           {atStart ? t('frameExport.atStart') : t('frameExport.loadPrev')}
         </button>
-        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={() => onExpand(1)}>
+        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={onExpandForward}>
           {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
         </button>
         <button className="jfs-fe-btn p" disabled={phase === 'skeleton' || !canGenerate} onClick={onGenerate}>

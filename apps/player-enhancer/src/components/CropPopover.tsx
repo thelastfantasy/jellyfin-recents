@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useAtomValue } from 'jotai'
 import { sCropOpen, sSettings, _frames, _videoEl, updateSettings, cropOpenAtom, settingsAtom } from '../core/state'
+import type { ExportSettings } from '../core/state'
 import { formatTime } from '../lib/utils'
 import { showToast } from './Toast'
 import { t } from '../lib/i18n'
@@ -327,7 +328,7 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     const changed = JSON.stringify(newCrop) !== JSON.stringify(currentSt.cropRect)
     const w = currentSt.width
     const h = currentSt.height
-    const patch: any = { cropRect: newCrop }
+    const patch: Partial<ExportSettings> = { cropRect: newCrop }
     if (changed && (w.value > 0 || h.value > 0)) {
       const vw = _videoEl?.videoWidth  || 1
       const vh = _videoEl?.videoHeight || 1

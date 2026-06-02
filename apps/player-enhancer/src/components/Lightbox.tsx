@@ -11,7 +11,7 @@ export function Lightbox() {
   const frame = idx !== null ? _frames[idx] : null
 
   useEffect(() => {
-    if (idx === null || !frame?.blobUrl) return
+    if (idx === null || !frame?.jpegUrl) return
     const handler = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') sLightboxIdx.value = null
       else if (ev.key === 'ArrowLeft' && idx > 0) sLightboxIdx.value = idx - 1
@@ -23,9 +23,9 @@ export function Lightbox() {
       document.removeEventListener('keydown', handler, { capture: true })
       document.body.style.overflow = ''
     }
-  }, [idx, frame?.blobUrl])
+  }, [idx, frame?.jpegUrl])
 
-  if (idx === null || !frame?.blobUrl) return null
+  if (idx === null || !frame?.jpegUrl) return null
 
   const fullUrl = frameUrl(_itemId, frame.fiIdx, frame.posMs, 0)
 

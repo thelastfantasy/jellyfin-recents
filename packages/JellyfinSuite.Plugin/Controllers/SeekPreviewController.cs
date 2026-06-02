@@ -19,17 +19,20 @@ public class SeekPreviewController : ControllerBase
 
     private readonly SeekPreviewService _seekPreview;
     private readonly SeekPreviewBatchService _batchService;
+    private readonly FrameExportService _frameExport;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<SeekPreviewController> _logger;
 
     public SeekPreviewController(
         SeekPreviewService seekPreview,
         SeekPreviewBatchService batchService,
+        FrameExportService frameExport,
         ILibraryManager libraryManager,
         ILogger<SeekPreviewController> logger)
     {
         _seekPreview = seekPreview;
         _batchService = batchService;
+        _frameExport = frameExport;
         _libraryManager = libraryManager;
         _logger = logger;
     }
@@ -124,25 +127,20 @@ public class SeekPreviewController : ControllerBase
         [FromRoute] Guid itemId,
         CancellationToken cancellationToken = default)
     {
-        if (!_seekPreview.IsAvailable)
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, "seek-preview not available");
+        if (!_frameExport.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame-forge not available");
 
         var item = _libraryManager.GetItemById(itemId);
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound();
 
-        await _seekPreview.EnsureStartedAsync(cancellationToken);
+        await _frameExport.EnsureStartedAsync(cancellationToken);
 
-        var result = await _seekPreview.FrameIndexAsync(item.Path, itemId, cancellationToken);
+        var result = await _frameExport.FrameIndexAsync(item.Path, itemId, cancellationToken);
         if (result == null)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame index not available");
 
-        return Ok(new FrameIndexDto
-        {
-            Frames = [.. result.Value.Frames
-                .Select(f => new FrameIndexEntryDto { Ms = f.Ms, IsKey = f.IsKey })],
-            Fps = new FpsFracDto { Num = result.Value.FpsNum, Den = result.Value.FpsDen },
-        });
+        return Ok(result);
     }
 
     /// <summary>
@@ -213,7 +211,8 @@ public class SeekPreviewController : ControllerBase
                 seen.Add(ms);
                 try
                 {
-                    await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {ms}\n\n"), cancellationToken);
+                    var json = $"{{\"frameReady\":{ms}}}";
+                    await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {json}\n\n"), cancellationToken);
                 }
                 catch (OperationCanceledException) { return; }
             }
@@ -224,11 +223,12 @@ public class SeekPreviewController : ControllerBase
             // Stream new completions from the batch service.
             await foreach (var ms in channel.Reader.ReadAllAsync(cancellationToken))
             {
-                if (!seen.Add(ms)) continue; // skip if already sent in initial scan
+                if (!seen.Add(ms)) continue;
 
                 try
                 {
-                    await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {ms}\n\n"), cancellationToken);
+                    var json = $"{{\"frameReady\":{ms}}}";
+                    await Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"data: {json}\n\n"), cancellationToken);
                     await Response.Body.FlushAsync(cancellationToken);
                 }
                 catch (OperationCanceledException) { return; }

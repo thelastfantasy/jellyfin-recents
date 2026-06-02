@@ -2,15 +2,14 @@ import type { components } from '@jfs/api-types'
 
 type GenerateRequest = components['schemas']['GenerateRequest']
 type GenerateResponse = components['schemas']['GenerateResponse']
-type PrefetchRequest  = components['schemas']['PrefetchRequest']
 
 function getBaseUrl(): string {
-  const ac = (window as any).ApiClient
+  const ac = window.ApiClient
   return ac?.serverAddress?.() ?? ac?._serverAddress ?? ''
 }
 
 function getToken(): string {
-  const ac = (window as any).ApiClient
+  const ac = window.ApiClient
   return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
 }
 
@@ -56,7 +55,7 @@ export function snapFpsToRational(fps: number): { num: number; den: number } {
 }
 
 export async function fetchFrameIndex(itemId: string): Promise<{
-  frames: Array<{ ms: number; isKey: boolean }>
+  frames: Array<{ ms: number; isKey: boolean; frameIndex: number }>
   fps: { num: number; den: number }
 } | null> {
   try {
@@ -65,7 +64,7 @@ export async function fetchFrameIndex(itemId: string): Promise<{
     )
     if (!res.ok) return null
     const data = await res.json() as {
-      frames: Array<{ ms: number; isKey: boolean }>
+      frames: Array<{ ms: number; isKey: boolean; frameIndex: number }>
       fps: { num: number; den: number }
     }
     if (!data.frames?.length) return null
@@ -75,33 +74,48 @@ export async function fetchFrameIndex(itemId: string): Promise<{
   }
 }
 
-export async function prefetch(
+export type FrameBatchCallback = (frames: Array<{ ms: number; isKey: boolean; frameIndex: number }>) => void
+export type FpsCallback = (fps: { num: number; den: number }) => void
+
+export function openFrameInfoStream(
   itemId: string,
-  items: Array<{ fiIdx: number; posMs: number }>,
-  width: number,
-): Promise<void> {
+  currentTimeMs: number,
+  onBatch: FrameBatchCallback,
+  onDone: FpsCallback,
+  onError: () => void,
+): EventSource {
   const base  = getBaseUrl()
   const token = getToken()
-  const useIdx = items.every(it => it.fiIdx >= 0)
-  const body: PrefetchRequest = useIdx
-    ? { frameIndices: items.map(it => it.fiIdx), width } as any
-    : { positions: items.map(it => Math.round(it.posMs)), width }
-  try {
-    await fetch(
-      `${base}/JellyfinSuite/FrameExport/Prefetch/${itemId}?api_key=${encodeURIComponent(token)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-    )
-  } catch { /* proceed even if prefetch fails */ }
+  const url = `${base}/JellyfinSuite/${itemId}/FrameInfoStream?currentTimeMs=${currentTimeMs}&api_key=${encodeURIComponent(token)}`
+  const evSrc = new EventSource(url)
+  evSrc.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data)
+      if (Array.isArray(data)) {
+        onBatch(data)
+      } else if (data?.fps) {
+        onDone(data.fps)
+        evSrc.close()
+      }
+    } catch { /* malformed event, ignore */ }
+  }
+  evSrc.onerror = () => {
+    evSrc.close()
+    onError()
+  }
+  return evSrc
 }
 
 export function openPrefetchStream(
   itemId: string,
   width: number,
+  fiIdx: number[],
 ): EventSource {
   const base  = getBaseUrl()
   const token = getToken()
+  const idxParam = fiIdx.join(',')
   return new EventSource(
-    `${base}/JellyfinSuite/FrameExport/PrefetchReady/${itemId}?width=${width}&api_key=${encodeURIComponent(token)}`
+    `${base}/JellyfinSuite/FrameExport/PrefetchReady/${itemId}?width=${width}&fiIdx=${encodeURIComponent(idxParam)}&api_key=${encodeURIComponent(token)}`
   )
 }
 
@@ -129,7 +143,7 @@ export function openProgressStream(taskId: string): EventSource {
   const base  = getBaseUrl()
   const token = getToken()
   return new EventSource(
-    `${base}/JellyfinSuite/FrameExport/Progress?taskId=${encodeURIComponent(taskId)}&api_key=${encodeURIComponent(token)}`
+    `${base}/JellyfinSuite/FrameExport/TaskProgress?taskId=${encodeURIComponent(taskId)}&api_key=${encodeURIComponent(token)}`
   )
 }
 

@@ -1,0 +1,11 @@
+pre-commit:
+  parallel: true
+  commands:
+    player-enhancer-lint:
+      glob: "apps/player-enhancer/src/**/*.{ts,tsx}"
+      run: cd apps/player-enhancer && npx tsc --noEmit && npx eslint src/
+      stage_fixed: true
+    frontend-lint:
+      glob: "apps/frontend/src/**/*.{ts,tsx}"
+      run: cd apps/frontend && npx tsc --noEmit && npx eslint src/ --max-warnings=0
+      stage_fixed: true

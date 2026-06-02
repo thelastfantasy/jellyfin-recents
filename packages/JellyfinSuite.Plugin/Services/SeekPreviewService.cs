@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -226,19 +227,19 @@ public sealed class SeekPreviewService : IDisposable
 
             await _fetchSocket.SendAsync(buf, System.Net.Sockets.SocketFlags.None, ct);
 
-            // Response: [4 request_id][4 count][count × 8 pos_ms]
+            // Response: [4 request_id][4 count][count × (8 frame_idx + 8 pos_ms)]
             var header = new byte[8];
             if (!await ReceiveBytesAsync(_fetchSocket, header, ct)) return Array.Empty<long>();
 
             var count = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
             if (count == 0) return Array.Empty<long>();
 
-            var body = new byte[count * 8];
+            var body = new byte[count * 16];
             if (!await ReceiveBytesAsync(_fetchSocket, body, ct)) return Array.Empty<long>();
 
             var result = new List<long>((int)count);
             for (var i = 0; i < (int)count; i++)
-                result.Add(System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 8)));
+                result.Add(System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 16 + 8))); // pos_ms (skip frame_idx)
             return result;
         }
         catch (Exception ex)
@@ -352,78 +353,6 @@ public sealed class SeekPreviewService : IDisposable
             _fetchLock.Release();
         }
     }
-
-    /// <summary>
-    /// Sends INDEX_FRAMES (0x05) to the Rust daemon: enumerates all video frame timestamps
-    /// by demuxing (no decode). Returns null if unavailable or unsupported container.
-    /// Result is cached in Rust RAM per item_id.
-    /// </summary>
-    public async Task<(FrameIndexEntryInternal[] Frames, long FpsNum, long FpsDen)?> FrameIndexAsync(
-        string filePath, Guid itemId, CancellationToken ct = default)
-    {
-        if (_fetchSocket == null) return null;
-
-        await _fetchLock.WaitAsync(ct);
-        try
-        {
-            var id = Interlocked.Increment(ref _nextRequestId);
-            var pathBytes    = System.Text.Encoding.UTF8.GetBytes(filePath);
-            var itemIdBytes  = System.Text.Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
-
-            // priority(1) + request_id(4) + item_id(32) + path_len(4) + path(N)
-            var req = new byte[1 + 4 + 32 + 4 + pathBytes.Length];
-            req[0] = 0x05;
-            BinaryPrimitives.WriteUInt32LittleEndian(req.AsSpan(1), id);
-            itemIdBytes.CopyTo(req, 5);
-            BinaryPrimitives.WriteUInt32LittleEndian(req.AsSpan(37), (uint)pathBytes.Length);
-            pathBytes.CopyTo(req, 41);
-            await _fetchSocket.SendAsync(req, SocketFlags.None, ct);
-
-            // Response header: request_id(4) + frame_count(4) + fps_num(8) + fps_den(8) = 24 bytes
-            var header = new byte[24];
-            if (!await ReceiveBytesAsync(_fetchSocket, header, ct)) return null;
-
-            var responseId  = BinaryPrimitives.ReadUInt32LittleEndian(header);
-            if (responseId != id)
-                throw new InvalidOperationException(
-                    $"[SeekPreview] FrameIndex socket desync: expected {id}, got {responseId}");
-
-            var frameCount = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
-            var fpsNum     = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(8));
-            var fpsDen     = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(16));
-
-            if (frameCount == 0) return null;
-
-            // Frame data: (pts_ms(8) + flags(1)) × frameCount
-            var frameData = new byte[frameCount * 9];
-            if (!await ReceiveBytesAsync(_fetchSocket, frameData, ct)) return null;
-
-            var frames = new FrameIndexEntryInternal[(int)frameCount];
-            for (var i = 0; i < (int)frameCount; i++)
-            {
-                var off  = i * 9;
-                var ms   = BinaryPrimitives.ReadInt64LittleEndian(frameData.AsSpan(off));
-                var isKey = (frameData[off + 8] & 1) != 0;
-                frames[i] = new FrameIndexEntryInternal(ms, isKey);
-            }
-
-            return (frames, fpsNum, fpsDen);
-        }
-        catch (Exception ex)
-        {
-            try { _fetchSocket?.Dispose(); } catch { }
-            _fetchSocket = null;
-            if (ex is OperationCanceledException) throw;
-            _logger.LogDebug(ex, "[SeekPreview] FrameIndexAsync error — socket reset");
-            return null;
-        }
-        finally
-        {
-            _fetchLock.Release();
-        }
-    }
-
-    public record FrameIndexEntryInternal(long Ms, bool IsKey);
 
     public void Dispose()
     {

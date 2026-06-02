@@ -16,14 +16,14 @@ namespace Jellyfin.Plugin.JellyfinSuite.Controllers;
 [AllowAnonymous]
 public class JellyfinSuiteController : ControllerBase
 {
-    private readonly SeekPreviewService _seekPreview;
+    private readonly FrameExportService _frameExport;
     private readonly ILibraryManager _libraryManager;
 
     public JellyfinSuiteController(
-        SeekPreviewService seekPreview,
+        FrameExportService frameExport,
         ILibraryManager libraryManager)
     {
-        _seekPreview = seekPreview;
+        _frameExport = frameExport;
         _libraryManager = libraryManager;
     }
 
@@ -42,24 +42,56 @@ public class JellyfinSuiteController : ControllerBase
         [FromRoute] Guid itemId,
         CancellationToken cancellationToken = default)
     {
-        if (!_seekPreview.IsAvailable)
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, "seek-preview not available");
+        if (!_frameExport.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame-forge not available");
 
         var item = _libraryManager.GetItemById(itemId);
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound();
 
-        await _seekPreview.EnsureStartedAsync(cancellationToken);
+        await _frameExport.EnsureStartedAsync(cancellationToken);
 
-        var result = await _seekPreview.FrameIndexAsync(item.Path, itemId, cancellationToken);
+        var result = await _frameExport.FrameIndexAsync(item.Path, itemId, cancellationToken);
         if (result == null)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame index not available");
 
-        return Ok(new FrameIndexDto
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /JellyfinSuite/{itemId}/FrameInfoStream
+    /// SSE stream of frame index entries. Rust daemon demuxes and sends batched JSON
+    /// arrays via Unix socket; this action copies bytes directly to the HTTP response
+    /// without deserializing.
+    /// Frames near currentTimeMs (±1s) are prioritized and arrive first.
+    /// Query: ?currentTimeMs={ms} (optional, default 0)
+    /// </summary>
+    [HttpGet("{itemId:guid}/FrameInfoStream")]
+    public async Task FrameInfoStream(
+        [FromRoute] Guid itemId,
+        [FromQuery] long currentTimeMs = 0,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_frameExport.IsAvailable)
         {
-            Frames = [.. result.Value.Frames
-                .Select(f => new FrameIndexEntryDto { Ms = f.Ms, IsKey = f.IsKey })],
-            Fps = new FpsFracDto { Num = result.Value.FpsNum, Den = result.Value.FpsDen },
-        });
+            HttpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        await _frameExport.EnsureStartedAsync(cancellationToken);
+
+        HttpContext.Response.ContentType = "text/event-stream; charset=utf-8";
+        HttpContext.Response.Headers["Cache-Control"] = "no-cache, no-store";
+        HttpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+        await _frameExport.FrameIndexStreamAsync(item.Path, itemId, currentTimeMs,
+            HttpContext.Response.Body, cancellationToken);
     }
 }

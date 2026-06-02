@@ -15,6 +15,7 @@ const ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 export interface FrameCardProps {
   frame: FrameEntry
   idx: number
+  pressing?: boolean
   onMouseDown: (idx: number, e: MouseEvent) => void
   onView:      (idx: number) => void
   onDownload:  (idx: number) => void
@@ -25,7 +26,7 @@ export interface FrameCardProps {
 }
 
 export function FrameCard({
-  frame: f, idx,
+  frame: f, idx, pressing,
   onMouseDown, onView, onDownload, onRemove, onRetry, onToggle, onLoadError,
 }: FrameCardProps) {
   const prefTotal = useAtomValue(prefetchTotalAtom)
@@ -57,14 +58,14 @@ export function FrameCard({
 
   return (
     <div
-      className={`jfs-fe-card${f.selected ? ' sel' : ''}${f.isJunk ? ' junk' : ''}`}
+      className={`jfs-fe-card${f.selected ? ' sel' : ''}${f.isJunk ? ' junk' : ''}${pressing ? ' jfs-pressing' : ''}`}
       data-idx={String(idx)}
       style={{ cursor: 'pointer' }}
-      onMouseDown={e => onMouseDown(idx, e.nativeEvent as any)}
+      onMouseDown={e => onMouseDown(idx, e.nativeEvent)}
     >
       {f.isJunk && <span className="jfs-fe-badge">{f.junkReason || t('frameExport.junk')}</span>}
       {imgContent}
-      <div className="jfs-fe-card-acts">
+      <div className="jfs-fe-card-acts" onTouchStart={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
         <button
           className="jfs-fe-card-act jfs-fe-view-btn"
           title={t('card.view')}
@@ -90,6 +91,7 @@ export function FrameCard({
           checked={f.selected}
           className="jfs-fe-cb"
           style={{ cursor: 'pointer' }}
+          onTouchStart={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
           onChange={e => { e.stopPropagation(); onToggle(idx, (e.target as HTMLInputElement).checked) }}
         />
         {formatTime(displayMs)}

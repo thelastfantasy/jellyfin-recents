@@ -120,9 +120,13 @@ pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<
 }
 
 /// Enumerate all video frame timestamps by demuxing (no decoding).
-/// Returns (frames: Vec<(pts_ms, is_keyframe)>, fps_num, fps_den).
+/// Calls `on_frame(frame_index, pts_ms, is_keyframe)` for each frame as it is read.
+/// Returns (total_frame_count, fps_num, fps_den).
 /// Fast: reads container index without decoding pixel data.
-pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
+pub fn demux_frames(
+    path: &Path,
+    mut on_frame: impl FnMut(usize, i64, bool),
+) -> Result<(usize, i64, i64)> {
     use ffmpeg_next as ff;
 
     let mut ictx = ff::format::input(path)
@@ -153,7 +157,7 @@ pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
         };
     }
 
-    let mut frames: Vec<(i64, bool)> = Vec::new();
+    let mut frame_count = 0usize;
 
     for (stream, pkt) in ictx.packets() {
         if stream.index() != stream_idx {
@@ -166,15 +170,26 @@ pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
             let raw = (pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
             (raw - stream_start_ms).max(0)
         } else if fps_num > 0 {
-            (frames.len() as i64 * fps_den * 1000) / fps_num
+            (frame_count as i64 * fps_den * 1000) / fps_num
         } else {
-            frames.len() as i64 * 42  // fallback: assume ~24fps
+            frame_count as i64 * 42
         };
 
-        frames.push((pts_ms, is_key));
+        on_frame(frame_count, pts_ms, is_key);
+        frame_count += 1;
     }
 
-    anyhow::ensure!(!frames.is_empty(), "no video frames found in {:?}", path);
+    anyhow::ensure!(frame_count > 0, "no video frames found in {:?}", path);
+    Ok((frame_count, fps_num, fps_den))
+}
+
+/// Convenience wrapper: collects all frames into a Vec.
+pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
+    let mut frames = Vec::new();
+    let (count, fps_num, fps_den) = demux_frames(path, |_fi, ms, is_key| {
+        frames.push((ms, is_key));
+    })?;
+    debug_assert_eq!(frames.len(), count);
     Ok((frames, fps_num, fps_den))
 }
 

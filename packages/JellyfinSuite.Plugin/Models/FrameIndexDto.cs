@@ -10,8 +10,9 @@ public sealed class FrameIndexDto
 
 public sealed class FrameIndexEntryDto
 {
-    [JsonPropertyName("ms")]    public long Ms    { get; set; }
-    [JsonPropertyName("isKey")] public bool IsKey { get; set; }
+    [JsonPropertyName("frameIndex")] public long FrameIndex { get; set; }
+    [JsonPropertyName("ms")]         public long Ms        { get; set; }
+    [JsonPropertyName("isKey")]      public bool IsKey     { get; set; }
 }
 
 public sealed class FpsFracDto

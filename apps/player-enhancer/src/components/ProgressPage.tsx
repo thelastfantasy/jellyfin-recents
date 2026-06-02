@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { progressTaskIdAtom } from '../core/state'
-import { setGesturesSuspended } from '../hooks/useGestures'
 import { openProgressStream, cancelExport } from '../api/frameExportApi'
 import type { TaskProgressEvent } from '../types/api'
 import { sProgressPercent, sProgressVisible } from '../components/OsdButtons'

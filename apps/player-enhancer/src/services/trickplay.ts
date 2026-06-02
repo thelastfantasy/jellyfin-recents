@@ -1,7 +1,7 @@
 import { atom, getDefaultStore } from 'jotai'
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
-  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v as any) }, peek(): T { return jstore.get(a) } }
+  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) }, peek(): T { return jstore.get(a) } }
 }
 
 interface ThumbState {
@@ -62,13 +62,13 @@ export function closeTrickplayStream(): void {
 }
 
 function getRawToken(): string {
-  const ac = (window as any).ApiClient;
+  const ac = window.ApiClient;
   if (!ac) return '';
   return (typeof ac.accessToken === 'function' ? ac.accessToken() : ac._accessToken) ?? '';
 }
 
 function getServerAddress(): string {
-  const ac = (window as any).ApiClient;
+  const ac = window.ApiClient;
   if (!ac) return '';
   return (typeof ac.serverAddress === 'function' ? ac.serverAddress() : ac._serverAddress) ?? '';
 }
@@ -128,7 +128,8 @@ function openReadyStream(itemId: string, meta: SeekPreviewMeta, videoEl: HTMLVid
   _readyStreamItemId = itemId;
 
   es.onmessage = (e) => {
-    const posMs = Number(e.data);
+    let posMs: number
+    try { posMs = JSON.parse(e.data).frameReady } catch { posMs = Number(e.data) }
     if (!isFinite(posMs)) return;
     const key = `${itemId}:${posMs}`;
     if (_loadedKeys.has(key)) return;

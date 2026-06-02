@@ -38,6 +38,8 @@ declare global {
       ajax(req: { url: string; type?: string; dataType?: string }): Promise<unknown>;
       getJSON(url: string): Promise<unknown>;
       getCurrentUser(): Promise<{ Policy?: { IsAdministrator?: boolean } }>;
+      _serverAddress?: string;
+      _accessToken?: string;
     };
   }
 }

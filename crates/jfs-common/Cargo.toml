@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"] }
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }

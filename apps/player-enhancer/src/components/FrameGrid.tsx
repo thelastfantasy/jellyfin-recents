@@ -1,43 +1,49 @@
-import { useEffect, useCallback, useRef } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import {
   _frames, _dragMode, _dragSelectValue, _lastClickedIdx, _suppressNextMousedown,
-  _longPressCard, _longPressTimer, _autoScrollRaf, _lastTouchX, _lastTouchY,
   set_dragMode, set_dragSelectValue, set_lastClickedIdx, set_suppressNextMousedown,
-  set_longPressCard, set_longPressTimer, set_autoScrollRaf, set_lastTouchXY,
-  renderGrid, framesAtom,
+  renderGrid, framesAtom, modalPhaseAtom,
 } from '../core/state'
 import { frameUrl } from '../api/frameExportApi'
+import { formatTime } from '../lib/utils'
 import { _itemId } from '../core/state'
 import { FrameCard } from './FrameCard'
 import { sLightboxIdx } from '../core/state'
 import { FrameGridPhaseGate } from './FrameGridSkeleton'
 
-// ── applyDragToPoint: direct DOM updates for drag perf, no renderGrid ─────────
-function applyDragToPoint(x: number, y: number): void {
+// Cached item title (populated once per video)
+let _itemTitle = ''
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Find the index of the card at (x,y) coordinates; returns -1 if none. */
+function cardIdxAt(x: number, y: number): number {
   const el = document.elementFromPoint(x, y) as HTMLElement | null
   const card = el?.closest<HTMLElement>('.jfs-fe-card')
-  if (!card) return
+  if (!card) return -1
   const idx = parseInt(card.dataset.idx ?? '')
-  if (isNaN(idx) || !_frames[idx] || _frames[idx].selected === _dragSelectValue) return
-  _frames[idx].selected = _dragSelectValue
-  card.classList.toggle('sel', _dragSelectValue)
-  const cb = card.querySelector<HTMLInputElement>('.jfs-fe-cb')
-  if (cb) cb.checked = _dragSelectValue
-}
-
-function stopAutoScroll(): void {
-  if (_autoScrollRaf !== null) { cancelAnimationFrame(_autoScrollRaf); set_autoScrollRaf(null) }
+  return (isNaN(idx) || !_frames[idx]) ? -1 : idx
 }
 
 export function FrameGrid() {
   const frames   = useAtomValue(framesAtom)
+  const phase    = useAtomValue(modalPhaseAtom)
   const gridRef  = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // ── Local imperative refs (no React re-render needed) ──────────────────────
+  const pressingTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoScrollRaf   = useRef<number | null>(null)
+  const lastTouchXY     = useRef({ x: 0, y: 0 })
+
+  // ── Long-press visual state (triggers React re-render for jfs-pressing) ───
+  const [pressingIdx, setPressingIdx] = useState<number | null>(null)
+
+  // ── Callbacks ──────────────────────────────────────────────────────────────
+
   const handleCardMouseDown = useCallback((idx: number, e: MouseEvent) => {
     if (_suppressNextMousedown) { set_suppressNextMousedown(false); return }
-    if ((e.target as HTMLElement).closest('.jfs-fe-card-acts,.jfs-fe-cb')) return
     if (!_frames[idx]) return
 
     if (e.shiftKey && _lastClickedIdx >= 0 && _lastClickedIdx !== idx) {
@@ -55,10 +61,6 @@ export function FrameGrid() {
     set_dragSelectValue(_frames[idx].selected)
     set_dragMode(true)
     set_lastClickedIdx(idx)
-    const card = (e.currentTarget as HTMLElement)
-    card.classList.toggle('sel', _frames[idx].selected)
-    const cb = card.querySelector<HTMLInputElement>('.jfs-fe-cb')
-    if (cb) cb.checked = _frames[idx].selected
     renderGrid()
     e.preventDefault()
   }, [])
@@ -68,15 +70,12 @@ export function FrameGrid() {
     const f = _frames[idx]
     if (!f) return
     const url = frameUrl(_itemId, f.fiIdx, f.posMs, 0)
-    const title = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'frame'
-    const ts = import('../lib/utils').then(({ formatTime }) => {
-      const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `jellyfin-frame-${title}-${stamp}.jpg`
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-    })
-    void ts
+    const title = _itemTitle || document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'frame'
+    const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `jellyfin-frame-${title}-${stamp}.jpg`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }, [])
 
   const handleRemove = useCallback((idx: number) => {
@@ -89,9 +88,7 @@ export function FrameGrid() {
   const handleRetry = useCallback((idx: number) => {
     if (!_frames[idx]) return
     _frames[idx].loadError = false
-    if (_frames[idx].blobUrl) { URL.revokeObjectURL(_frames[idx].blobUrl!); _frames[idx].blobUrl = undefined }
     renderGrid()
-    import('../core/frame-export').then(m => m.updateFrameImage(idx))
   }, [])
 
   const handleToggle = useCallback((idx: number, checked: boolean) => {
@@ -106,24 +103,41 @@ export function FrameGrid() {
     renderGrid()
   }, [])
 
+  // ── Drag helper: toggle selection at point (mouse or touch during drag) ───
+  function dragSelectAt(x: number, y: number): void {
+    const idx = cardIdxAt(x, y)
+    if (idx < 0 || _frames[idx].selected === _dragSelectValue) return
+    _frames[idx].selected = _dragSelectValue
+    renderGrid()
+  }
+
+  // ── Auto-scroll during touch drag ──────────────────────────────────────────
+  function cancelAutoScroll(): void {
+    if (autoScrollRaf.current !== null) {
+      cancelAnimationFrame(autoScrollRaf.current)
+      autoScrollRaf.current = null
+    }
+  }
+
+  // ── Event listeners ────────────────────────────────────────────────────────
   useEffect(() => {
     const grid   = gridRef.current
     const scroll = scrollRef.current
     if (!grid) return
 
-    const EDGE_ZONE       = 64
+    const EDGE_ZONE        = 64
     const MAX_SCROLL_SPEED = 8
 
     function runAutoScroll(speed: number): void {
       if (!scroll) return
       scroll.scrollTop += speed
-      applyDragToPoint(_lastTouchX, _lastTouchY)
-      set_autoScrollRaf(requestAnimationFrame(() => runAutoScroll(speed)))
+      dragSelectAt(lastTouchXY.current.x, lastTouchXY.current.y)
+      autoScrollRaf.current = requestAnimationFrame(() => runAutoScroll(speed))
     }
 
     const onMouseOver = (e: MouseEvent) => {
       if (!_dragMode) return
-      applyDragToPoint(e.clientX, e.clientY)
+      dragSelectAt(e.clientX, e.clientY)
     }
 
     const onMouseUp = () => {
@@ -133,59 +147,54 @@ export function FrameGrid() {
 
     const onTouchStart = (e: TouchEvent) => {
       const touch = e.touches[0]
-      const el = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement | null
-      const card = el?.closest<HTMLElement>('.jfs-fe-card')
-      if (!card || el?.closest('.jfs-fe-card-acts,.jfs-fe-cb')) return
-      const idx = parseInt(card.dataset.idx ?? '')
-      if (isNaN(idx) || !_frames[idx]) return
-      set_longPressCard(card)
-      card.classList.add('jfs-pressing')
-      set_longPressTimer(setTimeout(() => {
-        set_longPressTimer(null)
+      const idx = cardIdxAt(touch.clientX, touch.clientY)
+      if (idx < 0) return
+
+      setPressingIdx(idx)
+      pressingTimer.current = setTimeout(() => {
+        pressingTimer.current = null
+        setPressingIdx(null)
         set_dragMode(true)
         _frames[idx].selected = !_frames[idx].selected
         set_dragSelectValue(_frames[idx].selected)
         set_lastClickedIdx(idx)
-        card.classList.remove('jfs-pressing')
-        card.classList.toggle('sel', _frames[idx].selected)
-        const cb = card.querySelector<HTMLInputElement>('.jfs-fe-cb')
-        if (cb) cb.checked = _frames[idx].selected
         renderGrid()
         if ('vibrate' in navigator) navigator.vibrate(25)
-      }, 400))
+      }, 400)
     }
 
     const onTouchMove = (e: TouchEvent) => {
-      if (_longPressTimer !== null) {
-        clearTimeout(_longPressTimer)
-        set_longPressTimer(null)
-        _longPressCard?.classList.remove('jfs-pressing')
-        set_longPressCard(null)
+      if (pressingTimer.current !== null) {
+        clearTimeout(pressingTimer.current)
+        pressingTimer.current = null
+        setPressingIdx(null)
       }
       if (!_dragMode) return
       e.preventDefault()
       const touch = e.touches[0]
-      set_lastTouchXY(touch.clientX, touch.clientY)
-      applyDragToPoint(touch.clientX, touch.clientY)
+      lastTouchXY.current = { x: touch.clientX, y: touch.clientY }
+      dragSelectAt(touch.clientX, touch.clientY)
       if (scroll) {
         const rect = scroll.getBoundingClientRect()
         if (touch.clientY < rect.top + EDGE_ZONE) {
           const speed = -1 - (rect.top + EDGE_ZONE - touch.clientY) / EDGE_ZONE * MAX_SCROLL_SPEED
-          if (_autoScrollRaf === null) runAutoScroll(speed)
+          if (autoScrollRaf.current === null) runAutoScroll(speed)
         } else if (touch.clientY > rect.bottom - EDGE_ZONE) {
           const speed = 1 + (touch.clientY - rect.bottom + EDGE_ZONE) / EDGE_ZONE * MAX_SCROLL_SPEED
-          if (_autoScrollRaf === null) runAutoScroll(speed)
+          if (autoScrollRaf.current === null) runAutoScroll(speed)
         } else {
-          stopAutoScroll()
+          cancelAutoScroll()
         }
       }
     }
 
     const endTouch = (): void => {
-      if (_longPressTimer !== null) { clearTimeout(_longPressTimer); set_longPressTimer(null) }
-      _longPressCard?.classList.remove('jfs-pressing')
-      set_longPressCard(null)
-      stopAutoScroll()
+      if (pressingTimer.current !== null) {
+        clearTimeout(pressingTimer.current)
+        pressingTimer.current = null
+      }
+      setPressingIdx(null)
+      cancelAutoScroll()
       if (_dragMode) {
         renderGrid()
         set_suppressNextMousedown(true)
@@ -194,22 +203,23 @@ export function FrameGrid() {
       set_dragMode(false)
     }
 
-    grid.addEventListener('mouseover',    onMouseOver)
-    document.addEventListener('mouseup',  onMouseUp)
-    grid.addEventListener('touchstart',   onTouchStart,  { passive: true })
-    grid.addEventListener('touchmove',    onTouchMove,   { passive: false })
-    grid.addEventListener('touchend',     endTouch,      { passive: true })
-    grid.addEventListener('touchcancel',  endTouch,      { passive: true })
+    grid.addEventListener('mouseover', onMouseOver)
+    document.addEventListener('mouseup', onMouseUp)
+    grid.addEventListener('touchstart', onTouchStart, { passive: true })
+    grid.addEventListener('touchmove', onTouchMove, { passive: false })
+    grid.addEventListener('touchend', endTouch, { passive: true })
+    grid.addEventListener('touchcancel', endTouch, { passive: true })
 
     return () => {
-      grid.removeEventListener('mouseover',   onMouseOver)
+      grid.removeEventListener('mouseover', onMouseOver)
       document.removeEventListener('mouseup', onMouseUp)
-      grid.removeEventListener('touchstart',  onTouchStart)
-      grid.removeEventListener('touchmove',   onTouchMove)
-      grid.removeEventListener('touchend',    endTouch)
+      grid.removeEventListener('touchstart', onTouchStart)
+      grid.removeEventListener('touchmove', onTouchMove)
+      grid.removeEventListener('touchend', endTouch)
       grid.removeEventListener('touchcancel', endTouch)
+      cancelAutoScroll()
     }
-  }, [])
+  }, [phase])
 
   return (
     <FrameGridPhaseGate>
@@ -217,9 +227,10 @@ export function FrameGrid() {
         <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
           {frames.map((f, i) => f.removed ? null : (
             <FrameCard
-              key={f.posMs}
+              key={`${f.fiIdx}-${f.posMs}`}
               frame={f}
               idx={i}
+              pressing={i === pressingIdx}
               onMouseDown={handleCardMouseDown}
               onView={handleView}
               onDownload={handleDownload}

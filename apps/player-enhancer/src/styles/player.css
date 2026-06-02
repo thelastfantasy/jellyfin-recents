@@ -753,7 +753,7 @@ body.jfs-fe-open .upNextContainer {
   #jfs-fe-generate { order: 10; }
 
   /* Bigger touch targets */
-  .jfs-fe-card-act { width: 44px; height: 44px; }
+  .jfs-fe-card-act { width: 32px; height: 32px; }
   .jfs-fe-card-foot { font-size: 9px; padding: 2px 4px; }
 }
 

@@ -2,16 +2,16 @@ import { t } from '../lib/i18n';
 import { showToast } from '../components/Toast';
 
 function getApiBase(): string {
-  const ac = (window as any).ApiClient;
+  const ac = window.ApiClient;
   return ac?.serverAddress?.() ?? ac?._serverAddress ?? '';
 }
 
 function getToken(): string {
-  const ac = (window as any).ApiClient;
+  const ac = window.ApiClient;
   return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? '';
 }
 
-async function fetchItemName(itemId: string): Promise<string | null> {
+export async function fetchItemName(itemId: string): Promise<string | null> {
   try {
     const url = `${getApiBase()}/Items/${encodeURIComponent(itemId)}?api_key=${encodeURIComponent(getToken())}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });

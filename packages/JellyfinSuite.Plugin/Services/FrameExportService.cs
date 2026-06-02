@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using Jellyfin.Plugin.JellyfinSuite.Models;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,7 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgListCached = 0x14;
     private const byte MsgIndexFrames = 0x15;
     private const byte MsgPrefetchRange = 0x16;
+    private const byte MsgPrefetchStream = 0x18;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -114,12 +116,12 @@ public sealed class FrameExportService : IDisposable
 
     public async Task<(byte[]? JpegData, ushort QualityFlags, long ActualPtsMs)> GetFrameAsync(
         string filePath,
-        long posMs,
+        long frameIdx,
         int width,
         Guid itemId,
         CancellationToken ct = default)
     {
-        if (!IsAvailable) return (null, 0, posMs);
+        if (!IsAvailable) return (null, 0, 0);
 
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
@@ -134,7 +136,7 @@ public sealed class FrameExportService : IDisposable
 
             // [1] msg_type (0x10)
             // [4] request_id (u32 LE)
-            // [8] pos_ms (i64 LE)
+            // [8] frame_idx (i64 LE, frame-forge resolves to posMs internally)
             // [4] width (u32 LE)
             // [4] path_len (u32 LE)
             // [N] file path (UTF-8)
@@ -142,7 +144,7 @@ public sealed class FrameExportService : IDisposable
             var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
             buf[0] = MsgSingleFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
-            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), posMs);
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(13, 4), (uint)width);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
@@ -159,7 +161,7 @@ public sealed class FrameExportService : IDisposable
                 var jpegLen = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, 4));
 
                 if (jpegLen == 0)
-                    return (null, 0, posMs);
+                    return (null, 0, 0);
 
                 var jpegData = new byte[jpegLen];
                 await ReceiveExactAsync(sock, jpegData, (int)jpegLen, ct).ConfigureAwait(false);
@@ -171,7 +173,7 @@ public sealed class FrameExportService : IDisposable
                 var ptsBuf = new byte[8];
                 await ReceiveExactAsync(sock, ptsBuf, 8, ct).ConfigureAwait(false);
                 var actualPtsMs = BinaryPrimitives.ReadInt64LittleEndian(ptsBuf);
-                if (actualPtsMs < 0) actualPtsMs = posMs; // cache hit sentinel
+                if (actualPtsMs < 0) actualPtsMs = 0; // cache hit sentinel
 
                 return (jpegData, flags, actualPtsMs);
             }
@@ -180,7 +182,7 @@ public sealed class FrameExportService : IDisposable
                 _logger.LogWarning("[FrameExport] socket error — resetting: {Ex}", ex.Message);
                 try { _socket?.Dispose(); } catch { }
                 _socket = null;
-                return (null, 0, posMs);
+                return (null, 0, 0);
             }
         }
         finally
@@ -209,7 +211,7 @@ public sealed class FrameExportService : IDisposable
 
     public async Task PrefetchFrameAsync(
         string filePath,
-        long posMs,
+        long frameIdx,
         int width,
         Guid itemId,
         CancellationToken ct = default)
@@ -228,7 +230,7 @@ public sealed class FrameExportService : IDisposable
             var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
             buf[0] = MsgPrefetchFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
-            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), posMs);
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(13, 4), (uint)width);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
@@ -330,26 +332,90 @@ public sealed class FrameExportService : IDisposable
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
-            // Response: [4 request_id][4 count][count × 8 pos_ms]
+            // Response: [4 request_id][4 count][count × (8 frame_idx + 8 pos_ms)]
             var header = new byte[8];
             await ReceiveExactAsync(sock, header, 8, ct).ConfigureAwait(false);
             var count = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4));
             if (count == 0) return Array.Empty<long>();
 
-            var body = new byte[count * 8];
-            await ReceiveExactAsync(sock, body, (int)(count * 8), ct).ConfigureAwait(false);
+            var body = new byte[count * 16];
+            await ReceiveExactAsync(sock, body, (int)(count * 16), ct).ConfigureAwait(false);
 
             var result = new List<long>((int)count);
             for (var i = 0; i < (int)count; i++)
-                result.Add(BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 8)));
+                result.Add(BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 16))); // frame_idx
             return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning("[FrameExport] ListCached socket error: {Ex}", ex.Message);
+            _logger.LogWarning("[FrameExport] list_cached socket error: {Ex}", ex.Message);
             try { _socket?.Dispose(); } catch { }
             _socket = null;
             return Array.Empty<long>();
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends MSG_INDEX_FRAMES (0x15) to frame-forge and returns the complete frame index.
+    /// Result is cached in the Rust daemon per video path.
+    /// </summary>
+    public async Task<FrameIndexDto?> FrameIndexAsync(
+        string filePath, Guid itemId, CancellationToken ct = default)
+    {
+        if (!IsAvailable) return null;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+
+            // Wire: [msg_type(1)] [path_len(4)][path(N)]
+            var buf = new byte[1 + 4 + pathBytes.Length];
+            buf[0] = 0x15; // MSG_INDEX_FRAMES
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), (uint)pathBytes.Length);
+            pathBytes.CopyTo(buf.AsSpan(5));
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Response: [frame_count(4)][fps_num(8)][fps_den(8)] × frame_count: [pts_ms(8)][is_key(1)]
+            var header = new byte[20];
+            await ReceiveExactAsync(sock, header, 20, ct).ConfigureAwait(false);
+            var frameCount = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0));
+            var fpsNum = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(4));
+            var fpsDen = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(12));
+
+            if (frameCount == 0)
+                return new FrameIndexDto { Frames = Array.Empty<FrameIndexEntryDto>(), Fps = new FpsFracDto { Num = fpsNum, Den = fpsDen } };
+
+            var body = new byte[frameCount * 9];
+            await ReceiveExactAsync(sock, body, (int)(frameCount * 9), ct).ConfigureAwait(false);
+
+            var frames = new FrameIndexEntryDto[frameCount];
+            for (var i = 0; i < (int)frameCount; i++)
+            {
+                var offset = i * 9;
+                frames[i] = new FrameIndexEntryDto
+                {
+                    Ms = BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(offset)),
+                    IsKey = body[offset + 8] != 0,
+                    FrameIndex = i,
+                };
+            }
+
+            return new FrameIndexDto { Frames = frames, Fps = new FpsFracDto { Num = fpsNum, Den = fpsDen } };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] FrameIndexAsync error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+            return null;
         }
         finally
         {
@@ -568,6 +634,129 @@ public sealed class FrameExportService : IDisposable
             throw;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Sends MSG_INDEX_FRAMES_STREAM (0x17) to frame-forge and streams the response
+    /// directly to <paramref name="output"/> without deserializing. The daemon sends
+    /// SSE-formatted chunks prefixed with 4-byte length; C# just copies bytes.
+    /// Priority frames near <paramref name="currentTimeMs"/> arrive first.
+    /// </summary>
+    public async Task FrameIndexStreamAsync(
+        string filePath, Guid itemId, long currentTimeMs, Stream output, CancellationToken ct = default)
+    {
+        if (!IsAvailable) return;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
+
+            // Wire: [msg_type(1)] [request_id(4)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)]
+            var buf = new byte[1 + 4 + 32 + 4 + pathBytes.Length + 8];
+            var pos = 0;
+            buf[pos++] = 0x17; // MSG_INDEX_FRAMES_STREAM
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), requestId); pos += 4;
+            itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
+            pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), currentTimeMs);
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Response header: request_id(4)
+            var header = new byte[4];
+            await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+            var responseId = BinaryPrimitives.ReadUInt32LittleEndian(header);
+            if (responseId != requestId)
+                throw new IOException($"[FrameExport] FrameIndexStream socket desync: expected {requestId}, got {responseId}");
+
+            // Read chunks and forward directly to output
+            var lenBuf = new byte[4];
+            while (true)
+            {
+                await ReceiveExactAsync(sock, lenBuf, 4, ct).ConfigureAwait(false);
+                var chunkLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(lenBuf);
+                if (chunkLen == 0) break;
+
+                var chunk = new byte[chunkLen];
+                await ReceiveExactAsync(sock, chunk, chunkLen, ct).ConfigureAwait(false);
+                await output.WriteAsync(chunk, ct).ConfigureAwait(false);
+                await output.FlushAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] FrameIndexStreamAsync error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends MSG_PREFETCH_STREAM (0x18) to frame-forge with specific frame indices.
+    /// Rust decodes each frame (skipping cached) and sends SSE per frame.
+    /// </summary>
+    public async Task PrefetchStreamAsync(
+        string filePath, Guid itemId, int width, long[] fiIndices,
+        Stream output, CancellationToken ct = default)
+    {
+        if (!IsAvailable) return;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
+
+            // Wire: [msg(1)] [path_len(4)][path(N)] [item_id(32)] [width(4)] [count(4)] [count × fi_idx(8)]
+            var count = fiIndices.Length;
+            var buf = new byte[1 + 4 + pathBytes.Length + 32 + 4 + 4 + count * 8];
+            var pos = 0;
+            buf[pos++] = MsgPrefetchStream; // 0x18
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
+            pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
+            itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)count); pos += 4;
+            foreach (var fi in fiIndices)
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), fi);
+                pos += 8;
+            }
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Read SSE lines and forward
+            var readBuf = new byte[4096];
+            while (true)
+            {
+                var n = await sock.ReceiveAsync(readBuf, SocketFlags.None, ct).ConfigureAwait(false);
+                if (n == 0) break;
+                await output.WriteAsync(readBuf.AsMemory(0, n), ct).ConfigureAwait(false);
+                await output.FlushAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] PrefetchStreamAsync error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
     }
 
     public void Dispose()

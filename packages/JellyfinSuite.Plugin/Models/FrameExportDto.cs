@@ -12,6 +12,13 @@ public class PrefetchRequest
     [JsonPropertyName("includeStart")]       public bool   IncludeStart        { get; set; } = true;
     [JsonPropertyName("width")]              public int    Width               { get; set; } = 320;
     [JsonPropertyName("positions")]          public List<long>? Positions      { get; set; }
+    [JsonPropertyName("framePairs")] public List<FramePairDto>? FramePairs { get; set; }
+}
+
+public class FramePairDto
+{
+    [JsonPropertyName("fiIdx")]  public long FiIdx  { get; set; }
+    [JsonPropertyName("posMs")]  public long PosMs  { get; set; }
 }
 
 // ── POST /FrameExport/Generate ──────────────────────────────────────
