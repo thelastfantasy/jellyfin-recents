@@ -20,7 +20,3 @@ export function FrameGridSkeleton({ count = 48 }: { count?: number }) {
     </div>
   )
 }
-
-export function FrameGridPhaseGate({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
-}
