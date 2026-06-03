@@ -1,8 +1,8 @@
 import { useAtomValue } from 'jotai'
-import { useCallback, useEffect, useMemo,useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ExportSettings } from '../core/state'
-import { _frames, _videoEl, cropOpenAtom, sCropOpen, settingsAtom,sSettings, updateSettings } from '../core/state'
+import { _frames, _videoEl, cropOpenAtom, sCropOpen, settingsAtom, sSettings, updateSettings } from '../core/state'
 import { t } from '../lib/i18n'
 import { formatTime } from '../lib/utils'
 import { showToast } from './Toast'
@@ -76,10 +76,7 @@ export function CropPopover() {
   )
 
   useEffect(() => {
-    if (open && loadedFrames.length === 0) {
-      sCropOpen.value = false
-      showToast(t('crop.noFrames'))
-    }
+    if (open && loadedFrames.length === 0) { sCropOpen.value = false; showToast(t('crop.noFrames')) }
   }, [open, loadedFrames.length])
 
   if (!open || loadedFrames.length === 0) return null
@@ -87,6 +84,8 @@ export function CropPopover() {
 }
 
 function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
+  // ── 1. Atoms + derived ────────────────────────────────────────────────────
+
   const st = useAtomValue(settingsAtom)
   const currentMs = (_videoEl?.currentTime ?? 0) * 1000
 
@@ -96,27 +95,26 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     return best
   })()
 
-  const [curIdx, setCurIdx]   = useState(initialIdx)
+  // ── 2. Refs ───────────────────────────────────────────────────────────────
+
+  const imgRef       = useRef<HTMLImageElement>(null)
+  const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const stageRef     = useRef<HTMLDivElement>(null)
+  const draftRef     = useRef<CropRect>(st.cropRect ? { ...st.cropRect } : { x: 0, y: 0, w: 1, h: 1 })
+  const activeHandle = useRef<HandleId | null>(null)
+  const handleStart  = useRef<{ mx: number; my: number; draft0: CropRect } | null>(null)
+
+  // ── 3. State ──────────────────────────────────────────────────────────────
+
+  const [curIdx, setCurIdx]     = useState(initialIdx)
   const [infoText, setInfoText] = useState(() => t('crop.hint'))
 
-  const imgRef    = useRef<HTMLImageElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const stageRef  = useRef<HTMLDivElement>(null)
-
-  // Drag state in refs — no re-render needed during pointer move
-  const draftRef        = useRef<CropRect>(st.cropRect ? { ...st.cropRect } : { x: 0, y: 0, w: 1, h: 1 })
-  const activeHandleRef = useRef<HandleId | null>(null)
-  const handleStartRef  = useRef<{ mx: number; my: number; draft0: CropRect } | null>(null)
-
-  // ── canvas helpers ────────────────────────────────────────────────────────
+  // ── 4. Callbacks ──────────────────────────────────────────────────────────
 
   const positionCanvas = useCallback(() => {
-    const img    = imgRef.current
-    const canvas = canvasRef.current
-    const stage  = stageRef.current
+    const img = imgRef.current; const canvas = canvasRef.current; const stage = stageRef.current
     if (!img || !canvas || !stage) return
-    const iRect = img.getBoundingClientRect()
-    const sRect = stage.getBoundingClientRect()
+    const iRect = img.getBoundingClientRect(); const sRect = stage.getBoundingClientRect()
     canvas.style.left   = `${iRect.left - sRect.left}px`
     canvas.style.top    = `${iRect.top  - sRect.top}px`
     canvas.style.width  = `${iRect.width}px`
@@ -126,19 +124,12 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
   }, [])
 
   const drawCanvas = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')!
-    const cw = canvas.width, ch = canvas.height
+    const canvas = canvasRef.current; if (!canvas) return
+    const ctx = canvas.getContext('2d')!; const cw = canvas.width; const ch = canvas.height
     ctx.clearRect(0, 0, cw, ch)
-    const { x, y, w, h } = draftRef.current
-    const isFullFrame = w >= 0.99 && h >= 0.99
+    const { x, y, w, h } = draftRef.current; const isFullFrame = w >= 0.99 && h >= 0.99
     const [px, py, pw, ph] = [x*cw, y*ch, w*cw, h*ch]
-    if (!isFullFrame) {
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'
-      ctx.fillRect(0, 0, cw, ch)
-      ctx.clearRect(px, py, pw, ph)
-    }
+    if (!isFullFrame) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, cw, ch); ctx.clearRect(px, py, pw, ph) }
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
     ctx.strokeRect(px+0.5, py+0.5, pw-1, ph-1); ctx.restore()
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 0.5
@@ -157,21 +148,15 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
   }, [])
 
   const updateInfo = useCallback(() => {
-    const canvas = canvasRef.current
-    const img    = imgRef.current
+    const canvas = canvasRef.current; const img = imgRef.current
     if (!canvas || !img) return
-    const { x: _x, y: _y, w, h } = draftRef.current
-    const cropW = Math.round(w * img.naturalWidth)
-    const cropH = Math.round(h * img.naturalHeight)
-    const currentSt = sSettings.value
-    const dimW = currentSt.width
-    const dimH = currentSt.height
-    let targetPx = 0, resizeMode: 'width' | 'height' = 'width'
-    if (dimH.mode === 'userInput' && dimH.value > 0) {
-      targetPx = dimH.value; resizeMode = 'height'
-    } else if (dimW.value > 0) {
-      targetPx = dimW.value
-    } else if (currentSt.resolutionPreset !== 'original') {
+    const { w, h } = draftRef.current
+    const cropW = Math.round(w * img.naturalWidth); const cropH = Math.round(h * img.naturalHeight)
+    const currentSt = sSettings.value; const dimW = currentSt.width; const dimH = currentSt.height
+    let targetPx = 0; let resizeMode: 'width' | 'height' = 'width'
+    if (dimH.mode === 'userInput' && dimH.value > 0) { targetPx = dimH.value; resizeMode = 'height' }
+    else if (dimW.value > 0) { targetPx = dimW.value }
+    else if (currentSt.resolutionPreset !== 'original') {
       const pm: Record<string, number> = { '1080p': 1080, '720p': 720, '480p': 480, '360p': 360 }
       targetPx = pm[currentSt.resolutionPreset] ?? 0
     }
@@ -182,93 +167,91 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     }
     setInfoText((outW === cropW && outH === cropH)
       ? t('crop.infoSize').replace('{w}', String(cropW)).replace('{h}', String(cropH))
-      : t('crop.infoResized').replace('{w}', String(cropW)).replace('{h}', String(cropH))
-          .replace('{ow}', String(outW)).replace('{oh}', String(outH))
+      : t('crop.infoResized').replace('{w}', String(cropW)).replace('{h}', String(cropH)).replace('{ow}', String(outW)).replace('{oh}', String(outH)),
     )
   }, [])
 
   const applyDragCrop = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current
-    if (!canvas || !activeHandleRef.current || !handleStartRef.current) return
+    if (!canvas || !activeHandle.current || !handleStart.current) return
     const r = canvas.getBoundingClientRect()
-    const pos = {
-      x: Math.max(0, Math.min(canvas.width,  (clientX - r.left) * canvas.width  / r.width)),
-      y: Math.max(0, Math.min(canvas.height, (clientY - r.top)  * canvas.height / r.height)),
-    }
-    const dx = (pos.x - handleStartRef.current.mx) / canvas.width
-    const dy = (pos.y - handleStartRef.current.my) / canvas.height
-    const orig = handleStartRef.current.draft0
-    if (activeHandleRef.current === 'draw') {
-      const sx = handleStartRef.current.mx / canvas.width
-      const sy = handleStartRef.current.my / canvas.height
-      const cx = Math.max(0, Math.min(1, pos.x / canvas.width))
-      const cy = Math.max(0, Math.min(1, pos.y / canvas.height))
+    const pos = { x: Math.max(0, Math.min(canvas.width, (clientX - r.left) * canvas.width / r.width)), y: Math.max(0, Math.min(canvas.height, (clientY - r.top) * canvas.height / r.height)) }
+    const dx = (pos.x - handleStart.current.mx) / canvas.width; const dy = (pos.y - handleStart.current.my) / canvas.height
+    const orig = handleStart.current.draft0
+    if (activeHandle.current === 'draw') {
+      const sx = handleStart.current.mx / canvas.width; const sy = handleStart.current.my / canvas.height
+      const cx = Math.max(0, Math.min(1, pos.x / canvas.width)); const cy = Math.max(0, Math.min(1, pos.y / canvas.height))
       draftRef.current = { x: Math.min(sx, cx), y: Math.min(sy, cy), w: Math.max(0.01, Math.abs(cx-sx)), h: Math.max(0.01, Math.abs(cy-sy)) }
-    } else if (activeHandleRef.current === 'move') {
+    } else if (activeHandle.current === 'move') {
       draftRef.current = { x: Math.max(0, Math.min(1-orig.w, orig.x+dx)), y: Math.max(0, Math.min(1-orig.h, orig.y+dy)), w: orig.w, h: orig.h }
     } else {
-      draftRef.current = applyHandleResize(activeHandleRef.current, orig, dx, dy)
+      draftRef.current = applyHandleResize(activeHandle.current, orig, dx, dy)
     }
     drawCanvas(); updateInfo()
   }, [drawCanvas, updateInfo])
 
-  // ── canvas pointer/touch events (need passive: false) ──────────────────────
+  const loadFrame = useCallback((idx: number) => {
+    setCurIdx(idx); const img = imgRef.current; if (!img) return
+    img.onload = () => requestAnimationFrame(() => { positionCanvas(); drawCanvas(); updateInfo() })
+    img.src = loadedFrames[idx].jpegUrl
+  }, [loadedFrames, positionCanvas, drawCanvas, updateInfo])
+
+  const handleReset = useCallback(() => {
+    draftRef.current = { x: 0, y: 0, w: 1, h: 1 }; drawCanvas(); updateInfo()
+  }, [drawCanvas, updateInfo])
+
+  const handleApply = useCallback(() => {
+    const isFullFrame = draftRef.current.w >= 0.99 && draftRef.current.h >= 0.99
+    const newCrop = isFullFrame ? null : { ...draftRef.current }
+    const currentSt = sSettings.value
+    const w = currentSt.width; const h = currentSt.height
+    const patch: Partial<ExportSettings> = { cropRect: newCrop }
+    if (JSON.stringify(newCrop) !== JSON.stringify(currentSt.cropRect) && (w.value > 0 || h.value > 0)) {
+      const vw = _videoEl?.videoWidth || 1; const vh = _videoEl?.videoHeight || 1
+      if (w.mode === 'userInput' && w.value > 0) {
+        const hRatio = newCrop ? (newCrop.h * vh) / (newCrop.w * vw) : vh/vw
+        patch.height = { value: Math.round(w.value * hRatio), mode: 'autoAdjust' }; showToast(t('crop.autoAdjH'))
+      } else if (h.mode === 'userInput' && h.value > 0) {
+        const wRatio = newCrop ? (newCrop.w * vw) / (newCrop.h * vh) : vw/vh
+        patch.width = { value: Math.round(h.value * wRatio), mode: 'autoAdjust' }; showToast(t('crop.autoAdjW'))
+      }
+    }
+    updateSettings(patch); sCropOpen.value = false
+  }, [])
+
+  // ── 5. Effects ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const canvas = canvasRef.current; if (!canvas) return
 
     const onPointerDown = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect()
-      const pos = {
-        x: Math.max(0, Math.min(canvas.width,  (e.clientX - r.left) * canvas.width  / r.width)),
-        y: Math.max(0, Math.min(canvas.height, (e.clientY - r.top)  * canvas.height / r.height)),
-      }
+      const pos = { x: Math.max(0, Math.min(canvas.width, (e.clientX - r.left) * canvas.width / r.width)), y: Math.max(0, Math.min(canvas.height, (e.clientY - r.top) * canvas.height / r.height)) }
       const type = hitTest(pos.x, pos.y, draftRef.current, canvas.width, canvas.height)
-      activeHandleRef.current = type
-      handleStartRef.current  = { mx: pos.x, my: pos.y, draft0: { ...draftRef.current } }
-      if (type === 'draw') {
-        const nx = pos.x / canvas.width, ny = pos.y / canvas.height
-        draftRef.current = { x: nx, y: ny, w: 0.01, h: 0.01 }
-      }
+      activeHandle.current = type; handleStart.current = { mx: pos.x, my: pos.y, draft0: { ...draftRef.current } }
+      if (type === 'draw') { const nx = pos.x / canvas.width; const ny = pos.y / canvas.height; draftRef.current = { x: nx, y: ny, w: 0.01, h: 0.01 } }
       canvas.setPointerCapture(e.pointerId); e.preventDefault()
     }
 
     const onPointerMove = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect()
-      const pos = {
-        x: Math.max(0, Math.min(canvas.width,  (e.clientX - r.left) * canvas.width  / r.width)),
-        y: Math.max(0, Math.min(canvas.height, (e.clientY - r.top)  * canvas.height / r.height)),
-      }
-      if (!activeHandleRef.current || !handleStartRef.current) {
-        canvas.style.cursor = HANDLE_CURSOR[hitTest(pos.x, pos.y, draftRef.current, canvas.width, canvas.height)]
-        return
-      }
+      const pos = { x: Math.max(0, Math.min(canvas.width, (e.clientX - r.left) * canvas.width / r.width)), y: Math.max(0, Math.min(canvas.height, (e.clientY - r.top) * canvas.height / r.height)) }
+      if (!activeHandle.current || !handleStart.current) { canvas.style.cursor = HANDLE_CURSOR[hitTest(pos.x, pos.y, draftRef.current, canvas.width, canvas.height)]; return }
       applyDragCrop(e.clientX, e.clientY); e.preventDefault()
     }
 
-    const onPointerUp = () => { activeHandleRef.current = null; handleStartRef.current = null }
+    const onPointerUp = () => { activeHandle.current = null; handleStart.current = null }
 
     const onTouchStart = (e: TouchEvent) => {
-      e.preventDefault()
-      const touch = e.touches[0]
-      const r = canvas.getBoundingClientRect()
-      const pos = {
-        x: Math.max(0, Math.min(canvas.width,  (touch.clientX - r.left) * canvas.width  / r.width)),
-        y: Math.max(0, Math.min(canvas.height, (touch.clientY - r.top)  * canvas.height / r.height)),
-      }
+      e.preventDefault(); const touch = e.touches[0]; const r = canvas.getBoundingClientRect()
+      const pos = { x: Math.max(0, Math.min(canvas.width, (touch.clientX - r.left) * canvas.width / r.width)), y: Math.max(0, Math.min(canvas.height, (touch.clientY - r.top) * canvas.height / r.height)) }
       const type = hitTest(pos.x, pos.y, draftRef.current, canvas.width, canvas.height)
-      activeHandleRef.current = type
-      handleStartRef.current  = { mx: pos.x, my: pos.y, draft0: { ...draftRef.current } }
+      activeHandle.current = type; handleStart.current = { mx: pos.x, my: pos.y, draft0: { ...draftRef.current } }
       if (type === 'draw') draftRef.current = { x: pos.x/canvas.width, y: pos.y/canvas.height, w: 0.01, h: 0.01 }
     }
 
-    const onTouchMove = (e: TouchEvent) => {
-      e.preventDefault()
-      applyDragCrop(e.touches[0].clientX, e.touches[0].clientY)
-    }
-
-    const onTouchEnd = () => { activeHandleRef.current = null; handleStartRef.current = null }
+    const onTouchMove = (e: TouchEvent) => { e.preventDefault(); applyDragCrop(e.touches[0].clientX, e.touches[0].clientY) }
+    const onTouchEnd  = () => { activeHandle.current = null; handleStart.current = null }
 
     canvas.addEventListener('pointerdown',  onPointerDown,  { passive: false })
     canvas.addEventListener('pointermove',  onPointerMove,  { passive: false })
@@ -287,22 +270,8 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     }
   }, [applyDragCrop])
 
-  // ── frame loading ─────────────────────────────────────────────────────────
-
-  const loadFrame = useCallback((idx: number) => {
-    setCurIdx(idx)
-    const img = imgRef.current
-    if (!img) return
-    img.onload = () => requestAnimationFrame(() => {
-      positionCanvas(); drawCanvas(); updateInfo()
-    })
-    img.src = loadedFrames[idx].jpegUrl
-  }, [loadedFrames, positionCanvas, drawCanvas, updateInfo])
-
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => { loadFrame(initialIdx) }, [])
-
-  // ── keyboard ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -315,64 +284,21 @@ function CropPopoverInner({ loadedFrames }: { loadedFrames: typeof _frames }) {
     return () => document.removeEventListener('keydown', onKey, { capture: true })
   }, [curIdx, loadedFrames.length, loadFrame])
 
-  // ── handlers ─────────────────────────────────────────────────────────────
-
-  const handleReset = useCallback(() => {
-    draftRef.current = { x: 0, y: 0, w: 1, h: 1 }
-    drawCanvas(); updateInfo()
-  }, [drawCanvas, updateInfo])
-
-  const handleApply = useCallback(() => {
-    const isFullFrame = draftRef.current.w >= 0.99 && draftRef.current.h >= 0.99
-    const newCrop = isFullFrame ? null : { ...draftRef.current }
-    const currentSt = sSettings.value
-    const changed = JSON.stringify(newCrop) !== JSON.stringify(currentSt.cropRect)
-    const w = currentSt.width
-    const h = currentSt.height
-    const patch: Partial<ExportSettings> = { cropRect: newCrop }
-    if (changed && (w.value > 0 || h.value > 0)) {
-      const vw = _videoEl?.videoWidth  || 1
-      const vh = _videoEl?.videoHeight || 1
-      if (w.mode === 'userInput' && w.value > 0) {
-        const hRatio = newCrop ? (newCrop.h * vh) / (newCrop.w * vw) : vh / vw
-        patch.height = { value: Math.round(w.value * hRatio), mode: 'autoAdjust' }
-        showToast(t('crop.autoAdjH'))
-      } else if (h.mode === 'userInput' && h.value > 0) {
-        const wRatio = newCrop ? (newCrop.w * vw) / (newCrop.h * vh) : vw / vh
-        patch.width = { value: Math.round(h.value * wRatio), mode: 'autoAdjust' }
-        showToast(t('crop.autoAdjW'))
-      }
-    }
-    updateSettings(patch)
-    sCropOpen.value = false
-  }, [])
+  // ── 6. Render ─────────────────────────────────────────────────────────────
 
   const hasPrev = curIdx > 0
   const hasNext = curIdx < loadedFrames.length - 1
   const f = loadedFrames[curIdx]
 
   return (
-    <div
-      className="jfs-fe-crop-overlay"
-      onClick={e => { if (e.target === e.currentTarget) sCropOpen.value = false }}
-    >
+    <div className="jfs-fe-crop-overlay" onClick={e => { if (e.target === e.currentTarget) sCropOpen.value = false }}>
       <div className="jfs-fe-crop-dialog">
         <div ref={stageRef} className="jfs-fe-crop-stage" id="jfs-cp-stage">
           <img ref={imgRef} id="jfs-cp-img" alt="" />
           <canvas ref={canvasRef} className="jfs-fe-crop-canvas" />
-          <button
-            className="jfs-fe-cp-nav jfs-fe-cp-nav-l"
-            disabled={!hasPrev}
-            onClick={() => hasPrev && loadFrame(curIdx - 1)}
-          >‹</button>
-          <button
-            className="jfs-fe-cp-nav jfs-fe-cp-nav-r"
-            disabled={!hasNext}
-            onClick={() => hasNext && loadFrame(curIdx + 1)}
-          >›</button>
-          <div className="jfs-fe-cp-label">
-            {curIdx + 1} / {loadedFrames.length} · {formatTime(f.posMs)}
-          </div>
+          <button className="jfs-fe-cp-nav jfs-fe-cp-nav-l" disabled={!hasPrev} onClick={() => hasPrev && loadFrame(curIdx - 1)}>‹</button>
+          <button className="jfs-fe-cp-nav jfs-fe-cp-nav-r" disabled={!hasNext} onClick={() => hasNext && loadFrame(curIdx + 1)}>›</button>
+          <div className="jfs-fe-cp-label">{curIdx + 1} / {loadedFrames.length} · {formatTime(f.posMs)}</div>
         </div>
         <div className="jfs-fe-row sep-t" style={{ gap: '6px' }}>
           <span className="jfs-fe-muted" style={{ flex: '1', fontSize: '11px' }}>{infoText}</span>
