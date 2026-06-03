@@ -1,22 +1,22 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
+import { useQuery } from '@tanstack/react-query'
+import { experimental_streamedQuery as streamedQuery } from '@tanstack/react-query'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import {
   sPage, sResultUrl, sFileSize, sLightboxIdx, sModalPhase,
-  sPrefetchTotal, sPrefetchDone, sExportType, sSettings, modalPhaseAtom,
+  sPrefetchTotal, sPrefetchDone, sExportType, sSettings, sProgressTaskId,
   pageAtom, modalMinimizedAtom, _feOpen,
   _frames, _itemId, _videoEl, _fpsFrac, _frameIndex,
   _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs, _savedState,
   setFrames, setItemId, setVideoEl, setFpsFrac, setFrameIndex, setItemTitle,
   setFiMinIdx, setFiMaxIdx, setMinPosMs, setMaxPosMs,
   setSavedState, setLastClickedIdx, setDragMode, setActiveTaskId,
-  setSuppressNextMousedown, samplePositionsInRange, sProgressTaskId,
-  FrameEntry,
+  setSuppressNextMousedown, FrameEntry,
 } from '../core/state'
-import { fetchVideoFps, openFrameInfoStream, openPrefetchStream,
-  frameUrl, generateExport,
-} from '../api/frameExportApi'
+import { frameUrl, generateExport } from '../api/frameExportApi'
+import { frameInfoStreamer, prefetchStreamer } from '../api/streamers'
 import { fetchItemName } from '../api/jellyfinApi'
 import type { components } from '@jfs/api-types'
 import { t } from '../lib/i18n'
@@ -28,9 +28,8 @@ import { CropPopover }  from './CropPopover'
 
 const jstore = getDefaultStore()
 
-// ── Module-level helpers ─────────────────────────────────────────────────────
-
 type FiEntry = { ms: number; isKey: boolean; frameIndex: number }
+type FiStreamItem = FiEntry | { fps: { num: number; den: number } }
 
 function lastFiIdx(fi: FiEntry[], ms: number): number {
   for (let i = fi.length - 1; i >= 0; i--) if (fi[i].ms <= ms) return i
@@ -44,7 +43,7 @@ function sliceRange(fi: FiEntry[], center: number): [number, number] {
   return [a, b]
 }
 
-// ── Inner modal component ────────────────────────────────────────────────────
+// ── Inner modal ───────────────────────────────────────────────────────────────
 
 function FrameExportModalInner({ videoEl, itemId, minimized }: {
   videoEl: HTMLVideoElement; itemId: string; minimized: boolean
@@ -52,25 +51,67 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
   const setFE = useSetAtom(_feOpen)
   const rootRef = useRef<HTMLDivElement>(null)
   const page = useAtomValue(pageAtom)
-  const abortRef = useRef<AbortController[]>([])
-  const accumRef = useRef<FiEntry[]>([])
-  const sawBatchRef = useRef(false)
+  const centerMs = Math.round(videoEl.currentTime * 1000)
 
-  // ── helpers ────────────────────────────────────────────────────────────────
+  // ── FrameInfo stream (SSE → tanstack-query) ────────────────────────────────
 
-  function flush() { setFrames([..._frames]) }
+  const fiQuery = useQuery({
+    queryKey: ['frameInfo', itemId, centerMs] as const,
+    queryFn: streamedQuery<FiStreamItem>({
+      streamFn: () => frameInfoStreamer(itemId, centerMs),
+      refetchMode: 'append',
+    }),
+    staleTime: Infinity,
+  })
 
-  function markReady(idx: number) {
-    setFrames(_frames.map((f, i) => i === idx
-      ? { ...f, jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320), loadError: false }
-      : f))
+  const fiData = fiQuery.data as FiStreamItem[] | undefined
+  const fiEntries = (fiData?.filter((d): d is FiEntry => 'ms' in d) ?? []) as FiEntry[]
+  const fpsMeta = fiData?.find((d): d is { fps: { num: number; den: number } } => 'fps' in d) as { fps: { num: number; den: number } } | undefined
+
+  useEffect(() => {
+    if (fpsMeta) {
+      setFpsFrac(fpsMeta.fps)
+      setFrameIndex(fiEntries)
+    }
+  }, [fpsMeta])
+
+  useEffect(() => {
+    if (fiEntries.length > 0 && !_frames.length) {
+      const c = lastFiIdx(fiEntries, centerMs)
+      const [a, b] = sliceRange(fiEntries, c)
+      setRangeAndFrames(fiEntries, centerMs, a, b)
+      triggerPrefetch()
+    }
+  }, [fiEntries.length])
+
+  // ── Prefetch ────────────────────────────────────────────────────────────────
+
+  const [prefetchKey, setPrefetchKey] = useState<string | null>(null)
+
+  const pfQuery = useQuery({
+    queryKey: ['prefetch', itemId, prefetchKey ?? ''] as const,
+    queryFn: streamedQuery<number>({
+      streamFn: () => prefetchStreamer(itemId, 320, _frames.map(f => f.fiIdx).filter(i => i >= 0)),
+      refetchMode: 'append',
+    }),
+    staleTime: Infinity,
+    enabled: prefetchKey !== null,
+  })
+
+  const pfData = pfQuery.data as number[] | undefined
+  useEffect(() => {
+    if (!pfData) return
+    pfData.forEach(fi => {
+      const i = _frames.findIndex(f => f.fiIdx === fi)
+      if (i >= 0) markReady(i)
+    })
+  }, [pfData])
+
+  function triggerPrefetch() {
+    setPrefetchKey(String(Date.now()))
   }
 
-  function fillRemaining(w: number) {
-    setFrames(_frames.map(f => (f.removed || f.loadError || f.jpegUrl) ? f
-      : { ...f, jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, w) }))
-    sPrefetchTotal.value = 0; sPrefetchDone.value = 0
-  }
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   function setRangeAndFrames(fi: FiEntry[], center: number, start: number, end: number) {
     setFiMinIdx(start); setFiMaxIdx(end)
@@ -79,29 +120,13 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     setFrames(slice.map(f => ({ posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null } as FrameEntry)))
   }
 
-  function startPrefetch() {
-    const idxs = _frames.map(f => f.fiIdx).filter(i => i >= 0)
-    if (idxs.length === 0) return
-    const ac = new AbortController(); abortRef.current.push(ac)
-    const ev = openPrefetchStream(_itemId, 320, idxs)
-    const pend = new Set(idxs); sPrefetchTotal.value = pend.size; sPrefetchDone.value = 0
-
-    ev.onmessage = (e) => {
-      if (ac.signal.aborted) return
-      try {
-        const d = JSON.parse(e.data)
-        if (d.done) { ev.close(); fillRemaining(320); return }
-        const v: number = d.frameReady; if (typeof v !== 'number' || !pend.has(v)) return
-        pend.delete(v); sPrefetchDone.value = sPrefetchTotal.value - pend.size
-        const i = _frames.findIndex(f => f.fiIdx === v); if (i < 0) return
-        if (jstore.get(modalPhaseAtom) === 'skeleton') jstore.set(modalPhaseAtom, 'loading')
-        markReady(i); if (pend.size === 0) { ev.close() }
-      } catch { /* ignore */ }
-    }
-    ev.onerror = () => { ev.close(); fillRemaining(320) }
+  function markReady(idx: number) {
+    setFrames(_frames.map((f, i) => i === idx
+      ? { ...f, jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320), loadError: false }
+      : f))
   }
 
-  // ── expand ─────────────────────────────────────────────────────────────────
+  // ── Expand ──────────────────────────────────────────────────────────────────
 
   const expandBack = useCallback(() => {
     if (!_frameIndex) return
@@ -109,10 +134,9 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     if (a < 0) return
     const slice = _frameIndex.slice(a, _fiMinIdx)
     const ents = slice.map(f => ({ posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null } as FrameEntry))
-    setFrames([...ents, ..._frames])
-    setFiMinIdx(a); setMinPosMs(_frameIndex[a].ms)
-    flush()
-    startPrefetch()
+    setFrames([...ents, ..._frames]); setFiMinIdx(a); setMinPosMs(_frameIndex[a].ms)
+    setFrames([..._frames])
+    triggerPrefetch()
   }, [])
 
   const expandForward = useCallback(() => {
@@ -121,18 +145,17 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     if (b >= _frameIndex.length) return
     const slice = _frameIndex.slice(_fiMaxIdx + 1, b + 1)
     const ents = slice.map(f => ({ posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null } as FrameEntry))
-    setFrames([..._frames, ...ents])
-    setFiMaxIdx(b); setMaxPosMs(_frameIndex[b].ms)
-    flush()
-    startPrefetch()
+    setFrames([..._frames, ...ents]); setFiMaxIdx(b); setMaxPosMs(_frameIndex[b].ms)
+    setFrames([..._frames])
+    triggerPrefetch()
   }, [])
 
-  // ── submit ─────────────────────────────────────────────────────────────────
+  // ── Submit ──────────────────────────────────────────────────────────────────
 
   const submitGenerate = useCallback(async () => {
     const ex = sExportType.value; const st = sSettings.value
     const sel = _frames.filter(f => f.selected && !f.removed && !f.skeleton)
-    const seen = new Set<number>(); const uniq = sel.filter(f => { const k = f.fiIdx; if (seen.has(k)) return false; seen.add(k); return true })
+    const uniq = sel.filter((f, i) => sel.findIndex(x => x.fiIdx === f.fiIdx) === i)
     if (uniq.length < 2) { alert(t('export.minFrames')); return }
     if (uniq.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(uniq.length)))) return
     const fmt = ex === 'animate' ? st.animateFormat : st.stitchFormat
@@ -149,18 +172,15 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
         quality: ex === 'animate' ? st.animateQuality : st.stitchQuality,
       },
     }
-    try {
-      const taskId = await generateExport(body); sProgressTaskId.value = taskId; sPage.value = 'progress'
-    } catch (e) { alert(t('export.failed').replace('{msg}', e instanceof Error ? e.message : String(e))) }
+    try { const tid = await generateExport(body); sProgressTaskId.value = tid; sPage.value = 'progress' }
+    catch (e) { alert(t('export.failed').replace('{msg}', e instanceof Error ? e.message : String(e))) }
   }, [])
 
-  // ── close / minimize ───────────────────────────────────────────────────────
+  // ── Close / minimize ────────────────────────────────────────────────────────
 
   const handleClose = useCallback(() => {
-    setGesturesSuspended(false)
-    document.body.classList.remove('jfs-fe-open')
+    setGesturesSuspended(false); document.body.classList.remove('jfs-fe-open')
     sLightboxIdx.value = null; sModalPhase.value = 'skeleton'
-    abortRef.current.forEach(c => c.abort()); abortRef.current = []
     setLastClickedIdx(-1); setDragMode(false); setSuppressNextMousedown(false)
     if (_itemId && _frames.length > 0) setSavedState({
       itemId: _itemId, frames: _frames.map(f => ({ ...f })), exportType: sExportType.value,
@@ -171,8 +191,7 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
   }, [])
 
   const handleMinimize = useCallback(() => {
-    setGesturesSuspended(false)
-    document.body.classList.remove('jfs-fe-open')
+    setGesturesSuspended(false); document.body.classList.remove('jfs-fe-open')
     jstore.set(modalMinimizedAtom, true)
     if (_itemId && _frames.length > 0) setSavedState({
       itemId: _itemId, frames: _frames.map(f => ({ ...f })), exportType: sExportType.value,
@@ -181,31 +200,27 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     })
   }, [])
 
-  // ── keyboard ───────────────────────────────────────────────────────────────
+  // ── Keyboard ────────────────────────────────────────────────────────────────
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'Escape') return; e.stopPropagation()
     if (sLightboxIdx.value !== null) sLightboxIdx.value = null
     else handleClose()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── lifecycle ──────────────────────────────────────────────────────────────
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     setVideoEl(videoEl)
-    if (itemId !== _itemId) { setFrameIndex(null); setFpsFrac({ num: 24, den: 1 }); abortRef.current.forEach(c => c.abort()); abortRef.current = [] }
+    if (itemId !== _itemId) { setFrameIndex(null); setFpsFrac({ num: 24, den: 1 }) }
     setItemId(itemId); setActiveTaskId('')
     fetchItemName(itemId).then((n: string | null) => { if (n) setItemTitle(n) })
     videoEl.pause()
     document.body.classList.add('jfs-fe-open')
     setGesturesSuspended(true)
 
-    const centerMs = Math.round(videoEl.currentTime * 1000)
-
     // saved state
     if (_savedState && _savedState.itemId === itemId && centerMs >= _savedState.minPosMs && centerMs <= _savedState.maxPosMs) {
-      abortRef.current.forEach(c => c.abort()); abortRef.current = []
       setFrames(_savedState.frames.map(f => ({ ...f })))
       sExportType.value = _savedState.exportType
       setMinPosMs(_savedState.minPosMs); setMaxPosMs(_savedState.maxPosMs)
@@ -213,9 +228,6 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
       setFiMinIdx(_savedState.fiMinIdx); setFiMaxIdx(_savedState.fiMaxIdx)
       sPrefetchTotal.value = 0; sPrefetchDone.value = 0
       sPage.value = 'grid'; sLightboxIdx.value = null
-      flush()
-      setFrames(_frames.map(f => f.jpegUrl ? { ...f, loadError: false } : f))
-      flush()
       return
     }
 
@@ -225,56 +237,17 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
       const [a, b] = sliceRange(_frameIndex, c)
       sPage.value = 'grid'; sLightboxIdx.value = null
       setRangeAndFrames(_frameIndex, centerMs, a, b)
-      flush(); startPrefetch()
+      triggerPrefetch()
       return
     }
 
-    // skeleton + load
+    // skeleton fallback
     setFrames([]); sPage.value = 'grid'; sLightboxIdx.value = null
-    const fpsN = _fpsFrac.num > 0 ? _fpsFrac.num : 24; const fpsD = _fpsFrac.den > 0 ? _fpsFrac.den : 1
-    const n = Math.round(2000 / 1000 * fpsN / fpsD)
+    const n = Math.round(2000 / 1000 * (_fpsFrac.num || 24) / (_fpsFrac.den || 1))
     setFrames(Array.from({ length: n }, (_, i) => ({
-      posMs: Math.round(centerMs - 1000 + i * fpsD * 1000 / fpsN),
+      posMs: Math.round(centerMs - 1000 + i * (_fpsFrac.den || 1) * 1000 / (_fpsFrac.num || 24)),
       fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null, skeleton: true,
     } as FrameEntry)))
-    flush()
-
-    const ac = new AbortController(); abortRef.current.push(ac)
-    accumRef.current = []; sawBatchRef.current = false
-    void openFrameInfoStream(itemId, centerMs,
-      batch => {
-        if (ac.signal.aborted) return
-        accumRef.current.push(...batch)
-        if (!sawBatchRef.current) {
-          sawBatchRef.current = true
-          const fi = accumRef.current; const c = lastFiIdx(fi, centerMs)
-          const [a, b] = sliceRange(fi, c)
-          setRangeAndFrames(fi, centerMs, a, b)
-          flush(); startPrefetch()
-        }
-      },
-      fps => {
-        if (ac.signal.aborted) return
-        setFpsFrac(fps); setFrameIndex(accumRef.current)
-        const [a, b] = sliceRange(accumRef.current, lastFiIdx(accumRef.current, centerMs))
-        setFiMinIdx(a); setFiMaxIdx(b)
-        setMinPosMs(accumRef.current[a]?.ms ?? centerMs)
-        setMaxPosMs(accumRef.current[b]?.ms ?? centerMs)
-      },
-      async () => {
-        if (ac.signal.aborted || sawBatchRef.current) return
-        const fps = await fetchVideoFps(itemId); setFpsFrac(fps); setFrameIndex(null)
-        const s = Math.max(0, centerMs - 1000); const e = Math.min(Number.MAX_SAFE_INTEGER, centerMs + 1000)
-        const pos = samplePositionsInRange(s, e)
-        setMinPosMs(pos[0] ?? centerMs); setMaxPosMs(pos[pos.length - 1] ?? centerMs)
-        setFrames(pos.map(p => ({ posMs: p, fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null } as FrameEntry)))
-      },
-    )
-
-    return () => {
-      ac.abort()
-      abortRef.current = abortRef.current.filter(c => c !== ac)
-    }
   }, [videoEl, itemId])
 
   return createPortal(
@@ -295,8 +268,6 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     document.body,
   )
 }
-
-// ── App entry ────────────────────────────────────────────────────────────────
 
 function FrameExportModalApp() {
   const feInfo = useAtomValue(_feOpen)

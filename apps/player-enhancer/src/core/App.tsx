@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useAtomValue } from 'jotai'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useGestures } from '../hooks/useGestures'
 import { useLongPress } from '../hooks/useLongPress'
 import { useTrickplay } from '../hooks/useTrickplay'
@@ -13,6 +14,8 @@ import { FrameExportModalApp } from '../components/FrameExportModal'
 import { openFrameExportModal } from './state'
 import { sVideoElAtom, sOsdTargetAtom, sTrickplayEnabledAtom } from './injector'
 import { getCurrentVideoEl, getSpeedRate, getItemId } from './video-tracker'
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 10 * 60 * 1000, staleTime: Infinity } } })
 
 function PlayerRoot() {
   const videoEl = useAtomValue(sVideoElAtom)
@@ -34,7 +37,7 @@ export function AppRoot() {
   }, [])
 
   return (
-    <>
+    <QueryClientProvider client={queryClient}>
       <OsdOverlay />
       <Toast />
       <TrickplayThumb />
@@ -46,6 +49,6 @@ export function AppRoot() {
         osdTarget,
       )}
       <PlayerRoot />
-    </>
+    </QueryClientProvider>
   )
 }
