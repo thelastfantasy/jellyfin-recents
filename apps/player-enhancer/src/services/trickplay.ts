@@ -1,5 +1,5 @@
 import { atom, getDefaultStore } from 'jotai'
-import { getApiBaseUrl, getAccessToken } from '../lib/utils'
+import { suite } from '../api/routes'
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
   return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) }, peek(): T { return jstore.get(a) } }
@@ -21,13 +21,7 @@ const _sThumbState = atom<ThumbState>({
 export const thumbStateAtom = _sThumbState
 export const sThumbState = $val(_sThumbState)
 
-interface SeekPreviewMeta {
-  base: string;
-  token: string;
-}
-
-const _cache = new Map<string, SeekPreviewMeta>();
-let _pendingKey: string | null = null;
+let _pendingKey: string | null = null
 
 // Frames confirmed loaded into the browser cache (`${itemId}:${alignedMs}`)
 const _loadedKeys = new Set<string>();
@@ -79,29 +73,15 @@ export function initTrickplay(getItemId: () => string, videoEl: HTMLVideoElement
   };
 
   const doOpen = (): void => {
-    const id = getItemId();
-    const meta = ensureMeta(id);
-    if (meta && id) {
-      openReadyStream(id, meta, videoEl);
-    } else {
-      tryOpen();
-    }
+    const id = getItemId()
+    if (id) openReadyStream(id, videoEl)
+    else tryOpen()
   };
 
   tryOpen();
 }
 
-function ensureMeta(itemId: string): SeekPreviewMeta | undefined {
-  if (!itemId) return undefined;
-  if (!_cache.has(itemId)) {
-    const base = getApiBaseUrl();
-    const token = getAccessToken();
-    if (base) _cache.set(itemId, { base, token });
-  }
-  return _cache.get(itemId);
-}
-
-function openReadyStream(itemId: string, meta: SeekPreviewMeta, videoEl: HTMLVideoElement): void {
+function openReadyStream(itemId: string, videoEl: HTMLVideoElement): void {
   if (_readyStreamEs) {
     _readyStreamEs.close();
     _readyStreamEs = null;
@@ -110,9 +90,9 @@ function openReadyStream(itemId: string, meta: SeekPreviewMeta, videoEl: HTMLVid
     _warmImages.clear();
   }
 
-  const posMs = Math.floor((videoEl.currentTime || 0) * 1000);
-  const url = `${meta.base}/JellyfinSuite/SeekPreview/${itemId}/ready-stream?positionMs=${posMs}&api_key=${meta.token}`;
-  const es = new EventSource(url);
+  const posMs = Math.floor((videoEl.currentTime || 0) * 1000)
+  const url = suite.seekPreview.readyStream(itemId, posMs)
+  const es = new EventSource(url)
   _readyStreamEs = es;
   _readyStreamItemId = itemId;
 
@@ -124,7 +104,7 @@ function openReadyStream(itemId: string, meta: SeekPreviewMeta, videoEl: HTMLVid
     if (_loadedKeys.has(key)) return;
     const img = new Image();
     img.onload = () => { _loadedKeys.add(key); _warmImages.set(key, img); };
-    img.src = makeUrl(meta, itemId, posMs);
+    img.src = makeUrl(itemId, posMs);
   };
 
   es.onerror = () => {
@@ -133,8 +113,8 @@ function openReadyStream(itemId: string, meta: SeekPreviewMeta, videoEl: HTMLVid
   };
 }
 
-function makeUrl(meta: SeekPreviewMeta, itemId: string, alignedMs: number): string {
-  return `${meta.base}/JellyfinSuite/SeekPreview/${itemId}?positionMs=${alignedMs}&api_key=${meta.token}`;
+function makeUrl(itemId: string, alignedMs: number): string {
+  return suite.seekPreview.frame(itemId, alignedMs)
 }
 
 export function showTrickplayThumb(
@@ -145,10 +125,7 @@ export function showTrickplayThumb(
   direction: 1 | -1 | 0 = 0,
 ): void {
   if (!_globalEnabled) return;
-  const meta = ensureMeta(itemId);
-  if (!meta) return;
-
-  if (!_readyStreamEs || _readyStreamItemId !== itemId) openReadyStream(itemId, meta, videoEl);
+  if (!_readyStreamEs || _readyStreamItemId !== itemId) openReadyStream(itemId, videoEl);
 
   const rect = videoEl.getBoundingClientRect();
   const osd = document.querySelector<HTMLElement>('.jfs-seek-osd');
@@ -167,7 +144,7 @@ export function showTrickplayThumb(
 
   _pendingKey = exactKey;
 
-  const exactUrl = makeUrl(meta, itemId, aligned);
+  const exactUrl = makeUrl(itemId, aligned);
 
   if (_loadedKeys.has(exactKey)) {
     sThumbState.value = { visible: true, src: exactUrl, top, transform };
@@ -183,12 +160,12 @@ export function showTrickplayThumb(
     const first  = direction >= 0 ? fwd : bwd;
     const second = direction >= 0 ? bwd : fwd;
     if (_loadedKeys.has(`${itemId}:${first}`)) {
-      sThumbState.value = { visible: true, src: makeUrl(meta, itemId, first), top, transform };
+      sThumbState.value = { visible: true, src: makeUrl(itemId, first), top, transform };
       fuzzyFound = true;
       break;
     }
     if (_loadedKeys.has(`${itemId}:${second}`)) {
-      sThumbState.value = { visible: true, src: makeUrl(meta, itemId, second), top, transform };
+      sThumbState.value = { visible: true, src: makeUrl(itemId, second), top, transform };
       fuzzyFound = true;
       break;
     }
@@ -201,7 +178,7 @@ export function showTrickplayThumb(
       : (aligned - lower30 <= upper30 - aligned ? [lower30, upper30] : [upper30, lower30]);
     for (const c of candidates) {
       if (c >= 0 && _loadedKeys.has(`${itemId}:${c}`)) {
-        sThumbState.value = { visible: true, src: makeUrl(meta, itemId, c), top, transform };
+        sThumbState.value = { visible: true, src: makeUrl(itemId, c), top, transform };
         fuzzyFound = true;
         break;
       }
@@ -226,17 +203,16 @@ export function showTrickplayThumb(
 }
 
 export function prefetchFrame(posMs: number, itemId: string): void {
-  const meta = ensureMeta(itemId);
-  if (!meta || posMs < 0) return;
-  const aligned = Math.floor(posMs / 100) * 100;
-  const key = `${itemId}:${aligned}`;
-  if (_loadedKeys.has(key)) return;
-  const now = Date.now();
-  const last = _prefetchSent.get(key) ?? 0;
-  if (now - last < PREFETCH_DEDUP_MS) return;
-  _prefetchSent.set(key, now);
-  const url = `${meta.base}/JellyfinSuite/SeekPreview/${itemId}?positionMs=${aligned}&prefetch=true&api_key=${meta.token}`;
-  void fetch(url);
+  if (posMs < 0) return
+  const aligned = Math.floor(posMs / 100) * 100
+  const key = `${itemId}:${aligned}`
+  if (_loadedKeys.has(key)) return
+  const now = Date.now()
+  const last = _prefetchSent.get(key) ?? 0
+  if (now - last < PREFETCH_DEDUP_MS) return
+  _prefetchSent.set(key, now)
+  const url = suite.seekPreview.frame(itemId, aligned) + '&prefetch=true'
+  void fetch(url)
 }
 
 export function hideTrickplayThumb(): void {

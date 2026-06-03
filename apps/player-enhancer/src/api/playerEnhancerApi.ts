@@ -1,4 +1,5 @@
-import { getAccessToken, getApiBaseUrl } from '../lib/utils'
+import { getAccessToken } from '../lib/utils'
+import { suite } from './routes'
 
 export interface PlayerEnhancerConfig {
   trickplayEnabled?: boolean
@@ -14,7 +15,7 @@ export async function fetchEnhancerConfig(): Promise<PlayerEnhancerConfig | null
   }
   if (!token) return null
   try {
-    const res = await fetch(`${getApiBaseUrl()}/JellyfinSuite/PlayerEnhancer/Config?api_key=${encodeURIComponent(token)}`)
+    const res = await fetch(suite.playerEnhancer.config())
     if (!res.ok) return null
     return await res.json() as PlayerEnhancerConfig
   } catch {

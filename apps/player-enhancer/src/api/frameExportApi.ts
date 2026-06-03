@@ -1,23 +1,16 @@
 import type { components } from '@jfs/api-types'
-import { getApiBaseUrl, getAccessToken } from '../lib/utils'
+import { suite, jf } from './routes'
 
 type GenerateRequest = components['schemas']['GenerateRequest']
 type GenerateResponse = components['schemas']['GenerateResponse']
 
 export function frameUrl(itemId: string, fiIdx: number, posMs: number, width: number): string {
-  const base  = getApiBaseUrl()
-  const token = getAccessToken()
-  if (fiIdx >= 0) {
-    return `${base}/JellyfinSuite/FrameExport/${itemId}?frameIdx=${fiIdx}&width=${width}&api_key=${encodeURIComponent(token)}`
-  }
-  return `${base}/JellyfinSuite/FrameExport/${itemId}?positionMs=${Math.round(posMs)}&width=${width}&api_key=${encodeURIComponent(token)}`
+  return suite.frameExport.jpeg(itemId, fiIdx, posMs, width)
 }
 
 export async function fetchVideoFps(itemId: string): Promise<{ num: number; den: number }> {
   try {
-    const res = await fetch(
-      `${getApiBaseUrl()}/Items/${itemId}?Fields=MediaStreams&api_key=${encodeURIComponent(getAccessToken())}`
-    )
+    const res = await fetch(jf.item(itemId, 'MediaStreams'))
     if (!res.ok) return { num: 24, den: 1 }
     const data = await res.json() as {
       MediaStreams?: Array<{ Type?: string; RealFrameRate?: number; AverageFrameRate?: number }>
@@ -30,7 +23,7 @@ export async function fetchVideoFps(itemId: string): Promise<{ num: number; den:
   }
 }
 
-export function snapFpsToRational(fps: number): { num: number; den: number } {
+function snapFpsToRational(fps: number): { num: number; den: number } {
   const table: Array<[number, number, number]> = [
     [23.976, 24000, 1001], [24, 24, 1], [25, 25, 1],
     [29.97, 30000, 1001], [30, 30, 1],
@@ -49,52 +42,29 @@ export type FrameBatchCallback = (frames: Array<{ ms: number; isKey: boolean; fr
 export type FpsCallback = (fps: { num: number; den: number }) => void
 
 export function openFrameInfoStream(
-  itemId: string,
-  currentTimeMs: number,
-  onBatch: FrameBatchCallback,
-  onDone: FpsCallback,
-  onError: () => void,
+  itemId: string, currentTimeMs: number,
+  onBatch: FrameBatchCallback, onDone: FpsCallback, onError: () => void,
 ): EventSource {
-  const base  = getApiBaseUrl()
-  const token = getAccessToken()
-  const url = `${base}/JellyfinSuite/${itemId}/FrameInfoStream?currentTimeMs=${currentTimeMs}&api_key=${encodeURIComponent(token)}`
-  const evSrc = new EventSource(url)
+  const evSrc = new EventSource(suite.frameInfoStream(itemId, currentTimeMs))
   evSrc.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data)
-      if (Array.isArray(data)) {
-        onBatch(data)
-      } else if (data?.fps) {
-        onDone(data.fps)
-        evSrc.close()
-      }
-    } catch { /* malformed event, ignore */ }
+      if (Array.isArray(data)) onBatch(data)
+      else if (data?.fps) { onDone(data.fps); evSrc.close() }
+    } catch { /* ignore */ }
   }
-  evSrc.onerror = () => {
-    evSrc.close()
-    onError()
-  }
+  evSrc.onerror = () => { evSrc.close(); onError() }
   return evSrc
 }
 
-export function openPrefetchStream(
-  itemId: string,
-  width: number,
-  fiIdx: number[],
-): EventSource {
-  const base  = getApiBaseUrl()
-  const token = getAccessToken()
-  const idxParam = fiIdx.join(',')
-  return new EventSource(
-    `${base}/JellyfinSuite/FrameExport/PrefetchReady/${itemId}?width=${width}&fiIdx=${encodeURIComponent(idxParam)}&api_key=${encodeURIComponent(token)}`
-  )
+export function openPrefetchStream(itemId: string, width: number, fiIdx: number[]): EventSource {
+  return new EventSource(suite.frameExport.prefetchReady(itemId, width, fiIdx))
 }
 
 export async function generateExport(body: GenerateRequest): Promise<string> {
-  const res = await fetch(
-    `${getApiBaseUrl()}/JellyfinSuite/FrameExport/Generate?api_key=${encodeURIComponent(getAccessToken())}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-  )
+  const res = await fetch(suite.frameExport.generate(), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const { taskId } = await res.json() as GenerateResponse
   if (!taskId) throw new Error('no taskId')
@@ -102,32 +72,20 @@ export async function generateExport(body: GenerateRequest): Promise<string> {
 }
 
 export function openProgressStream(taskId: string): EventSource {
-  const base  = getApiBaseUrl()
-  const token = getAccessToken()
-  return new EventSource(
-    `${base}/JellyfinSuite/FrameExport/TaskProgress?taskId=${encodeURIComponent(taskId)}&api_key=${encodeURIComponent(token)}`
-  )
+  return new EventSource(suite.frameExport.taskProgress(taskId))
 }
 
 export async function cancelExport(taskId: string): Promise<void> {
-  await fetch(
-    `${getApiBaseUrl()}/JellyfinSuite/FrameExport/Cancel/${taskId}?api_key=${encodeURIComponent(getAccessToken())}`,
-    { method: 'POST' }
-  ).catch(() => {})
+  await fetch(suite.frameExport.cancel(taskId), { method: 'POST' }).catch(() => {})
 }
 
 export async function deleteResult(taskId: string): Promise<void> {
-  await fetch(
-    `${getApiBaseUrl()}/JellyfinSuite/FrameExport/Result/${taskId}?api_key=${encodeURIComponent(getAccessToken())}`,
-    { method: 'DELETE' }
-  ).catch(() => {})
+  await fetch(suite.frameExport.result(taskId), { method: 'DELETE' }).catch(() => {})
 }
 
-export function buildResultUrl(itemId: string, resultUrl: string): string {
-  const base  = getApiBaseUrl()
-  const token = getAccessToken()
-  void itemId
-  return resultUrl.startsWith('http')
-    ? resultUrl
-    : `${base}${resultUrl}?api_key=${encodeURIComponent(token)}`
+import { getApiBaseUrl, getAccessToken } from '../lib/utils'
+
+export function buildResultUrl(_itemId: string, resultUrl: string): string {
+  if (resultUrl.startsWith('http')) return resultUrl
+  return `${getApiBaseUrl()}${resultUrl}?api_key=${encodeURIComponent(getAccessToken())}`
 }

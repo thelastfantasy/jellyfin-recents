@@ -1,28 +1,26 @@
 import { t } from '../lib/i18n'
 import { showToast } from '../components/Toast'
-import { getApiBaseUrl, getAccessToken } from '../lib/utils'
+import { jf, suite } from '../api/routes'
 
 export async function fetchItemName(itemId: string): Promise<string | null> {
   try {
-    const url = `${getApiBaseUrl()}/Items/${encodeURIComponent(itemId)}?api_key=${encodeURIComponent(getAccessToken())}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { Name?: unknown };
-    return typeof data.Name === 'string' ? data.Name : null;
+    const res = await fetch(jf.item(itemId), { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return null
+    const data = await res.json() as { Name?: unknown }
+    return typeof data.Name === 'string' ? data.Name : null
   } catch {
-    return null;
+    return null
   }
 }
 
 async function fetchFrameStartMs(itemId: string, posMs: number): Promise<number | null> {
   try {
-    const url = `${getApiBaseUrl()}/JellyfinSuite/SeekPreview/${encodeURIComponent(itemId)}/frame-info?positionMs=${posMs}&api_key=${encodeURIComponent(getAccessToken())}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { frameStartMs?: number };
-    return typeof data.frameStartMs === 'number' ? data.frameStartMs : null;
+    const res = await fetch(suite.seekPreview.frameInfo(itemId, posMs), { signal: AbortSignal.timeout(5000) })
+    if (!res.ok) return null
+    const data = await res.json() as { frameStartMs?: number }
+    return typeof data.frameStartMs === 'number' ? data.frameStartMs : null
   } catch {
-    return null;
+    return null
   }
 }
 
