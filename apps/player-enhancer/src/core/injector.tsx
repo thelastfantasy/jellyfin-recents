@@ -2,7 +2,8 @@ import { createRoot } from 'react-dom/client'
 import { atom, getDefaultStore } from 'jotai'
 import { setSeekSeconds } from '../hooks/useGestures'
 import { setTrickplayEnabled } from '../services/trickplay'
-import { fetchEnhancerConfig } from '../api/playerEnhancerApi'
+import { enhancerConfigQuery } from '../api/playerEnhancerApi'
+import { queryClient } from './queryClient'
 import { AppRoot } from './App'
 import { setVideoEl, setSpeedRate, cacheItemIdFromUrl, getCurrentVideoEl } from './video-tracker'
 
@@ -45,7 +46,7 @@ function updateOsdTarget(): void {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 async function loadConfig(): Promise<void> {
-  const cfg = await fetchEnhancerConfig()
+  const cfg = await queryClient.fetchQuery(enhancerConfigQuery)
   if (!cfg) return
   if (typeof cfg.trickplayEnabled === 'boolean') { sTrickplayEnabled.value = cfg.trickplayEnabled; setTrickplayEnabled(cfg.trickplayEnabled) }
   if (typeof cfg.seekSeconds === 'number' && cfg.seekSeconds > 0) setSeekSeconds(cfg.seekSeconds)

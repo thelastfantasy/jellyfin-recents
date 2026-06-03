@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useAtomValue } from 'jotai'
+import { useMutation } from '@tanstack/react-query'
 import { sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
-import { buildResultUrl, deleteResult } from '../api/frameExportApi'
+import { buildResultUrl, deleteResultMutation } from '../api/frameExportApi'
 import { formatTime, cleanItemTitle, triggerDownload } from '../lib/utils'
 import { t } from '../lib/i18n'
 
@@ -20,9 +21,10 @@ export function ResultPage({ onBack, onClose }: {
   const sizeStr = fileSize > 1024 * 1024
     ? `${(fileSize / 1024 / 1024).toFixed(1)} MB`
     : `${(fileSize / 1024).toFixed(0)} KB`
+  const deleteMut = useMutation(deleteResultMutation())
 
   function handleDelete() {
-    deleteResult(_activeTaskId)
+    deleteMut.mutate(_activeTaskId)
     onBack()
   }
 

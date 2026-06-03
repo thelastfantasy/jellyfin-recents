@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
+import { useMutation } from '@tanstack/react-query'
 import { progressTaskIdAtom } from '../core/state'
-import { openProgressStream, cancelExport } from '../api/frameExportApi'
+import { openProgressStream, cancelExportMutation } from '../api/frameExportApi'
 import type { TaskProgressEvent } from '../types/api'
 import { sProgressPercent, sProgressVisible } from '../components/OsdButtons'
 import { t } from '../lib/i18n'
@@ -14,6 +15,7 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
   const taskId = useAtomValue(progressTaskIdAtom)
   const [pct, setPct]         = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const cancelMut = useMutation(cancelExportMutation())
 
   function clearIndicator() {
     sProgressVisible.value = false
@@ -57,7 +59,7 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
 
   function handleCancel() {
     clearIndicator()
-    cancelExport(taskId)
+    cancelMut.mutate(taskId)
     onClose()
   }
 
