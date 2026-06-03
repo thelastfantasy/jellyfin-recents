@@ -227,17 +227,19 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
   const { data: fetchedName } = useQuery(itemNameQuery(itemId))
   useEffect(() => { if (fetchedName) setItemTitle(fetchedName) }, [fetchedName])
 
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
+  // ── Lifecycle: side effects ──────────────────────────────────────────────────
 
   useEffect(() => {
-    setVideoEl(videoEl)
+    setVideoEl(videoEl); setItemId(itemId); setActiveTaskId('')
     if (itemId !== _itemId) { setFrameIndex(null); setFpsFrac({ num: 24, den: 1 }) }
-    setItemId(itemId); setActiveTaskId('')
     videoEl.pause()
     setBodyModalOpen(true)
     setGesturesSuspended(true)
+  }, [videoEl, itemId])
 
-    // Restore saved state
+  // ── Lifecycle: frame initialization ─────────────────────────────────────────
+
+  useEffect(() => {
     if (_savedState && _savedState.itemId === itemId && playbackMs >= _savedState.minPosMs && playbackMs <= _savedState.maxPosMs) {
       setFrames(_savedState.frames.map(f => ({ ...f })))
       sExportType.value = _savedState.exportType
@@ -249,7 +251,6 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
       return
     }
 
-    // Use preloaded frameIndex
     if (_frameIndex && _frameIndex.length > 0) {
       const centerIndex = findCenterFrameIndex(_frameIndex, playbackMs)
       const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, centerIndex)
@@ -259,7 +260,6 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
       return
     }
 
-    // Skeleton fallback while frameInfo loads
     setFrames([]); sPage.value = 'grid'; sLightboxIdx.value = null
     const skeletonCount = Math.round(2000 / 1000 * (_fpsFrac.num || 24) / (_fpsFrac.den || 1))
     setFrames(Array.from({ length: skeletonCount }, (_, i) => ({
