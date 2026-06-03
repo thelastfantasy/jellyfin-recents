@@ -8,49 +8,49 @@ import { AppRoot } from './App'
 import { setVideoEl, setSpeedRate, cacheItemIdFromUrl, getCurrentVideoEl } from './video-tracker'
 
 const ROOT_ID = 'jfs-enhancer-root'
-const jstore = getDefaultStore()
+const jotaiStore = getDefaultStore()
+const anchorId = 'jfs-osd-portal-anchor'
 
-const _sVideoEl = atom<HTMLVideoElement | null>(null)
-const _sOsdTarget = atom<HTMLElement | null>(null)
-const _sTrickplayEnabled = atom(true)
+const _sVideoEl            = atom<HTMLVideoElement | null>(null)
+const _sOsdTarget          = atom<HTMLElement | null>(null)
+const _sTrickplayEnabled   = atom(true)
 
-export const sVideoElAtom = _sVideoEl
-export const sOsdTargetAtom = _sOsdTarget
+export const sVideoElAtom          = _sVideoEl
+export const sOsdTargetAtom        = _sOsdTarget
 export const sTrickplayEnabledAtom = _sTrickplayEnabled
 
-function $val<T>(a: ReturnType<typeof atom<T>>) {
-  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) } }
+function createRefProxy<AtomTargetType>(targetAtom: ReturnType<typeof atom<AtomTargetType>>) {
+  return { get value(): AtomTargetType { return jotaiStore.get(targetAtom) }, set value(v: AtomTargetType) { jotaiStore.set(targetAtom, v) } }
 }
-const sVideoEl = $val(_sVideoEl)
-const sTrickplayEnabled = $val(_sTrickplayEnabled)
+const videoRef = createRefProxy(_sVideoEl)
+const trickplayEnabledRef = createRefProxy(_sTrickplayEnabled)
 
 // ── OSD portal ────────────────────────────────────────────────────────────────
 
 function updateOsdTarget(): void {
-  const osdButtons = document.querySelector<HTMLElement>('.osdControls .buttons.focuscontainer-x')
-  const dirLtr = osdButtons?.querySelector<HTMLElement>('div[dir="ltr"]')
-  if (!dirLtr) return
-  const existing = document.getElementById('jfs-osd-portal-anchor')
-  if (!existing) {
+  const buttonsRow = document.querySelector<HTMLElement>('.osdControls .buttons.focuscontainer-x')
+  const ltrDiv = buttonsRow?.querySelector<HTMLElement>('div[dir="ltr"]')
+  if (!ltrDiv) return
+  if (!document.getElementById(anchorId)) {
     const anchor = document.createElement('div')
-    anchor.id = 'jfs-osd-portal-anchor'
+    anchor.id = anchorId
     anchor.style.display = 'inline-flex'
-    dirLtr.after(anchor)
+    ltrDiv.after(anchor)
   }
-  const anchor = document.getElementById('jfs-osd-portal-anchor')
-  if (anchor && jstore.get(_sOsdTarget) !== anchor) {
-    jstore.set(_sOsdTarget, anchor as HTMLElement)
+  const anchor = document.getElementById(anchorId)
+  if (anchor && jotaiStore.get(_sOsdTarget) !== anchor) {
+    jotaiStore.set(_sOsdTarget, anchor as HTMLElement)
   }
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 async function loadConfig(): Promise<void> {
-  const cfg = await queryClient.fetchQuery(enhancerConfigQuery)
-  if (!cfg) return
-  if (typeof cfg.trickplayEnabled === 'boolean') { sTrickplayEnabled.value = cfg.trickplayEnabled; setTrickplayEnabled(cfg.trickplayEnabled) }
-  if (typeof cfg.seekSeconds === 'number' && cfg.seekSeconds > 0) setSeekSeconds(cfg.seekSeconds)
-  if (typeof cfg.speedRate === 'number' && cfg.speedRate >= 1.25) setSpeedRate(cfg.speedRate)
+  const config = await queryClient.fetchQuery(enhancerConfigQuery)
+  if (!config) return
+  if (typeof config.trickplayEnabled === 'boolean') { trickplayEnabledRef.value = config.trickplayEnabled; setTrickplayEnabled(config.trickplayEnabled) }
+  if (typeof config.seekSeconds === 'number' && config.seekSeconds > 0) setSeekSeconds(config.seekSeconds)
+  if (typeof config.speedRate === 'number' && config.speedRate >= 1.25) setSpeedRate(config.speedRate)
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -67,18 +67,18 @@ export function initInjector(): void {
   createRoot(appRootEl).render(<AppRoot />)
   loadConfig()
 
-  window.addEventListener('jfs:seekSecondsChanged', (e: Event) => {
-    const { seconds } = (e as CustomEvent<{ seconds: number }>).detail
+  window.addEventListener('jfs:seekSecondsChanged', (event: Event) => {
+    const { seconds } = (event as CustomEvent<{ seconds: number }>).detail
     if (typeof seconds === 'number' && seconds > 0) setSeekSeconds(seconds)
   })
-  window.addEventListener('jfs:speedRateChanged', (e: Event) => {
-    const { rate } = (e as CustomEvent<{ rate: number }>).detail
+  window.addEventListener('jfs:speedRateChanged', (event: Event) => {
+    const { rate } = (event as CustomEvent<{ rate: number }>).detail
     if (typeof rate === 'number' && rate >= 1.25) setSpeedRate(rate)
   })
-  window.addEventListener('jfs:trickplayEnabledChanged', (e: Event) => {
-    const { enabled } = (e as CustomEvent<{ enabled: boolean }>).detail
+  window.addEventListener('jfs:trickplayEnabledChanged', (event: Event) => {
+    const { enabled } = (event as CustomEvent<{ enabled: boolean }>).detail
     if (typeof enabled !== 'boolean') return
-    sTrickplayEnabled.value = enabled; setTrickplayEnabled(enabled)
+    trickplayEnabledRef.value = enabled; setTrickplayEnabled(enabled)
   })
 
   const _origPushState = history.pushState.bind(history)
@@ -87,11 +87,11 @@ export function initInjector(): void {
     return _origPushState(data, unused, url)
   }
 
-  let _obsLastCall = 0
+  let _lastObserverCall = 0
   const observer = new MutationObserver(() => {
     const now = performance.now()
-    if (now - _obsLastCall < 50) return
-    _obsLastCall = now
+    if (now - _lastObserverCall < 50) return
+    _lastObserverCall = now
     tryInject()
   })
   observer.observe(document.body, { childList: true, subtree: true })
@@ -104,13 +104,13 @@ function tryInject(): void {
   const videoEl = container.querySelector<HTMLVideoElement>('video.htmlvideoplayer')
   if (!videoEl) return
 
-  const prev = getCurrentVideoEl()
-  if (videoEl !== prev) {
-    if (prev) prev.style.filter = ''
+  const previousVideo = getCurrentVideoEl()
+  if (videoEl !== previousVideo) {
+    if (previousVideo) previousVideo.style.filter = ''
     const href = window.location.href
     const pending = href.includes('?') ? new URLSearchParams(href.slice(href.indexOf('?'))).get('id') ?? '' : ''
     setVideoEl(videoEl, pending)
-    sVideoEl.value = videoEl
+    videoRef.value = videoEl
   }
 
   if (!document.getElementById(ROOT_ID)) {
@@ -119,7 +119,7 @@ function tryInject(): void {
     container.appendChild(root)
   }
 
-  if (!document.getElementById('jfs-osd-portal-anchor')) {
+  if (!document.getElementById(anchorId)) {
     updateOsdTarget()
   }
 }
