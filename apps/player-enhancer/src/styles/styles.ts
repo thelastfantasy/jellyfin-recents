@@ -1,5 +1,6 @@
-import playerCss from './player.css?raw'
 import './alive.css'
+
+import playerCss from './player.css?raw'
 
 const STYLE_ID = 'jfs-enhancer-styles'
 

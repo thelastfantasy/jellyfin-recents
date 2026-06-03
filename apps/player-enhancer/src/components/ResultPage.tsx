@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { useAtomValue } from 'jotai'
 import { useMutation } from '@tanstack/react-query'
-import { sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
+import { useAtomValue } from 'jotai'
+import { useState } from 'react'
+
 import { buildResultUrl, deleteResultMutation } from '../api/frameExportApi'
-import { formatTime, cleanItemTitle, triggerDownload } from '../lib/utils'
+import { _activeTaskId, _frames, fileSizeAtom,resultUrlAtom, sExportType } from '../core/state'
 import { t } from '../lib/i18n'
+import { cleanItemTitle, formatTime, triggerDownload } from '../lib/utils'
 
 const ICON_CCW = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 const ICON_CW  = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`

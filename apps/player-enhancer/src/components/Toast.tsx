@@ -1,5 +1,6 @@
 import { atom, getDefaultStore } from 'jotai'
 import { useAtomValue } from 'jotai'
+
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
   return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) } }
@@ -8,6 +9,7 @@ function $val<T>(a: ReturnType<typeof atom<T>>) {
 interface ToastEntry { msg: string; id: number }
 
 export const toastAtom = atom<ToastEntry | null>(null)
+
 export const sToast = $val(toastAtom)
 
 let _toastSeq = 0

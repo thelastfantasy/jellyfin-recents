@@ -4,6 +4,7 @@ let _pendingItemId = ''
 let _speedRate = 2.0
 
 export function getCurrentVideoEl(): HTMLVideoElement | null { return _currentVideoEl }
+
 export function getSpeedRate(): number { return _speedRate }
 
 export function setVideoEl(v: HTMLVideoElement | null, pendingId: string): void {

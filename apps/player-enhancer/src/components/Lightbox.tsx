@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { sLightboxIdx, _frames, _itemId, lightboxIdxAtom } from '../core/state'
+import { useEffect } from 'react'
+
 import { frameUrl } from '../api/frameExportApi'
+import { _frames, _itemId, lightboxIdxAtom,sLightboxIdx } from '../core/state'
 
 const ICON_PREV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`
 const ICON_NEXT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`

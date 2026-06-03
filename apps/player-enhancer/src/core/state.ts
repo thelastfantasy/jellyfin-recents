@@ -3,6 +3,7 @@ import { atom, getDefaultStore } from 'jotai'
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CropRect { x: number; y: number; w: number; h: number }
+
 export interface FpsFrac  { num: number; den: number }
 
 export interface DimSetting { value: number; mode: 'userInput' | 'autoAdjust' }
@@ -106,35 +107,62 @@ const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
 const _modalPhaseAtom        = atom<'skeleton' | 'loading'>('skeleton')
 const _modalMinimizedAtom     = atom(false)
+
 export const modalMinimizedAtom = _modalMinimizedAtom
+
 export const sModalMinimized   = ref(_modalMinimizedAtom)
 
 // ── React hook-friendly atom exports ─────────────────────────────────────────
 export const pageAtom         = _pageAtom
+
 export const framesAtom       = _framesAtom
+
 export const exportTypeAtom   = _exportTypeAtom
+
 export const prefetchTotalAtom = _prefetchTotalAtom
+
 export const prefetchDoneAtom = _prefetchDoneAtom
+
 export const progressTaskIdAtom = _progressTaskIdAtom
+
 export const resultUrlAtom    = _resultUrlAtom
+
 export const fileSizeAtom     = _fileSizeAtom
+
 export const lightboxIdxAtom  = _lightboxIdxAtom
+
 export const cropOpenAtom     = _cropOpenAtom
+
 export const videoElAtom      = _videoElAtom
+
 export const itemIdAtom       = _itemIdAtom
+
 export const minPosMsAtom     = _minPosMsAtom
+
 export const maxPosMsAtom     = _maxPosMsAtom
+
 export const fpsFracAtom      = _fpsFracAtom
+
 export const lastClickedIdxAtom = _lastClickedIdxAtom
+
 export const dragModeAtom     = _dragModeAtom
+
 export const dragSelectValueAtom = _dragSelectValueAtom
+
 export const suppressNextMousedownAtom = _suppressNextMousedownAtom
+
 export const frameIndexAtom   = _frameIndexAtom
+
 export const fiMinIdxAtom     = _fiMinIdxAtom
+
 export const fiMaxIdxAtom     = _fiMaxIdxAtom
+
 export const savedStateAtom   = _savedStateAtom
+
 export const settingsAtom     = _settingsAtom
+
 export const paramsOpenAtom   = _paramsOpenAtom
+
 export const modalPhaseAtom   = _modalPhaseAtom
 
 // ── Backward-compatible .value proxies for imperative code ────────────────────
@@ -149,72 +177,123 @@ function ref<T>(a: ReturnType<typeof atom<T>>) {
 }
 
 export const sSettings          = ref(_settingsAtom)
+
 export const sPage              = ref(_pageAtom)
+
 export const sFrames            = ref(_framesAtom)
+
 export const sExportType        = ref(_exportTypeAtom)
+
 export const sParamsOpen        = ref(_paramsOpenAtom)
+
 export const sPrefetchTotal     = ref(_prefetchTotalAtom)
+
 export const sPrefetchDone      = ref(_prefetchDoneAtom)
+
 export const sProgressTaskId    = ref(_progressTaskIdAtom)
+
 export const sResultUrl         = ref(_resultUrlAtom)
+
 export const sFileSize          = ref(_fileSizeAtom)
+
 export const sLightboxIdx       = ref(_lightboxIdxAtom)
+
 export const sCropOpen          = ref(_cropOpenAtom)
+
 export const sVideoEl          = ref(_videoElAtom)
+
 export const sItemId           = ref(_itemIdAtom)
+
 export const sActiveTaskId     = ref(_activeTaskIdAtom)
+
 export const sMinPosMs         = ref(_minPosMsAtom)
+
 export const sMaxPosMs         = ref(_maxPosMsAtom)
+
 export const sFpsFrac          = ref(_fpsFracAtom)
+
 export const sLastClickedIdx   = ref(_lastClickedIdxAtom)
+
 export const sDragMode         = ref(_dragModeAtom)
+
 export const sDragSelectValue  = ref(_dragSelectValueAtom)
+
 export const sSuppressNextMousedown = ref(_suppressNextMousedownAtom)
+
 export const sFrameIndex       = ref(_frameIndexAtom)
+
 export const sFiMinIdx         = ref(_fiMinIdxAtom)
+
 export const sFiMaxIdx         = ref(_fiMaxIdxAtom)
+
 export const sSavedState       = ref(_savedStateAtom)
+
 export const sModalPhase         = ref(_modalPhaseAtom)
 
 // ── Module-level mutable vars (imperative code continues to use these) ────────
 
 export let _videoEl:        HTMLVideoElement | null = null
+
 export let _itemId  = ''
+
 export let _itemTitle = ''
+
 export let _activeTaskId = ''
 
 export function setVideoEl(v: HTMLVideoElement | null)       { _videoEl = v }
+
 export function setItemId(v: string)                         { _itemId = v }
+
 export function setItemTitle(v: string)                      { _itemTitle = v }
+
 export function setActiveTaskId(v: string)                   { _activeTaskId = v }
 
 export let _frames:         FrameEntry[] = []
+
 export let _minPosMs        = 1
+
 export let _maxPosMs        = 0
+
 export let _fpsFrac:        FpsFrac = { num: 24, den: 1 }
+
 export let _lastClickedIdx  = -1
+
 export let _dragMode        = false
+
 export let _dragSelectValue = false
+
 export let _suppressNextMousedown = false
 
 export function setFrames(v: FrameEntry[]) { _frames = v; sFrames.value = v }
+
 export function setMinPosMs(v: number)                        { _minPosMs = v }
+
 export function setMaxPosMs(v: number)                        { _maxPosMs = v }
+
 export function setFpsFrac(v: FpsFrac)                        { _fpsFrac = v }
+
 export function setLastClickedIdx(v: number)                  { _lastClickedIdx = v }
+
 export function setDragMode(v: boolean)                       { _dragMode = v }
+
 export function setDragSelectValue(v: boolean)                { _dragSelectValue = v }
+
 export function setSuppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
 
 export let _frameIndex: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null = null
+
 export let _fiMinIdx = 1
+
 export let _fiMaxIdx = -1
 
 export function setFrameIndex(v: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null) { _frameIndex = v }
+
 export function setFiMinIdx(v: number)  { _fiMinIdx = v }
+
 export function setFiMaxIdx(v: number)  { _fiMaxIdx = v }
 
 export let _savedState: SavedModalState | null = null
+
 export function setSavedState(v: SavedModalState | null) { _savedState = v }
 
 // ── Derived helpers ──────────────────────────────────────────────────────────

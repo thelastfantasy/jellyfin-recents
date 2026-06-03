@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
-import { showSpeedOsd, hideSpeedOsd } from '../components/OsdOverlay'
+
+import { hideSpeedOsd,showSpeedOsd } from '../components/OsdOverlay'
 
 const LONG_PRESS_MS   = 500
 const DIR_SAMPLE_PX   = 12

@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
-import {
-  setFpsFrac, setFrameIndex, _itemId as _gItemId,
-} from '../core/state'
+
 import { openFrameInfoStream } from '../api/frameExportApi'
+import {
+_itemId as _gItemId,
+  setFpsFrac, setFrameIndex, } from '../core/state'
 
 const preloadState = {
   evSrc: null as EventSource | null,

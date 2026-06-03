@@ -1,12 +1,13 @@
 import { useAtomValue } from 'jotai'
 import type { ChangeEvent } from 'react'
+
 import {
-  sExportType, sParamsOpen,
+_fiMaxIdx, _fiMinIdx, _frameIndex, _frames, _maxPosMs,
+_minPosMs, _videoEl, exportTypeAtom,   frameInterval,
+  framesAtom,   modalPhaseAtom,
+paramsOpenAtom, prefetchDoneAtom,
+prefetchTotalAtom,   setFrames, settingsAtom,   sExportType, sParamsOpen,
   updateSettings,
-  setFrames, _frames, _videoEl, _frameIndex, _fiMinIdx, _fiMaxIdx, _minPosMs, _maxPosMs,
-  frameInterval,
-  framesAtom, exportTypeAtom, paramsOpenAtom, settingsAtom, prefetchTotalAtom, prefetchDoneAtom,
-  modalPhaseAtom,
 } from '../core/state'
 import { t } from '../lib/i18n'
 import { FrameGrid } from './FrameGrid'

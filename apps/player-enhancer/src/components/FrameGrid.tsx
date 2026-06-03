@@ -1,15 +1,16 @@
-import { useEffect, useCallback, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import {
-  _frames, _dragMode, _dragSelectValue, _lastClickedIdx, _suppressNextMousedown,
-  setDragMode, setDragSelectValue, setLastClickedIdx, setSuppressNextMousedown,
-  setFrames, framesAtom, modalPhaseAtom,
-} from '../core/state'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
 import { frameUrl } from '../api/frameExportApi'
-import { formatTime, cleanItemTitle, triggerDownload } from '../lib/utils'
+import {
+_dragMode, _dragSelectValue,   _frames, _lastClickedIdx, _suppressNextMousedown,
+framesAtom, modalPhaseAtom,
+  setDragMode, setDragSelectValue,   setFrames, setLastClickedIdx, setSuppressNextMousedown,
+} from '../core/state'
 import { _itemId } from '../core/state'
-import { FrameCard } from './FrameCard'
 import { sLightboxIdx } from '../core/state'
+import { cleanItemTitle, formatTime, triggerDownload } from '../lib/utils'
+import { FrameCard } from './FrameCard'
 import { FrameGridPhaseGate } from './FrameGridSkeleton'
 
 // Cached item title (populated once per video)

@@ -1,4 +1,5 @@
 import { useAtomValue } from 'jotai'
+
 import { thumbStateAtom } from '../services/trickplay'
 
 export function TrickplayThumb() {

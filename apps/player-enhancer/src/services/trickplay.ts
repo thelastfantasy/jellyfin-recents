@@ -1,6 +1,8 @@
 import { atom, getDefaultStore } from 'jotai'
-import { openSeekPreviewStream, warmSeekPreviewCache } from '../api/seekPreviewApi'
+
 import { suite } from '../api/routes'
+import { openSeekPreviewStream, warmSeekPreviewCache } from '../api/seekPreviewApi'
+
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
   return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) }, peek(): T { return jstore.get(a) } }
@@ -19,7 +21,9 @@ const _sThumbState = atom<ThumbState>({
   top: '0px',
   transform: 'translate(-50%, -50%)',
 })
+
 export const thumbStateAtom = _sThumbState
+
 export const sThumbState = $val(_sThumbState)
 
 let _pendingKey: string | null = null

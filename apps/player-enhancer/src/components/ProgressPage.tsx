@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
-import { useAtomValue } from 'jotai'
 import { useMutation } from '@tanstack/react-query'
-import { progressTaskIdAtom } from '../core/state'
-import { openProgressStream, cancelExportMutation } from '../api/frameExportApi'
-import type { TaskProgressEvent } from '../types/api'
+import { useAtomValue } from 'jotai'
+import { useEffect,useState } from 'react'
+
+import { cancelExportMutation,openProgressStream } from '../api/frameExportApi'
 import { sProgressPercent, sProgressVisible } from '../components/OsdButtons'
+import { progressTaskIdAtom } from '../core/state'
 import { t } from '../lib/i18n'
+import type { TaskProgressEvent } from '../types/api'
 
 export function ProgressPage({ onClose, onMinimize, onResult }: {
   onClose:     () => void

@@ -1,8 +1,9 @@
-import { t } from '../lib/i18n'
-import { showToast } from '../components/Toast'
 import { fetchItemName } from '../api/jellyfinApi'
 import { frameStartMsQuery } from '../api/seekPreviewApi'
+import { showToast } from '../components/Toast'
 import { queryClient } from '../core/queryClient'
+import { t } from '../lib/i18n'
+
 export { fetchItemName }
 
 function sanitize(name: string): string {

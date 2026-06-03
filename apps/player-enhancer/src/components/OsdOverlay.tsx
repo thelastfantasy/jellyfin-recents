@@ -1,6 +1,7 @@
 import { atom, getDefaultStore } from 'jotai'
-import { useEffect } from 'react'
 import { useAtomValue } from 'jotai'
+import { useEffect } from 'react'
+
 import { t } from '../lib/i18n'
 
 const jstore = getDefaultStore()
@@ -18,7 +19,9 @@ function $val<T>(a: ReturnType<typeof atom<T>>) {
 
 interface RippleEntry { side: 'left' | 'right'; label: string; key: number }
 let _rippleKey = 0
+
 export const rippleAtom = atom<RippleEntry | null>(null)
+
 export const sRipple = $val(rippleAtom)
 
 export function showRipple(side: 'left' | 'right', label: string): void {
@@ -53,7 +56,9 @@ function RippleEl() {
 // ── Seek OSD ──────────────────────────────────────────────────────────────────
 
 interface SeekOsdState { line1: string; visible: boolean }
+
 export const seekOsdAtom = atom<SeekOsdState>({ line1: '', visible: false })
+
 export const sSeekOsd = $val(seekOsdAtom)
 let _seekHideTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -89,7 +94,9 @@ export function hideSeekOsd(delayMs = 0, onHide?: () => void): void {
 // ── Speed OSD (long-press fast-forward) ───────────────────────────────────────
 
 interface SpeedOsdState { rateText: string; visible: boolean }
+
 export const speedOsdAtom = atom<SpeedOsdState>({ rateText: '', visible: false })
+
 export const sSpeedOsd = $val(speedOsdAtom)
 
 export function showSpeedOsd(rateText: string): void {
@@ -106,9 +113,13 @@ export function hideSpeedOsd(): void {
 // ── Brightness / Volume OSD ───────────────────────────────────────────────────
 
 interface ValueOsdState { pct: number; visible: boolean }
+
 export const brightnessOsdAtom = atom<ValueOsdState>({ pct: 0, visible: false })
+
 export const sBrightnessOsd = $val(brightnessOsdAtom)
+
 export const volumeOsdAtom = atom<ValueOsdState>({ pct: 0, visible: false })
+
 export const sVolumeOsd = $val(volumeOsdAtom)
 let _bTimer: ReturnType<typeof setTimeout> | null = null
 let _vTimer: ReturnType<typeof setTimeout> | null = null

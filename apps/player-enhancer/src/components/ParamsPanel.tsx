@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
-import type { ChangeEvent, FormEvent, KeyboardEvent, WheelEvent } from 'react'
 import { useAtomValue } from 'jotai'
-import { sCropOpen, updateSettings, _videoEl, settingsAtom, exportTypeAtom } from '../core/state'
+import type { ChangeEvent, FormEvent, KeyboardEvent, WheelEvent } from 'react'
+import { useEffect } from 'react'
+
 import type { ExportSettings } from '../core/state'
+import { _videoEl, exportTypeAtom,sCropOpen, settingsAtom, updateSettings } from '../core/state'
 import { t } from '../lib/i18n'
 
 const ICON_CROP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 2 6 17 21 17"/><polyline points="2 6 17 6 17 21"/></svg>`

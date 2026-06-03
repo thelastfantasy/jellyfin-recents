@@ -1,5 +1,5 @@
-import { getApiBaseUrl, getAccessToken } from '../lib/utils'
 import { fetchApi } from '../lib/fetchApi'
+import { getAccessToken,getApiBaseUrl } from '../lib/utils'
 import { suite } from './routes'
 
 export function frameUrl(itemId: string, fiIdx: number, posMs: number, width: number): string {
@@ -7,6 +7,7 @@ export function frameUrl(itemId: string, fiIdx: number, posMs: number, width: nu
 }
 
 export type FrameBatchCallback = (frames: Array<{ ms: number; isKey: boolean; frameIndex: number }>) => void
+
 export type FpsCallback = (fps: { num: number; den: number }) => void
 
 export function openFrameInfoStream(itemId: string, currentTimeMs: number,

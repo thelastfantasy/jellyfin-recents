@@ -1,17 +1,19 @@
 import { atom, getDefaultStore } from 'jotai'
-import { useEffect, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
+import { useEffect, useRef, useState } from 'react'
+
+import { t } from '../lib/i18n'
+import { ICON_BACK1, ICON_BACK10, ICON_FORWARD1, ICON_FORWARD10, ICON_FRAME_EXPORT,ICON_SCREENSHOT } from '../lib/icons'
+import { cleanItemTitle } from '../lib/utils'
 import { stepFrames } from '../services/framestepper'
 import { takeScreenshot } from '../services/screenshot'
-import { t } from '../lib/i18n'
-import { cleanItemTitle } from '../lib/utils'
-import { ICON_BACK10, ICON_BACK1, ICON_FORWARD1, ICON_FORWARD10, ICON_SCREENSHOT, ICON_FRAME_EXPORT } from '../lib/icons'
 
 const _sProgressPercent = atom(0)
 const _sProgressVisible = atom(false)
 const store = getDefaultStore()
 
 export const progressPercentAtom = _sProgressPercent
+
 export const progressVisibleAtom = _sProgressVisible
 
 export const sProgressPercent = {

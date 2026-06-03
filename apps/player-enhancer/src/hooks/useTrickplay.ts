@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
-import { initTrickplay, closeTrickplayStream } from '../services/trickplay'
+
+import { closeTrickplayStream,initTrickplay } from '../services/trickplay'
 
 export function useTrickplay(
   videoEl: HTMLVideoElement | null,

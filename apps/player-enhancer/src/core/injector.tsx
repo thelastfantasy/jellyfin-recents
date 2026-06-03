@@ -1,11 +1,12 @@
-import { createRoot } from 'react-dom/client'
 import { atom, getDefaultStore } from 'jotai'
+import { createRoot } from 'react-dom/client'
+
+import { enhancerConfigQuery } from '../api/playerEnhancerApi'
 import { setSeekSeconds } from '../hooks/useGestures'
 import { setTrickplayEnabled } from '../services/trickplay'
-import { enhancerConfigQuery } from '../api/playerEnhancerApi'
-import { queryClient } from './queryClient'
 import { AppRoot } from './App'
-import { setVideoEl, setSpeedRate, cacheItemIdFromUrl, getCurrentVideoEl } from './video-tracker'
+import { queryClient } from './queryClient'
+import { cacheItemIdFromUrl, getCurrentVideoEl,setSpeedRate, setVideoEl } from './video-tracker'
 
 const ROOT_ID = 'jfs-enhancer-root'
 const jotaiStore = getDefaultStore()
@@ -16,7 +17,9 @@ const _sOsdTarget          = atom<HTMLElement | null>(null)
 const _sTrickplayEnabled   = atom(true)
 
 export const sVideoElAtom          = _sVideoEl
+
 export const sOsdTargetAtom        = _sOsdTarget
+
 export const sTrickplayEnabledAtom = _sTrickplayEnabled
 
 function createRefProxy<AtomTargetType>(targetAtom: ReturnType<typeof atom<AtomTargetType>>) {
@@ -62,6 +65,7 @@ export function initInjector(): void {
   _initDone = true
 
   import('../styles/styles').then(m => m.injectStyles())
+
   const appRootEl = document.createElement('div')
   document.body.appendChild(appRootEl)
   createRoot(appRootEl).render(<AppRoot />)
