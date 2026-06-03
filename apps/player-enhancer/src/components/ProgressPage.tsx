@@ -18,10 +18,6 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const cancelMut = useMutation(cancelExportMutation())
 
-  function clearIndicator() {
-    sProgressVisible.value = false
-  }
-
   useEffect(() => {
     let retries = 0
     const eventSource = openProgressStream(taskId)
@@ -51,6 +47,8 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
     // onClose / onResult are stable module-level functions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
+
+  function clearIndicator() { sProgressVisible.value = false }
 
   function handleMinimize() {
     sProgressPercent.value = Math.round(percent)

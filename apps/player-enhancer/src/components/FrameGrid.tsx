@@ -3,105 +3,34 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { frameUrl } from '../api/frameExportApi'
 import {
-_dragMode, _dragSelectValue,   _frames, _lastClickedIdx, _suppressNextMousedown,
+  _dragMode, _dragSelectValue, _frames,   _itemId, _lastClickedIdx, _suppressNextMousedown,
 framesAtom, modalPhaseAtom,
-  setDragMode, setDragSelectValue,   setFrames, setLastClickedIdx, setSuppressNextMousedown,
-} from '../core/state'
-import { _itemId } from '../core/state'
-import { sLightboxIdx } from '../core/state'
+setDragMode, setDragSelectValue, setFrames, setLastClickedIdx, setSuppressNextMousedown,
+  sLightboxIdx, } from '../core/state'
 import { cleanItemTitle, formatTime, triggerDownload } from '../lib/utils'
 import { FrameCard } from './FrameCard'
-import { FrameGridPhaseGate } from './FrameGridSkeleton'
 
-// Cached item title (populated once per video)
 let _itemTitle = ''
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Find the index of the card at (x,y) coordinates; returns -1 if none. */
 function cardIdxAt(x: number, y: number): number {
-  const el = document.elementFromPoint(x, y) as HTMLElement | null
-  const card = el?.closest<HTMLElement>('.jfs-fe-card')
+  const element = document.elementFromPoint(x, y) as HTMLElement | null
+  const card = element?.closest<HTMLElement>('.jfs-fe-card')
   if (!card) return -1
-  const idx = parseInt(card.dataset.idx ?? '')
-  return (isNaN(idx) || !_frames[idx]) ? -1 : idx
+  const index = parseInt(card.dataset.idx ?? '')
+  return (isNaN(index) || !_frames[index]) ? -1 : index
 }
 
 export function FrameGrid() {
-  const frames   = useAtomValue(framesAtom)
-  const phase    = useAtomValue(modalPhaseAtom)
-  const gridRef  = useRef<HTMLDivElement>(null)
+  const frames  = useAtomValue(framesAtom)
+  const phase   = useAtomValue(modalPhaseAtom)
+  const gridRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const pressingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoScrollRaf = useRef<number | null>(null)
+  const lastTouchXY    = useRef({ x: 0, y: 0 })
 
-  // ── Local imperative refs (no React re-render needed) ──────────────────────
-  const pressingTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const autoScrollRaf   = useRef<number | null>(null)
-  const lastTouchXY     = useRef({ x: 0, y: 0 })
-
-  // ── Long-press visual state (triggers React re-render for jfs-pressing) ───
   const [pressingIdx, setPressingIdx] = useState<number | null>(null)
 
-  // ── Callbacks ──────────────────────────────────────────────────────────────
-
-  const handleCardMouseDown = useCallback((idx: number, e: MouseEvent) => {
-    if (_suppressNextMousedown) { setSuppressNextMousedown(false); return }
-    if (!_frames[idx]) return
-
-    if (e.shiftKey && _lastClickedIdx >= 0 && _lastClickedIdx !== idx) {
-      const lo = Math.min(_lastClickedIdx, idx)
-      const hi = Math.max(_lastClickedIdx, idx)
-      const target = !_frames[idx].selected
-      for (let i = lo; i <= hi; i++) { _frames[i].selected = target }
-      setLastClickedIdx(idx)
-      setFrames([..._frames])
-      e.preventDefault()
-      return
-    }
-
-    _frames[idx].selected = !_frames[idx].selected
-    setDragSelectValue(_frames[idx].selected)
-    setDragMode(true)
-    setLastClickedIdx(idx)
-    setFrames([..._frames])
-    e.preventDefault()
-  }, [])
-
-  const handleView     = useCallback((idx: number) => { sLightboxIdx.value = idx }, [])
-  const handleDownload = useCallback((idx: number) => {
-    const f = _frames[idx]
-    if (!f) return
-    const url = frameUrl(_itemId, f.fiIdx, f.posMs, 0)
-    const title = _itemTitle || cleanItemTitle() || 'frame'
-    const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
-    triggerDownload(url, `jellyfin-frame-${title}-${stamp}.jpg`)
-  }, [])
-
-  const handleRemove = useCallback((idx: number) => {
-    if (!_frames[idx]) return
-    _frames[idx].removed  = true
-    _frames[idx].selected = false
-    setFrames([..._frames])
-  }, [])
-
-  const handleRetry = useCallback((idx: number) => {
-    if (!_frames[idx]) return
-    _frames[idx].loadError = false
-    setFrames([..._frames])
-  }, [])
-
-  const handleToggle = useCallback((idx: number, checked: boolean) => {
-    if (!_frames[idx]) return
-    _frames[idx].selected = checked
-    setFrames([..._frames])
-  }, [])
-
-  const handleLoadError = useCallback((idx: number) => {
-    if (!_frames[idx]) return
-    _frames[idx].loadError = true
-    setFrames([..._frames])
-  }, [])
-
-  // ── Drag helper: toggle selection at point (mouse or touch during drag) ───
   function dragSelectAt(x: number, y: number): void {
     const idx = cardIdxAt(x, y)
     if (idx < 0 || _frames[idx].selected === _dragSelectValue) return
@@ -109,15 +38,8 @@ export function FrameGrid() {
     setFrames([..._frames])
   }
 
-  // ── Auto-scroll during touch drag ──────────────────────────────────────────
-  function cancelAutoScroll(): void {
-    if (autoScrollRaf.current !== null) {
-      cancelAnimationFrame(autoScrollRaf.current)
-      autoScrollRaf.current = null
-    }
-  }
+  // ── 1. Effects ──────────────────────────────────────────────────────────────
 
-  // ── Event listeners ────────────────────────────────────────────────────────
   useEffect(() => {
     const grid   = gridRef.current
     const scroll = scrollRef.current
@@ -131,6 +53,13 @@ export function FrameGrid() {
       scroll.scrollTop += speed
       dragSelectAt(lastTouchXY.current.x, lastTouchXY.current.y)
       autoScrollRaf.current = requestAnimationFrame(() => runAutoScroll(speed))
+    }
+
+    function cancelAutoScroll(): void {
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current)
+        autoScrollRaf.current = null
+      }
     }
 
     const onMouseOver = (e: MouseEvent) => {
@@ -147,12 +76,9 @@ export function FrameGrid() {
       const touch = e.touches[0]
       const idx = cardIdxAt(touch.clientX, touch.clientY)
       if (idx < 0) return
-
       setPressingIdx(idx)
       pressingTimer.current = setTimeout(() => {
-        pressingTimer.current = null
-        setPressingIdx(null)
-        setDragMode(true)
+        pressingTimer.current = null; setPressingIdx(null); setDragMode(true)
         _frames[idx].selected = !_frames[idx].selected
         setDragSelectValue(_frames[idx].selected)
         setLastClickedIdx(idx)
@@ -163,9 +89,7 @@ export function FrameGrid() {
 
     const onTouchMove = (e: TouchEvent) => {
       if (pressingTimer.current !== null) {
-        clearTimeout(pressingTimer.current)
-        pressingTimer.current = null
-        setPressingIdx(null)
+        clearTimeout(pressingTimer.current); pressingTimer.current = null; setPressingIdx(null)
       }
       if (!_dragMode) return
       e.preventDefault()
@@ -187,12 +111,8 @@ export function FrameGrid() {
     }
 
     const endTouch = (): void => {
-      if (pressingTimer.current !== null) {
-        clearTimeout(pressingTimer.current)
-        pressingTimer.current = null
-      }
-      setPressingIdx(null)
-      cancelAutoScroll()
+      if (pressingTimer.current !== null) { clearTimeout(pressingTimer.current); pressingTimer.current = null }
+      setPressingIdx(null); cancelAutoScroll()
       if (_dragMode) {
         setFrames([..._frames])
         setSuppressNextMousedown(true)
@@ -219,27 +139,57 @@ export function FrameGrid() {
     }
   }, [phase])
 
+  // ── 2. Callbacks ────────────────────────────────────────────────────────────
+
+  const handleCardMouseDown = useCallback((idx: number, e: MouseEvent) => {
+    if (_suppressNextMousedown) { setSuppressNextMousedown(false); return }
+    if (!_frames[idx]) return
+    if (e.shiftKey && _lastClickedIdx >= 0 && _lastClickedIdx !== idx) {
+      const lo = Math.min(_lastClickedIdx, idx); const hi = Math.max(_lastClickedIdx, idx)
+      const target = !_frames[idx].selected
+      for (let i = lo; i <= hi; i++) _frames[i].selected = target
+      setLastClickedIdx(idx); setFrames([..._frames])
+      e.preventDefault(); return
+    }
+    _frames[idx].selected = !_frames[idx].selected
+    setDragSelectValue(_frames[idx].selected); setDragMode(true); setLastClickedIdx(idx)
+    setFrames([..._frames])
+    e.preventDefault()
+  }, [])
+
+  const handleView     = useCallback((idx: number) => { sLightboxIdx.value = idx }, [])
+  const handleDownload = useCallback((idx: number) => {
+    const f = _frames[idx]; if (!f) return
+    const title = _itemTitle || cleanItemTitle() || 'frame'
+    const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
+    triggerDownload(frameUrl(_itemId, f.fiIdx, f.posMs, 0), `jellyfin-frame-${title}-${stamp}.jpg`)
+  }, [])
+  const handleRemove    = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].removed = true; _frames[idx].selected = false; setFrames([..._frames]) } }, [])
+  const handleRetry     = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].loadError = false; setFrames([..._frames]) } }, [])
+  const handleToggle    = useCallback((idx: number, v: boolean) => { if (_frames[idx]) { _frames[idx].selected = v; setFrames([..._frames]) } }, [])
+  const handleLoadError = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].loadError = true; setFrames([..._frames]) } }, [])
+
+  // ── 3. Render ───────────────────────────────────────────────────────────────
+
   return (
-    <FrameGridPhaseGate>
-      <div className="jfs-fe-scroll" ref={scrollRef}>
-        <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
-          {frames.map((f, i) => f.removed ? null : (
-            <FrameCard
-              key={`${f.fiIdx}-${f.posMs}`}
-              frame={f}
-              idx={i}
-              pressing={i === pressingIdx}
-              onMouseDown={handleCardMouseDown}
-              onView={handleView}
-              onDownload={handleDownload}
-              onRemove={handleRemove}
-              onRetry={handleRetry}
-              onToggle={handleToggle}
-              onLoadError={handleLoadError}
-            />
-          ))}
-        </div>
+    <div className="jfs-fe-scroll" ref={scrollRef}>
+      <div id="jfs-fe-grid" className="jfs-fe-grid" ref={gridRef}>
+        {frames.map((f, i) => f.removed ? null : (
+          <FrameCard
+            key={`${f.fiIdx}-${f.posMs}`}
+            frame={f}
+            idx={i}
+            pressing={i === pressingIdx}
+            onMouseDown={handleCardMouseDown}
+            onView={handleView}
+            onDownload={handleDownload}
+            onRemove={handleRemove}
+            onRetry={handleRetry}
+            onToggle={handleToggle}
+            onLoadError={handleLoadError}
+          />
+        ))}
       </div>
-    </FrameGridPhaseGate>
+    </div>
   )
 }

@@ -44,6 +44,8 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
     : `${isMobile ? '' : t('frameExport.selected') + ' '}${selectedCount}/${visible.length}`
 
   const canGenerate = selectedCount > 1 && visible.filter(f => f.selected).every(f => f.jpegUrl && !f.loadError)
+  const displayFormat = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
+  const formatOpts = exportType === 'animate' ? ['gif', 'webp'] : ['png', 'webp']
 
   function handleSelectAll() {
     const val = !visible.every(f => f.selected)
@@ -66,9 +68,6 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
     if (exportType === 'animate') updateSettings({ animateFormat: formatValue as 'gif' | 'webp' })
     else                          updateSettings({ stitchFormat:  formatValue as 'png' | 'webp' })
   }
-
-  const displayFormat = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
-  const formatOpts = exportType === 'animate' ? ['gif', 'webp'] : ['png', 'webp']
 
   return (
     <div className="jfs-fe-osd">
