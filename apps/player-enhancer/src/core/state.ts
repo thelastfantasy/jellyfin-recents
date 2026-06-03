@@ -31,7 +31,6 @@ export interface FrameEntry {
   loadError?:   boolean
   removed?:     boolean
   actualPtsMs?: number
-  skeleton?:    boolean
 }
 
 export interface SavedModalState {

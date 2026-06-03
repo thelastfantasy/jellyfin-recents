@@ -167,7 +167,7 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
 
   const submitGenerate = useCallback(() => {
     const exportType = sExportType.value; const settings = sSettings.value
-    const selected = _frames.filter(f => f.selected && !f.removed && !f.skeleton)
+    const selected = _frames.filter(f => f.selected && !f.removed)
     if (selected.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(selected.length)))) return
     const format = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
     const body = {
@@ -262,7 +262,7 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     const skeletonCount = Math.round(2000 / 1000 * (_fpsFrac.num || 24) / (_fpsFrac.den || 1))
     setFrames(Array.from({ length: skeletonCount }, (_, i) => ({
       posMs: Math.round(playbackMs - 1000 + i * (_fpsFrac.den || 1) * 1000 / (_fpsFrac.num || 24)),
-      fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null, skeleton: true,
+      fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
     } as FrameEntry)))
   }, [videoEl, itemId])
 
