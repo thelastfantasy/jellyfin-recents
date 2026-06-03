@@ -168,13 +168,11 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
   const submitGenerate = useCallback(() => {
     const exportType = sExportType.value; const settings = sSettings.value
     const selected = _frames.filter(f => f.selected && !f.removed && !f.skeleton)
-    const uniqueFrames = selected.filter((f, i) => selected.findIndex(x => x.fiIdx === f.fiIdx) === i)
-    if (uniqueFrames.length < 2) { alert(t('export.minFrames')); return }
-    if (uniqueFrames.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(uniqueFrames.length)))) return
+    if (selected.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(selected.length)))) return
     const format = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
     const body = {
       itemId: _itemId, itemTitle: '', type: exportType,
-      frames: uniqueFrames.map(f => f.fiIdx >= 0 ? { frameIdx: f.fiIdx } : { positionMs: Math.round(f.posMs) }),
+      frames: selected.map(f => f.fiIdx >= 0 ? { frameIdx: f.fiIdx } : { positionMs: Math.round(f.posMs) }),
       params: {
         format, resizeMode: settings.width.mode === 'userInput' ? 'width' : 'height',
         customWidth: settings.width.value || null, customHeight: settings.height.value || null,
