@@ -1,10 +1,11 @@
+import { apiUrl } from '../lib/fetchApi'
 import { suite } from './routes'
 
 type FiEntry = { ms: number; isKey: boolean; frameIndex: number }
 type FiStreamItem = FiEntry | { fps: { num: number; den: number } }
 
 export function frameInfoStreamer(itemId: string, centerMs: number): AsyncIterable<FiStreamItem> {
-  const es = new EventSource(suite.frameInfoStream(itemId, centerMs))
+      const es = new EventSource(apiUrl(suite.frameInfoStream(itemId, centerMs)))
   let done = false
   let error: unknown = null
   let pending: ((v: IteratorResult<FiStreamItem>) => void) | null = null
@@ -46,8 +47,8 @@ export function frameInfoStreamer(itemId: string, centerMs: number): AsyncIterab
 }
 
 export function prefetchStreamer(itemId: string, width: number, fiIdx: number[]): AsyncIterable<number> {
-  const url = suite.frameExport.prefetchReady(itemId, width, fiIdx)
-  const es = new EventSource(url)
+      const url = apiUrl(suite.frameExport.prefetchReady(itemId, width, fiIdx))
+      const es = new EventSource(url)
   let done = false
   let pending: ((v: IteratorResult<number>) => void) | null = null
   const queue: IteratorResult<number>[] = []

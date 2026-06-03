@@ -1,4 +1,5 @@
 import { getApiBaseUrl, getAccessToken } from '../lib/utils'
+import { fetchApi } from '../lib/fetchApi'
 import { suite } from './routes'
 
 export function frameUrl(itemId: string, fiIdx: number, posMs: number, width: number): string {
@@ -41,7 +42,7 @@ export function buildResultUrl(_itemId: string, resultUrl: string): string {
 export const generateExportMutation = () => ({
   mutationKey: ['generateExport'] as const,
   mutationFn: async (body: unknown) => {
-    const res = await fetch(suite.frameExport.generate(), {
+    const res = await fetchApi(suite.frameExport.generate(), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -54,13 +55,13 @@ export const generateExportMutation = () => ({
 export const cancelExportMutation = () => ({
   mutationKey: ['cancelExport'] as const,
   mutationFn: async (taskId: string) => {
-    await fetch(suite.frameExport.cancel(taskId), { method: 'POST' })
+    await fetchApi(suite.frameExport.cancel(taskId), { method: 'POST' })
   },
 })
 
 export const deleteResultMutation = () => ({
   mutationKey: ['deleteResult'] as const,
   mutationFn: async (taskId: string) => {
-    await fetch(suite.frameExport.result(taskId), { method: 'DELETE' })
+    await fetchApi(suite.frameExport.result(taskId), { method: 'DELETE' })
   },
 })
