@@ -29,13 +29,13 @@ export function ResultPage({ onBack, onClose }: {
   }
 
   function handleDownload() {
-    const ext    = resultUrl.split('.').pop() ?? 'bin'
+    const extension = resultUrl.split('.').pop() ?? 'bin'
     const prefix = sExportType.value === 'animate' ? 'jellyfin-animate' : 'jellyfin-stitch'
     const title  = cleanItemTitle() || 'export'
-    const sel    = _frames.filter(f => f.selected)
-    const ts1    = formatTime(sel[0]?.posMs ?? 0).replace(/[:.]/g, '-')
-    const ts2    = formatTime(sel[sel.length - 1]?.posMs ?? 0).replace(/[:.]/g, '-')
-    triggerDownload(fullUrl, `${prefix}-${title}-${ts1}-to-${ts2}.${ext}`)
+    const selectedFrames = _frames.filter(f => f.selected)
+    const startTimestamp = formatTime(selectedFrames[0]?.posMs ?? 0).replace(/[:.]/g, '-')
+    const endTimestamp   = formatTime(selectedFrames[selectedFrames.length - 1]?.posMs ?? 0).replace(/[:.]/g, '-')
+    triggerDownload(fullUrl, `${prefix}-${title}-${startTimestamp}-to-${endTimestamp}.${extension}`)
   }
 
   return (

@@ -26,7 +26,7 @@ export interface FrameCardProps {
 }
 
 export function FrameCard({
-  frame: f, idx, pressing,
+  frame, idx, pressing,
   onMouseDown, onView, onDownload, onRemove, onRetry, onToggle, onLoadError,
 }: FrameCardProps) {
   const prefTotal = useAtomValue(prefetchTotalAtom)
@@ -35,7 +35,7 @@ export function FrameCard({
     ? prefDone / prefTotal * 100
     : 100
 
-  const imgContent = f.loadError
+  const imgContent = frame.loadError
     ? (
       <div className="jfs-fe-err-ph">
         <span>{t('frameExport.loadError')}</span>
@@ -44,26 +44,26 @@ export function FrameCard({
         </button>
       </div>
     )
-    : f.jpegUrl
+    : frame.jpegUrl
       ? (
         <img
-          src={f.jpegUrl}
-          alt={formatTime(f.posMs)}
+          src={frame.jpegUrl}
+          alt={formatTime(frame.posMs)}
           onError={() => onLoadError(idx)}
         />
       )
       : <div className="jfs-fe-loading"><div className="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
 
-  const displayMs = f.actualPtsMs ?? f.posMs
+  const displayMs = frame.actualPtsMs ?? frame.posMs
 
   return (
     <div
-      className={`jfs-fe-card${f.selected ? ' sel' : ''}${f.isJunk ? ' junk' : ''}${pressing ? ' jfs-pressing' : ''}`}
+      className={`jfs-fe-card${frame.selected ? ' sel' : ''}${frame.isJunk ? ' junk' : ''}${pressing ? ' jfs-pressing' : ''}`}
       data-idx={String(idx)}
       style={{ cursor: 'pointer' }}
       onMouseDown={e => onMouseDown(idx, e.nativeEvent)}
     >
-      {f.isJunk && <span className="jfs-fe-badge">{f.junkReason || t('frameExport.junk')}</span>}
+      {frame.isJunk && <span className="jfs-fe-badge">{frame.junkReason || t('frameExport.junk')}</span>}
       {imgContent}
       <div className="jfs-fe-card-acts" onTouchStart={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
         <button
@@ -88,14 +88,14 @@ export function FrameCard({
       <div className="jfs-fe-card-foot">
         <input
           type="checkbox"
-          checked={f.selected}
+          checked={frame.selected}
           className="jfs-fe-cb"
           style={{ cursor: 'pointer' }}
           onTouchStart={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
           onChange={e => { e.stopPropagation(); onToggle(idx, (e.target as HTMLInputElement).checked) }}
         />
         {formatTime(displayMs)}
-        {f.fiIdx >= 0 && <span className="jfs-fe-frnum">#{f.fiIdx}</span>}
+        {frame.fiIdx >= 0 && <span className="jfs-fe-frnum">#{frame.fiIdx}</span>}
       </div>
     </div>
   )

@@ -13,7 +13,7 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
   onResult:    (resultUrl: string, fileSize: number) => void
 }) {
   const taskId = useAtomValue(progressTaskIdAtom)
-  const [pct, setPct]         = useState(0)
+  const [percent, setPercent] = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const cancelMut = useMutation(cancelExportMutation())
 
@@ -23,36 +23,36 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
 
   useEffect(() => {
     let retries = 0
-    const evSrc = openProgressStream(taskId)
+    const eventSource = openProgressStream(taskId)
 
-    evSrc.onmessage = (e) => {
+    eventSource.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as TaskProgressEvent
         const roundedPct = Math.round(data.percent)
-        setPct(data.percent)
+        setPercent(data.percent)
         sProgressPercent.value = roundedPct
         if (data.status === 'complete' && data.resultUrl) {
-          evSrc.close(); clearIndicator(); onResult(data.resultUrl, data.fileSize ?? 0)
+          eventSource.close(); clearIndicator(); onResult(data.resultUrl, data.fileSize ?? 0)
         } else if (data.status === 'error') {
-          evSrc.close(); clearIndicator(); setErrorMsg(data.error ?? t('progress.failed'))
+          eventSource.close(); clearIndicator(); setErrorMsg(data.error ?? t('progress.failed'))
         } else if (data.status === 'cancelled') {
-          evSrc.close(); clearIndicator(); onClose()
+          eventSource.close(); clearIndicator(); onClose()
         }
       } catch { /* ignore */ }
     }
 
-    evSrc.onerror = () => {
+    eventSource.onerror = () => {
       if (retries++ < 3) return
-      evSrc.close(); clearIndicator(); setErrorMsg(t('progress.disconnected'))
+      eventSource.close(); clearIndicator(); setErrorMsg(t('progress.disconnected'))
     }
 
-    return () => { evSrc.close() }
+    return () => { eventSource.close() }
     // onClose / onResult are stable module-level functions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
   function handleMinimize() {
-    sProgressPercent.value = Math.round(pct)
+    sProgressPercent.value = Math.round(percent)
     sProgressVisible.value = true
     onMinimize()
   }
@@ -75,10 +75,10 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
         <div className="jfs-fe-progress">
           <div
             className="jfs-fe-bar"
-            style={{ width: `${errorMsg ? 100 : pct}%`, background: errorMsg ? 'rgba(239,68,68,0.8)' : undefined }}
+            style={{ width: `${errorMsg ? 100 : percent}%`, background: errorMsg ? 'rgba(239,68,68,0.8)' : undefined }}
           />
           <span className="jfs-fe-progress-label">
-            {errorMsg ? errorMsg.substring(0, 40) : `${Math.round(pct)}%`}
+            {errorMsg ? errorMsg.substring(0, 40) : `${Math.round(percent)}%`}
           </span>
         </div>
       </div>

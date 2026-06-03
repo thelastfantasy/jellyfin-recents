@@ -20,7 +20,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
 }) {
   const frames      = useAtomValue(framesAtom)
   const exportType  = useAtomValue(exportTypeAtom)
-  const st          = useAtomValue(settingsAtom)
+  const settings    = useAtomValue(settingsAtom)
   const paramsOpen  = useAtomValue(paramsOpenAtom)
   const prefTotal   = useAtomValue(prefetchTotalAtom)
   const prefDone    = useAtomValue(prefetchDoneAtom)
@@ -54,19 +54,19 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
   }
 
   function handleSparseChange(e: ChangeEvent<HTMLSelectElement>) {
-    const n = parseInt(e.target.value) || 0
-    if (n <= 0) return
-    setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % n === 0 }))
+    const spacing = parseInt(e.target.value) || 0
+    if (spacing <= 0) return
+    setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % spacing === 0 }))
     ;(e.target as HTMLSelectElement).value = '0'
   }
 
   function handleFormatChange(e: ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value
-    if (exportType === 'animate') updateSettings({ animateFormat: val as 'gif' | 'webp' })
-    else                          updateSettings({ stitchFormat:  val as 'png' | 'webp' })
+    const formatValue = e.target.value
+    if (exportType === 'animate') updateSettings({ animateFormat: formatValue as 'gif' | 'webp' })
+    else                          updateSettings({ stitchFormat:  formatValue as 'png' | 'webp' })
   }
 
-  const fmt        = exportType === 'animate' ? st.animateFormat : st.stitchFormat
+  const displayFormat = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
   const formatOpts = exportType === 'animate' ? ['gif', 'webp'] : ['png', 'webp']
 
   return (
@@ -79,8 +79,8 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
           <button className={`jfs-fe-seg-btn${exportType === 'animate' ? ' active' : ''}`} onClick={() => { sExportType.value = 'animate' }}>{t('grid.animate')}</button>
           <button className={`jfs-fe-seg-btn${exportType === 'stitch' ? ' active' : ''}`} onClick={() => { sExportType.value = 'stitch' }}>{t('grid.stitch')}</button>
         </div>
-        <select id="jfs-fe-format" className="jfs-fe-sel" value={fmt} onChange={handleFormatChange}>
-          {formatOpts.map(o => <option key={o} value={o}>{o.toUpperCase()}</option>)}
+        <select id="jfs-fe-format" className="jfs-fe-sel" value={displayFormat} onChange={handleFormatChange}>
+          {formatOpts.map(option => <option key={option} value={option}>{option.toUpperCase()}</option>)}
         </select>
         <select className="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
           <option value="0">{t('grid.sparse')}</option>
