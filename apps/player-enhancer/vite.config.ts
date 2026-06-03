@@ -23,6 +23,7 @@ export default defineConfig({
     },
     outDir: '../../packages/JellyfinSuite.Plugin/Web',
     emptyOutDir: false,
+    sourcemap: process.env.DEPLOY_MAP === '1' ? 'inline' as const : false,
     rollupOptions: { output: { inlineDynamicImports: true } },
   },
 })

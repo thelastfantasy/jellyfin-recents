@@ -95,6 +95,8 @@ update: build-poster-gen build
 		jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
 		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js.map \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js.map
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/meta.json \
 		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 	docker restart jellyfin-dev
@@ -117,6 +119,8 @@ update-quick:
 		jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
 		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js.map \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js.map
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/meta.json \
 		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 	docker restart jellyfin-dev

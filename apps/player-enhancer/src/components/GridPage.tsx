@@ -11,13 +11,15 @@ prefetchTotalAtom,   setFrames, settingsAtom,   sExportType, sParamsOpen,
 } from '../core/state'
 import { t } from '../lib/i18n'
 import { FrameGrid } from './FrameGrid'
+import { FrameGridSkeleton } from './FrameGridSkeleton'
 import { ParamsPanel } from './ParamsPanel'
 
-export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }: {
+export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, loading = false }: {
   onClose:        () => void
   onExpandBack:   () => void
   onExpandForward: () => void
   onGenerate:     () => void
+  loading?:       boolean
 }) {
   const frames      = useAtomValue(framesAtom)
   const exportType  = useAtomValue(exportTypeAtom)
@@ -71,7 +73,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate }:
 
   return (
     <div className="jfs-fe-osd">
-      <FrameGrid />
+      {loading ? <FrameGridSkeleton count={48} /> : <FrameGrid />}
       {paramsOpen && <ParamsPanel />}
       <div className="jfs-fe-row sep-t" id="jfs-fe-tbar">
         <span className="jfs-fe-title">{t('frameExport.title')}</span>

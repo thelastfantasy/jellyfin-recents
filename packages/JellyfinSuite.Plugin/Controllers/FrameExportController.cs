@@ -137,12 +137,12 @@ public class FrameExportController : ControllerBase
         return Accepted();
     }
 
-/// <summary>GET /FrameExport/PrefetchReady/{itemId}?width=320&fiIdx=1,2,3 — SSE stream of decoded frames.</summary>
-    [HttpGet("PrefetchReady/{itemId:guid}")]
+/// <summary>POST /FrameExport/PrefetchReady/{itemId}?width=320 — SSE stream of decoded frames, fiIdx list in body.</summary>
+    [HttpPost("PrefetchReady/{itemId:guid}")]
     public async Task PrefetchReady(
         [FromRoute] Guid itemId,
         [FromQuery] int width = 320,
-        [FromQuery] string? fiIdx = null,
+        [FromBody] long[]? fiIdx = null,
         CancellationToken ct = default)
     {
         if (!_frameExport.IsAvailable)
@@ -158,8 +158,7 @@ public class FrameExportController : ControllerBase
             return;
         }
 
-        var indices = fiIdx?.Split(',').Select(s => long.TryParse(s.Trim(), out var i) ? i : -1).Where(i => i >= 0).ToArray()
-                      ?? Array.Empty<long>();
+        var indices = fiIdx ?? Array.Empty<long>();
 
         await _frameExport.EnsureStartedAsync(ct);
 

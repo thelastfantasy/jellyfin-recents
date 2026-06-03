@@ -809,7 +809,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
 
 // ── MSG_INDEX_FRAMES_STREAM (0x17): SSE stream of frame index ───────────────
 
-const BATCH_SIZE: usize = 200;
+const BATCH_SIZE: usize = 5000;
 
 fn make_batch(entries: &[(usize, i64, bool)]) -> Vec<u8> {
     let items: Vec<_> = entries.iter().map(|(fi, ms, is_key)| FrameIndexEntry {

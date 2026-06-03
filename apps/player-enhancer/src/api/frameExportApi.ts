@@ -25,9 +25,6 @@ export function openFrameInfoStream(itemId: string, currentTimeMs: number,
   return evSrc
 }
 
-export function openPrefetchStream(itemId: string, width: number, fiIdx: number[]): EventSource {
-  return new EventSource(suite.frameExport.prefetchReady(itemId, width, fiIdx))
-}
 
 export function openProgressStream(taskId: string): EventSource {
   return new EventSource(suite.frameExport.taskProgress(taskId))
