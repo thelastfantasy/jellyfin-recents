@@ -198,7 +198,7 @@ export let _dragMode        = false
 export let _dragSelectValue = false
 export let _suppressNextMousedown = false
 
-export function setFrames(v: FrameEntry[])                    { _frames = v }
+export function setFrames(v: FrameEntry[]) { _frames = v; sFrames.value = v }
 export function setMinPosMs(v: number)                        { _minPosMs = v }
 export function setMaxPosMs(v: number)                        { _maxPosMs = v }
 export function setFpsFrac(v: FpsFrac)                        { _fpsFrac = v }

@@ -122,13 +122,15 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
 
   // ── Frame helpers ───────────────────────────────────────────────────────────
 
+  function makeEntry(f: FrameInfoEntry): FrameEntry {
+    return { posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null }
+  }
+
   function applyFrameRange(frames: FrameInfoEntry[], center: number, start: number, end: number) {
     setFiMinIdx(start); setFiMaxIdx(end)
     const slice = frames.slice(start, end + 1)
     setMinPosMs(slice[0]?.ms ?? center); setMaxPosMs(slice[slice.length - 1]?.ms ?? center)
-    setFrames(slice.map(f => ({
-      posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
-    } as FrameEntry)))
+    setFrames(slice.map(makeEntry))
   }
 
   function markFrameReady(idx: number) {
@@ -141,27 +143,21 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
 
   const expandBack = useCallback(() => {
     if (!_frameIndex) return
-    const offset = framesPerSecond(); const rangeStart = _fiMinIdx - offset
-    if (rangeStart < 0) return
-    const slice = _frameIndex.slice(rangeStart, _fiMinIdx)
-    const newEntries = slice.map(f => ({
-      posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
-    } as FrameEntry))
-    setFrames([...newEntries, ..._frames]); setFiMinIdx(rangeStart); setMinPosMs(_frameIndex[rangeStart].ms)
-    setFrames([..._frames])
+    const step = framesPerSecond(), start = _fiMinIdx - step
+    if (start < 0) return
+    const entries = _frameIndex.slice(start, _fiMinIdx).map(makeEntry)
+    setFrames([...entries, ..._frames])
+    setFiMinIdx(start); setMinPosMs(_frameIndex[start].ms)
     triggerPrefetch()
   }, [])
 
   const expandForward = useCallback(() => {
     if (!_frameIndex) return
-    const offset = framesPerSecond(); const rangeEnd = _fiMaxIdx + offset
-    if (rangeEnd >= _frameIndex.length) return
-    const slice = _frameIndex.slice(_fiMaxIdx + 1, rangeEnd + 1)
-    const newEntries = slice.map(f => ({
-      posMs: f.ms, fiIdx: f.frameIndex, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
-    } as FrameEntry))
-    setFrames([..._frames, ...newEntries]); setFiMaxIdx(rangeEnd); setMaxPosMs(_frameIndex[rangeEnd].ms)
-    setFrames([..._frames])
+    const step = framesPerSecond(), end = _fiMaxIdx + step
+    if (end >= _frameIndex.length) return
+    const entries = _frameIndex.slice(_fiMaxIdx + 1, end + 1).map(makeEntry)
+    setFrames([..._frames, ...entries])
+    setFiMaxIdx(end); setMaxPosMs(_frameIndex[end].ms)
     triggerPrefetch()
   }, [])
 
