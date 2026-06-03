@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
 import { useQuery } from '@tanstack/react-query'
 import { experimental_streamedQuery as streamedQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import {
   sPage, sResultUrl, sFileSize, sLightboxIdx, sModalPhase,
@@ -15,10 +16,9 @@ import {
   setSavedState, setLastClickedIdx, setDragMode, setActiveTaskId,
   setSuppressNextMousedown, FrameEntry,
 } from '../core/state'
-import { frameUrl, generateExport } from '../api/frameExportApi'
+import { frameUrl, generateExportMutation } from '../api/frameExportApi'
 import { frameInfoStreamer, prefetchStreamer } from '../api/streamers'
-import { fetchItemName } from '../api/jellyfinApi'
-import type { components } from '@jfs/api-types'
+import { itemNameQuery } from '../api/jellyfinApi'
 import { t } from '../lib/i18n'
 import { GridPage }     from './GridPage'
 import { ProgressPage } from './ProgressPage'
@@ -152,17 +152,17 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
-  const submitGenerate = useCallback(async () => {
+  const generateMut = useMutation(generateExportMutation())
+
+  const submitGenerate = useCallback(() => {
     const ex = sExportType.value; const st = sSettings.value
     const sel = _frames.filter(f => f.selected && !f.removed && !f.skeleton)
     const uniq = sel.filter((f, i) => sel.findIndex(x => x.fiIdx === f.fiIdx) === i)
     if (uniq.length < 2) { alert(t('export.minFrames')); return }
     if (uniq.length > 240 && !confirm(t('export.largeWarning').replace('{n}', String(uniq.length)))) return
     const fmt = ex === 'animate' ? st.animateFormat : st.stitchFormat
-    const name = await fetchItemName(_itemId)
-    const title = (name ?? document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim()) || 'export'
-    const body: components['schemas']['GenerateRequest'] = {
-      itemId: _itemId, itemTitle: title, type: ex,
+    const body = {
+      itemId: _itemId, itemTitle: '', type: ex,
       frames: uniq.map(f => f.fiIdx >= 0 ? { frameIdx: f.fiIdx } : { positionMs: Math.round(f.posMs) }),
       params: {
         format: fmt, resizeMode: st.width.mode === 'userInput' ? 'width' : 'height',
@@ -172,9 +172,11 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
         quality: ex === 'animate' ? st.animateQuality : st.stitchQuality,
       },
     }
-    try { const tid = await generateExport(body); sProgressTaskId.value = tid; sPage.value = 'progress' }
-    catch (e) { alert(t('export.failed').replace('{msg}', e instanceof Error ? e.message : String(e))) }
-  }, [])
+    generateMut.mutate(body, {
+      onSuccess: (taskId) => { sProgressTaskId.value = taskId; sPage.value = 'progress' },
+      onError: (e) => { alert(t('export.failed').replace('{msg}', e instanceof Error ? e.message : String(e))) },
+    })
+  }, [generateMut])
 
   // ── Close / minimize ────────────────────────────────────────────────────────
 
@@ -208,13 +210,17 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
     else handleClose()
   }, [])
 
+  // ── Item name ──────────────────────────────────────────────────────────────
+
+  const { data: itemNameData } = useQuery(itemNameQuery(itemId))
+  useEffect(() => { if (itemNameData) setItemTitle(itemNameData) }, [itemNameData])
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     setVideoEl(videoEl)
     if (itemId !== _itemId) { setFrameIndex(null); setFpsFrac({ num: 24, den: 1 }) }
     setItemId(itemId); setActiveTaskId('')
-    fetchItemName(itemId).then((n: string | null) => { if (n) setItemTitle(n) })
     videoEl.pause()
     document.body.classList.add('jfs-fe-open')
     setGesturesSuspended(true)

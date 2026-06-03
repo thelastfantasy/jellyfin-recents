@@ -1,28 +1,41 @@
+import { queryOptions } from '@tanstack/react-query'
 import { jf } from './routes'
 
+export const itemNameQuery = (itemId: string) =>
+  queryOptions({
+    queryKey: ['itemName', itemId],
+    queryFn: async () => {
+      const res = await fetch(jf.item(itemId), { signal: AbortSignal.timeout(3000) })
+      if (!res.ok) return null
+      const data = await res.json() as { Name?: string }
+      return data.Name ?? null
+    },
+    staleTime: 10 * 60 * 1000,
+  })
+
+export const videoFpsQuery = (itemId: string) =>
+  queryOptions({
+    queryKey: ['videoFps', itemId],
+    queryFn: async () => {
+      const res = await fetch(jf.item(itemId, 'MediaStreams'))
+      if (!res.ok) return { num: 24, den: 1 }
+      const data = await res.json() as {
+        MediaStreams?: Array<{ Type?: string; RealFrameRate?: number; AverageFrameRate?: number }>
+      }
+      const vid = data.MediaStreams?.find(s => s.Type === 'Video')
+      return snapFps(vid?.RealFrameRate ?? vid?.AverageFrameRate ?? 24)
+    },
+    staleTime: 10 * 60 * 1000,
+  })
+
+// Legacy: imperative version used by non-React code (screenshot.ts)
 export async function fetchItemName(itemId: string): Promise<string | null> {
   try {
     const res = await fetch(jf.item(itemId), { signal: AbortSignal.timeout(3000) })
     if (!res.ok) return null
     const data = await res.json() as { Name?: string }
     return data.Name ?? null
-  } catch {
-    return null
-  }
-}
-
-export async function fetchVideoFps(itemId: string): Promise<{ num: number; den: number }> {
-  try {
-    const res = await fetch(jf.item(itemId, 'MediaStreams'))
-    if (!res.ok) return { num: 24, den: 1 }
-    const data = await res.json() as {
-      MediaStreams?: Array<{ Type?: string; RealFrameRate?: number; AverageFrameRate?: number }>
-    }
-    const vid = data.MediaStreams?.find(s => s.Type === 'Video')
-    return snapFps(vid?.RealFrameRate ?? vid?.AverageFrameRate ?? 24)
-  } catch {
-    return { num: 24, den: 1 }
-  }
+  } catch { return null }
 }
 
 function snapFps(fps: number): { num: number; den: number } {
