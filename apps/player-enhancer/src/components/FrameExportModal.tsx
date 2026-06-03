@@ -1,7 +1,7 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useSuspenseQuery, useMutation } from '@tanstack/react-query'
 import { experimental_streamedQuery as streamedQuery } from '@tanstack/react-query'
 import { setGesturesSuspended } from '../hooks/useGestures'
 import {
@@ -24,6 +24,8 @@ import { ProgressPage } from './ProgressPage'
 import { ResultPage }   from './ResultPage'
 import { Lightbox }     from './Lightbox'
 import { CropPopover }  from './CropPopover'
+import { FrameGridSkeleton } from './FrameGridSkeleton'
+import { ErrorBoundary } from './ErrorBoundary'
 
 const jstore = getDefaultStore()
 
@@ -69,7 +71,7 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
 
   // ── FrameInfo stream ────────────────────────────────────────────────────────
 
-  const frameInfoQuery = useQuery({
+  const frameInfoQuery = useSuspenseQuery({
     queryKey: ['frameInfo', itemId, playbackMs] as const,
     queryFn: streamedQuery<StreamItem>({
       streamFn: () => frameInfoStreamer(itemId, playbackMs),
@@ -258,29 +260,29 @@ function FrameExportModalInner({ videoEl, itemId, minimized }: {
       return
     }
 
-    setFrames([]); sPage.value = 'grid'; sLightboxIdx.value = null
-    const skeletonCount = Math.round(2000 / 1000 * (_fpsFrac.num || 24) / (_fpsFrac.den || 1))
-    setFrames(Array.from({ length: skeletonCount }, (_, i) => ({
-      posMs: Math.round(playbackMs - 1000 + i * (_fpsFrac.den || 1) * 1000 / (_fpsFrac.num || 24)),
-      fiIdx: -1, selected: true, jpegUrl: '', isJunk: false, junkReason: null,
-    } as FrameEntry)))
+    // Fallback when neither saved state nor preloaded frameIndex: Suspense handles skeleton
+    sPage.value = 'grid'; sLightboxIdx.value = null
   }, [videoEl, itemId])
 
   return createPortal(
-    <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}
-      style={{
-        position: 'fixed', bottom: 12, left: '50%', zIndex: 99999,
-        display: minimized ? 'none' : 'flex', flexDirection: 'column',
-        width: 'min(92vw, 960px)', marginLeft: 'calc(-1 * min(46vw, 480px))',
-        fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
-        pointerEvents: 'auto',
-      }}>
-      {page === 'grid' && <GridPage onClose={handleClose} onExpandBack={expandBack} onExpandForward={expandForward} onGenerate={submitGenerate} />}
-      {page === 'progress' && <ProgressPage onClose={handleClose} onMinimize={handleMinimize} onResult={(url, size) => { sResultUrl.value = url; sFileSize.value = size; sPage.value = 'result' }} />}
-      {page === 'result' && <ResultPage onClose={handleClose} onBack={() => { sPage.value = 'grid' }} />}
-      <Lightbox />
-      <CropPopover />
-    </div>,
+    <ErrorBoundary fallback={<div style={{ color: '#f87171', padding: 16 }}>{t('progress.failed')}</div>}>
+      <Suspense fallback={<FrameGridSkeleton count={48} />}>
+        <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown}
+          style={{
+            position: 'fixed', bottom: 12, left: '50%', zIndex: 99999,
+            display: minimized ? 'none' : 'flex', flexDirection: 'column',
+            width: 'min(92vw, 960px)', marginLeft: 'calc(-1 * min(46vw, 480px))',
+            fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
+            pointerEvents: 'auto',
+          }}>
+          {page === 'grid' && <GridPage onClose={handleClose} onExpandBack={expandBack} onExpandForward={expandForward} onGenerate={submitGenerate} />}
+          {page === 'progress' && <ProgressPage onClose={handleClose} onMinimize={handleMinimize} onResult={(url, size) => { sResultUrl.value = url; sFileSize.value = size; sPage.value = 'result' }} />}
+          {page === 'result' && <ResultPage onClose={handleClose} onBack={() => { sPage.value = 'grid' }} />}
+          <Lightbox />
+          <CropPopover />
+        </div>
+      </Suspense>
+    </ErrorBoundary>,
     document.body,
   )
 }

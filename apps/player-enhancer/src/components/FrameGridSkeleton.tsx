@@ -1,6 +1,3 @@
-import { useAtomValue } from 'jotai'
-import { framesAtom, modalPhaseAtom } from '../core/state'
-
 function SkeletonCard() {
   return (
     <div className="jfs-fe-sk-card">
@@ -12,9 +9,7 @@ function SkeletonCard() {
   )
 }
 
-export function FrameGridSkeleton() {
-  const frames = useAtomValue(framesAtom)
-  const count = frames.length || 80
+export function FrameGridSkeleton({ count = 48 }: { count?: number }) {
   return (
     <div className="jfs-fe-scroll">
       <div className="jfs-fe-grid">
@@ -27,7 +22,5 @@ export function FrameGridSkeleton() {
 }
 
 export function FrameGridPhaseGate({ children }: { children: React.ReactNode }) {
-  const phase = useAtomValue(modalPhaseAtom)
-  if (phase === 'skeleton') return <FrameGridSkeleton />
   return <>{children}</>
 }
