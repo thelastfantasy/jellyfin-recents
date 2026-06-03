@@ -6,7 +6,7 @@ import {
   setFrames, framesAtom, modalPhaseAtom,
 } from '../core/state'
 import { frameUrl } from '../api/frameExportApi'
-import { formatTime } from '../lib/utils'
+import { formatTime, cleanItemTitle, triggerDownload } from '../lib/utils'
 import { _itemId } from '../core/state'
 import { FrameCard } from './FrameCard'
 import { sLightboxIdx } from '../core/state'
@@ -70,12 +70,9 @@ export function FrameGrid() {
     const f = _frames[idx]
     if (!f) return
     const url = frameUrl(_itemId, f.fiIdx, f.posMs, 0)
-    const title = _itemTitle || document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'frame'
+    const title = _itemTitle || cleanItemTitle() || 'frame'
     const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `jellyfin-frame-${title}-${stamp}.jpg`
-    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    triggerDownload(url, `jellyfin-frame-${title}-${stamp}.jpg`)
   }, [])
 
   const handleRemove = useCallback((idx: number) => {

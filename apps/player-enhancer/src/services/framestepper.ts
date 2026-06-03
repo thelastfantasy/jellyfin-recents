@@ -1,8 +1,5 @@
-import { getFps } from '../lib/fps-cache';
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
-}
+import { getFps } from '../lib/fps-cache'
+import { clamp } from '../lib/utils'
 
 export async function stepFrames(
   videoEl: HTMLVideoElement,

@@ -1,4 +1,5 @@
 import { atom, getDefaultStore } from 'jotai'
+import { getApiBaseUrl, getAccessToken } from '../lib/utils'
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
   return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) }, peek(): T { return jstore.get(a) } }
@@ -61,18 +62,6 @@ export function closeTrickplayStream(): void {
   if (_readyStreamEs) { _readyStreamEs.close(); _readyStreamEs = null; _readyStreamItemId = null; }
 }
 
-function getRawToken(): string {
-  const ac = window.ApiClient;
-  if (!ac) return '';
-  return (typeof ac.accessToken === 'function' ? ac.accessToken() : ac._accessToken) ?? '';
-}
-
-function getServerAddress(): string {
-  const ac = window.ApiClient;
-  if (!ac) return '';
-  return (typeof ac.serverAddress === 'function' ? ac.serverAddress() : ac._serverAddress) ?? '';
-}
-
 export function initTrickplay(getItemId: () => string, videoEl: HTMLVideoElement): void {
   if (_initRetryTimer) { clearTimeout(_initRetryTimer); _initRetryTimer = null; }
 
@@ -105,8 +94,8 @@ export function initTrickplay(getItemId: () => string, videoEl: HTMLVideoElement
 function ensureMeta(itemId: string): SeekPreviewMeta | undefined {
   if (!itemId) return undefined;
   if (!_cache.has(itemId)) {
-    const base = getServerAddress();
-    const token = getRawToken();
+    const base = getApiBaseUrl();
+    const token = getAccessToken();
     if (base) _cache.set(itemId, { base, token });
   }
   return _cache.get(itemId);

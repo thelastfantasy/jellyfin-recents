@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { sExportType, _frames, _activeTaskId, resultUrlAtom, fileSizeAtom } from '../core/state'
 import { buildResultUrl, deleteResult } from '../api/frameExportApi'
-import { formatTime } from '../lib/utils'
+import { formatTime, cleanItemTitle, triggerDownload } from '../lib/utils'
 import { t } from '../lib/i18n'
 
 const ICON_CCW = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
@@ -29,14 +29,11 @@ export function ResultPage({ onBack, onClose }: {
   function handleDownload() {
     const ext    = resultUrl.split('.').pop() ?? 'bin'
     const prefix = sExportType.value === 'animate' ? 'jellyfin-animate' : 'jellyfin-stitch'
-    const title  = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || 'export'
+    const title  = cleanItemTitle() || 'export'
     const sel    = _frames.filter(f => f.selected)
     const ts1    = formatTime(sel[0]?.posMs ?? 0).replace(/[:.]/g, '-')
     const ts2    = formatTime(sel[sel.length - 1]?.posMs ?? 0).replace(/[:.]/g, '-')
-    const a = document.createElement('a')
-    a.href = fullUrl
-    a.download = `${prefix}-${title}-${ts1}-to-${ts2}.${ext}`
-    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    triggerDownload(fullUrl, `${prefix}-${title}-${ts1}-to-${ts2}.${ext}`)
   }
 
   return (

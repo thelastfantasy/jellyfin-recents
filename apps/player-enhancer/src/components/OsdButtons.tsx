@@ -4,6 +4,7 @@ import { useAtomValue } from 'jotai'
 import { stepFrames } from '../services/framestepper'
 import { takeScreenshot } from '../services/screenshot'
 import { t } from '../lib/i18n'
+import { cleanItemTitle } from '../lib/utils'
 import { ICON_BACK10, ICON_BACK1, ICON_FORWARD1, ICON_FORWARD10, ICON_SCREENSHOT, ICON_FRAME_EXPORT } from '../lib/icons'
 
 const _sProgressPercent = atom(0)
@@ -62,7 +63,7 @@ function ScreenshotButton({ videoEl, getItemId }: Pick<OsdButtonsProps, 'videoEl
 
   const handleClick = () => {
     const checkbox = wrapperRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]')
-    const title = document.title.replace(/\s*[-|]\s*Jellyfin\s*$/i, '').trim() || undefined
+    const title = cleanItemTitle() || undefined
     takeScreenshot(videoEl, checkbox?.checked ?? false, title, getItemId())
   }
 

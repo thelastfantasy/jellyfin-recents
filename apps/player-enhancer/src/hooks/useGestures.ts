@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { showRipple, showValueOsd, showSeekOsd, hideSeekOsd } from '../components/OsdOverlay'
 import { cancelPendingLongPress, isLongPressActive } from './useLongPress'
 import { showTrickplayThumb, hideTrickplayThumb, prefetchFrame } from '../services/trickplay'
+import { clamp } from '../lib/utils'
 
 // Suppress Jellyfin's dblclick handler (fullscreen toggle) on touch devices — runs once on import.
 if (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) {
@@ -17,10 +18,6 @@ let _suspended   = false
 
 export function setSeekSeconds(s: number): void  { _seekSeconds = s }
 export function setGesturesSuspended(v: boolean): void { _suspended = v }
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v))
-}
 
 type Zone = 'left' | 'center' | 'right'
 type GestureMode = 'idle' | 'pending' | 'seek' | 'swipe'

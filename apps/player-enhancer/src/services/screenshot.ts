@@ -1,19 +1,10 @@
-import { t } from '../lib/i18n';
-import { showToast } from '../components/Toast';
-
-function getApiBase(): string {
-  const ac = window.ApiClient;
-  return ac?.serverAddress?.() ?? ac?._serverAddress ?? '';
-}
-
-function getToken(): string {
-  const ac = window.ApiClient;
-  return (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? '';
-}
+import { t } from '../lib/i18n'
+import { showToast } from '../components/Toast'
+import { getApiBaseUrl, getAccessToken } from '../lib/utils'
 
 export async function fetchItemName(itemId: string): Promise<string | null> {
   try {
-    const url = `${getApiBase()}/Items/${encodeURIComponent(itemId)}?api_key=${encodeURIComponent(getToken())}`;
+    const url = `${getApiBaseUrl()}/Items/${encodeURIComponent(itemId)}?api_key=${encodeURIComponent(getAccessToken())}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) return null;
     const data = await res.json() as { Name?: unknown };
@@ -25,7 +16,7 @@ export async function fetchItemName(itemId: string): Promise<string | null> {
 
 async function fetchFrameStartMs(itemId: string, posMs: number): Promise<number | null> {
   try {
-    const url = `${getApiBase()}/JellyfinSuite/SeekPreview/${encodeURIComponent(itemId)}/frame-info?positionMs=${posMs}&api_key=${encodeURIComponent(getToken())}`;
+    const url = `${getApiBaseUrl()}/JellyfinSuite/SeekPreview/${encodeURIComponent(itemId)}/frame-info?positionMs=${posMs}&api_key=${encodeURIComponent(getAccessToken())}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const data = await res.json() as { frameStartMs?: number };
