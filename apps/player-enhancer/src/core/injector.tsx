@@ -1,148 +1,58 @@
-import { useCallback, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createPortal } from 'react-dom'
-import { atom, getDefaultStore, useAtomValue } from 'jotai'
-import { useGestures, setSeekSeconds } from '../hooks/useGestures'
-import { useLongPress } from '../hooks/useLongPress'
-import { useTrickplay } from '../hooks/useTrickplay'
-import { useFrameInfoPreload } from '../hooks/useFrameInfoPreload'
+import { atom, getDefaultStore } from 'jotai'
+import { setSeekSeconds } from '../hooks/useGestures'
 import { setTrickplayEnabled } from '../services/trickplay'
-import { OsdOverlay } from '../components/OsdOverlay'
-import { Toast } from '../components/Toast'
-import { OsdButtons } from '../components/OsdButtons'
-import { TrickplayThumb } from '../components/TrickplayThumb'
-import { openFrameExportModal } from './state'
-import { FrameExportModalApp } from '../components/FrameExportModal'
+import { fetchEnhancerConfig } from '../api/playerEnhancerApi'
+import { AppRoot } from './App'
+import { setVideoEl, setSpeedRate, cacheItemIdFromUrl, getCurrentVideoEl } from './video-tracker'
 
 const ROOT_ID = 'jfs-enhancer-root'
 const jstore = getDefaultStore()
 
-let _currentVideoEl: HTMLVideoElement | null = null
-let _cachedItemId = ''
-let _pendingItemId = ''
-let _speedRate = 2.0
-
 const _sVideoEl = atom<HTMLVideoElement | null>(null)
-export const sVideoElAtom = _sVideoEl
-const _sTrickplayEnabled = atom(true)
 const _sOsdTarget = atom<HTMLElement | null>(null)
+const _sTrickplayEnabled = atom(true)
+
+export const sVideoElAtom = _sVideoEl
+export const sOsdTargetAtom = _sOsdTarget
+export const sTrickplayEnabledAtom = _sTrickplayEnabled
 
 function $val<T>(a: ReturnType<typeof atom<T>>) {
-  return {
-    get value(): T { return jstore.get(a) },
-    set value(v: T) { jstore.set(a, v) },
-  }
+  return { get value(): T { return jstore.get(a) }, set value(v: T) { jstore.set(a, v) } }
 }
 const sVideoEl = $val(_sVideoEl)
 const sTrickplayEnabled = $val(_sTrickplayEnabled)
 
-// ── PlayerRoot ────────────────────────────────────────────────────────────────
-
-function PlayerRoot() {
-  const videoEl = useAtomValue(_sVideoEl)
-  const trickEnabled = useAtomValue(_sTrickplayEnabled)
-  const getRate = useCallback(() => _speedRate, [])
-  useGestures(videoEl, getItemId)
-  useLongPress(videoEl, getRate)
-  useTrickplay(videoEl, getItemId, trickEnabled)
-  useFrameInfoPreload(videoEl, getItemId)
-  return null
-}
-
-function AppRoot() {
-  const osdTarget = useAtomValue(_sOsdTarget)
-  const videoEl = useAtomValue(_sVideoEl)
-  const handleOpenFrameExport = useMemo(() => () => {
-    const id = getItemId()
-    if (id && _currentVideoEl) openFrameExportModal(_currentVideoEl, id)
-  }, [])
-
-  return (
-    <>
-      <OsdOverlay />
-      <Toast />
-      <TrickplayThumb />
-      <FrameExportModalApp />
-      {osdTarget && videoEl && createPortal(
-        <div style={{ display: 'inline-flex', alignItems: 'center' }}>
-          <OsdButtons
-            videoEl={videoEl}
-            getItemId={getItemId}
-            onOpenFrameExport={handleOpenFrameExport}
-          />
-        </div>,
-        osdTarget,
-      )}
-      <PlayerRoot />
-    </>
-  )
-}
-
-// ── Item ID resolution ───────────────────────────────────────────────────────
-
-function extractItemIdFromSearch(search: string): string {
-  return new URLSearchParams(search).get('id') ?? ''
-}
-function extractItemIdFromUrl(url: string): string {
-  const qIndex = url.indexOf('?')
-  if (qIndex < 0) return ''
-  return extractItemIdFromSearch(url.slice(qIndex + 1))
-}
-function extractItemIdFromVideoSrc(src: string): string {
-  const m = src.match(/\/Videos\/([0-9a-f-]{32,36})\//i)
-  return m?.[1] ?? ''
-}
-function getItemId(): string {
-  const videoId = _currentVideoEl
-    ? extractItemIdFromVideoSrc(_currentVideoEl.currentSrc || _currentVideoEl.src) : ''
-  if (_pendingItemId) {
-    if (videoId === _pendingItemId) { _pendingItemId = '' } else { return _pendingItemId }
-  }
-  return videoId || extractItemIdFromUrl(window.location.href) || extractItemIdFromUrl(window.location.hash) || _cachedItemId
-}
-
-// ── OSD portal anchor management ──────────────────────────────────────────────
+// ── OSD portal ────────────────────────────────────────────────────────────────
 
 function updateOsdTarget(): void {
   const osdButtons = document.querySelector<HTMLElement>('.osdControls .buttons.focuscontainer-x')
   const dirLtr = osdButtons?.querySelector<HTMLElement>('div[dir="ltr"]')
-  if (dirLtr) {
-    const existing = document.getElementById('jfs-osd-portal-anchor')
-    if (!existing) {
-      const anchor = document.createElement('div')
-      anchor.id = 'jfs-osd-portal-anchor'
-      anchor.style.display = 'inline-flex'
-      dirLtr.after(anchor)
-    }
-    const anchor = document.getElementById('jfs-osd-portal-anchor')
-    if (anchor && jstore.get(_sOsdTarget) !== anchor) {
-      jstore.set(_sOsdTarget, anchor as HTMLElement)
-    }
+  if (!dirLtr) return
+  const existing = document.getElementById('jfs-osd-portal-anchor')
+  if (!existing) {
+    const anchor = document.createElement('div')
+    anchor.id = 'jfs-osd-portal-anchor'
+    anchor.style.display = 'inline-flex'
+    dirLtr.after(anchor)
+  }
+  const anchor = document.getElementById('jfs-osd-portal-anchor')
+  if (anchor && jstore.get(_sOsdTarget) !== anchor) {
+    jstore.set(_sOsdTarget, anchor as HTMLElement)
   }
 }
 
-// ── Config loading ───────────────────────────────────────────────────────────
+// ── Config ────────────────────────────────────────────────────────────────────
 
-async function loadGestureConfig(): Promise<void> {
-  let ac = window.ApiClient
-  let token: string = (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
-  for (let i = 0; i < 10 && !token; i++) {
-    await new Promise<void>(r => setTimeout(r, 500))
-    ac = window.ApiClient
-    token = (typeof ac?.accessToken === 'function' ? ac.accessToken() : ac?._accessToken) ?? ''
-  }
-  if (!token) return
-  try {
-    const res = await fetch(`/JellyfinSuite/PlayerEnhancer/Config?api_key=${encodeURIComponent(token)}`)
-    if (!res.ok) return
-    const cfg = await res.json() as { trickplayEnabled?: boolean; seekSeconds?: number; speedRate?: number }
-    if (typeof cfg.trickplayEnabled === 'boolean') { sTrickplayEnabled.value = cfg.trickplayEnabled; setTrickplayEnabled(cfg.trickplayEnabled) }
-    if (typeof cfg.seekSeconds === 'number' && cfg.seekSeconds > 0) setSeekSeconds(cfg.seekSeconds)
-    if (typeof cfg.speedRate === 'number' && cfg.speedRate >= 1.25) _speedRate = cfg.speedRate
-  } catch { /* defaults */ }
+async function loadConfig(): Promise<void> {
+  const cfg = await fetchEnhancerConfig()
+  if (!cfg) return
+  if (typeof cfg.trickplayEnabled === 'boolean') { sTrickplayEnabled.value = cfg.trickplayEnabled; setTrickplayEnabled(cfg.trickplayEnabled) }
+  if (typeof cfg.seekSeconds === 'number' && cfg.seekSeconds > 0) setSeekSeconds(cfg.seekSeconds)
+  if (typeof cfg.speedRate === 'number' && cfg.speedRate >= 1.25) setSpeedRate(cfg.speedRate)
 }
 
-// ── Public init ──────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 
 let _initDone = false
 
@@ -154,7 +64,7 @@ export function initInjector(): void {
   const appRootEl = document.createElement('div')
   document.body.appendChild(appRootEl)
   createRoot(appRootEl).render(<AppRoot />)
-  loadGestureConfig()
+  loadConfig()
 
   window.addEventListener('jfs:seekSecondsChanged', (e: Event) => {
     const { seconds } = (e as CustomEvent<{ seconds: number }>).detail
@@ -162,7 +72,7 @@ export function initInjector(): void {
   })
   window.addEventListener('jfs:speedRateChanged', (e: Event) => {
     const { rate } = (e as CustomEvent<{ rate: number }>).detail
-    if (typeof rate === 'number' && rate >= 1.25) _speedRate = rate
+    if (typeof rate === 'number' && rate >= 1.25) setSpeedRate(rate)
   })
   window.addEventListener('jfs:trickplayEnabledChanged', (e: Event) => {
     const { enabled } = (e as CustomEvent<{ enabled: boolean }>).detail
@@ -172,8 +82,7 @@ export function initInjector(): void {
 
   const _origPushState = history.pushState.bind(history)
   history.pushState = function (data: unknown, unused: string, url?: string | URL | null) {
-    const id = extractItemIdFromUrl(window.location.href)
-    if (id) _cachedItemId = id
+    cacheItemIdFromUrl(window.location.href)
     return _origPushState(data, unused, url)
   }
 
@@ -194,10 +103,12 @@ function tryInject(): void {
   const videoEl = container.querySelector<HTMLVideoElement>('video.htmlvideoplayer')
   if (!videoEl) return
 
-  if (videoEl !== _currentVideoEl) {
-    if (_currentVideoEl) _currentVideoEl.style.filter = ''
-    _currentVideoEl = videoEl
-    _pendingItemId = extractItemIdFromUrl(window.location.href) || extractItemIdFromUrl(window.location.hash) || ''
+  const prev = getCurrentVideoEl()
+  if (videoEl !== prev) {
+    if (prev) prev.style.filter = ''
+    const href = window.location.href
+    const pending = href.includes('?') ? new URLSearchParams(href.slice(href.indexOf('?'))).get('id') ?? '' : ''
+    setVideoEl(videoEl, pending)
     sVideoEl.value = videoEl
   }
 
