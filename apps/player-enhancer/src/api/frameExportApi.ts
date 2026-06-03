@@ -36,26 +36,6 @@ export function buildResultUrl(_itemId: string, resultUrl: string): string {
   return `${getApiBaseUrl()}${resultUrl}?api_key=${encodeURIComponent(getAccessToken())}`
 }
 
-// ── Legacy imperative ─────────────────────────────────────────────────────────
-
-export async function generateExport(body: unknown): Promise<string> {
-  const res = await fetch(suite.frameExport.generate(), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json() as { taskId?: string }
-  if (!data.taskId) throw new Error('no taskId')
-  return data.taskId
-}
-
-export async function cancelExport(taskId: string): Promise<void> {
-  await fetch(suite.frameExport.cancel(taskId), { method: 'POST' }).catch(() => {})
-}
-
-export async function deleteResult(taskId: string): Promise<void> {
-  await fetch(suite.frameExport.result(taskId), { method: 'DELETE' }).catch(() => {})
-}
-
 // ── Queries / Mutations ──────────────────────────────────────────────────────
 
 export const generateExportMutation = () => ({
