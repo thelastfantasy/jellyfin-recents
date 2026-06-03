@@ -1,7 +1,8 @@
 import { t } from '../lib/i18n'
 import { showToast } from '../components/Toast'
 import { fetchItemName } from '../api/jellyfinApi'
-import { fetchFrameStartMs } from '../api/seekPreviewApi'
+import { frameStartMsQuery } from '../api/seekPreviewApi'
+import { queryClient } from '../core/queryClient'
 export { fetchItemName }
 
 function sanitize(name: string): string {
@@ -103,7 +104,7 @@ export async function takeScreenshot(
   // Concurrently with canvas capture; falls back to passed itemTitle.
   const itemNamePromise = itemId ? fetchItemName(itemId) : Promise.resolve(null);
   // Start frame-info fetch concurrently with canvas capture; 5 s timeout, silently falls back.
-  const frameStartMsPromise = itemId ? fetchFrameStartMs(itemId, posMs) : Promise.resolve(null);
+  const frameStartMsPromise = itemId ? queryClient.fetchQuery(frameStartMsQuery(itemId, posMs)) : Promise.resolve(null);
 
   // DOM-attached canvas works around Firefox Android hardware-decode black-frame bug
   // (OffscreenCanvas cannot read hardware-decoded frames on Firefox for Android)
