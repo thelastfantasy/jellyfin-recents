@@ -17,7 +17,7 @@ import {
 import { fetchVideoFps, openFrameInfoStream, openPrefetchStream,
   frameUrl, generateExport,
 } from '../api/frameExportApi'
-import { fetchItemName } from '../services/screenshot'
+import { fetchItemName } from '../api/jellyfinApi'
 import type { components } from '@jfs/api-types'
 import { t } from '../lib/i18n'
 import { GridPage }     from './GridPage'

@@ -1,4 +1,5 @@
 import { atom, getDefaultStore } from 'jotai'
+import { openSeekPreviewStream, warmSeekPreviewCache } from '../api/seekPreviewApi'
 import { suite } from '../api/routes'
 const jstore = getDefaultStore()
 function $val<T>(a: ReturnType<typeof atom<T>>) {
@@ -91,8 +92,7 @@ function openReadyStream(itemId: string, videoEl: HTMLVideoElement): void {
   }
 
   const posMs = Math.floor((videoEl.currentTime || 0) * 1000)
-  const url = suite.seekPreview.readyStream(itemId, posMs)
-  const es = new EventSource(url)
+  const es = openSeekPreviewStream(itemId, posMs)
   _readyStreamEs = es;
   _readyStreamItemId = itemId;
 
@@ -211,8 +211,7 @@ export function prefetchFrame(posMs: number, itemId: string): void {
   const last = _prefetchSent.get(key) ?? 0
   if (now - last < PREFETCH_DEDUP_MS) return
   _prefetchSent.set(key, now)
-  const url = suite.seekPreview.frame(itemId, aligned) + '&prefetch=true'
-  void fetch(url)
+  warmSeekPreviewCache(itemId, aligned)
 }
 
 export function hideTrickplayThumb(): void {
