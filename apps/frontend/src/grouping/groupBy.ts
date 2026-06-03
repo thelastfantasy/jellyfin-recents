@@ -1,6 +1,6 @@
-import type { GroupByMode, PlayRecord, TimeGroup } from '../types'
 import type { Locale, Translations } from '../i18n'
 import { getLabelByMode } from '../i18n'
+import type { GroupByMode, PlayRecord, TimeGroup } from '../types'
 
 function getGroupKey(date: Date, mode: GroupByMode): string {
   const y = date.getFullYear()

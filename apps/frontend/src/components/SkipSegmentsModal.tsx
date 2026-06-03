@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useEffect, useRef,useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MdAdd, MdRemove, MdLanguage } from 'react-icons/md'
+import { MdAdd, MdLanguage,MdRemove } from 'react-icons/md'
+
 import type { SkipSegment } from '../api/posterSheetApi'
 import { loadGlobalSkipSegments, saveGlobalSkipSegments } from '../api/posterSheetApi'
 import { useLocale } from '../i18n/context'

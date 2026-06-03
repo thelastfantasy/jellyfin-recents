@@ -1,5 +1,5 @@
-import type { ViewSettings } from '../types'
 import { SETTINGS_KEY, SETTINGS_KEY_LEGACY } from '../constants'
+import type { ViewSettings } from '../types'
 
 const DEFAULT_SETTINGS: ViewSettings = {
   groupBy: 'week',

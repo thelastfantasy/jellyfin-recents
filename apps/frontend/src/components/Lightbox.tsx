@@ -1,6 +1,7 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MdClose, MdDownload, MdDelete, MdZoomIn, MdZoomOut, MdFitScreen, MdChevronLeft, MdChevronRight } from 'react-icons/md'
+import { MdChevronLeft, MdChevronRight,MdClose, MdDelete, MdDownload, MdFitScreen, MdZoomIn, MdZoomOut } from 'react-icons/md'
+
 import { useLocale } from '../i18n/context'
 
 interface Props {

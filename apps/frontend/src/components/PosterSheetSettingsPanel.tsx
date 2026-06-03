@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef,useState } from 'react'
 import { MdAdd, MdRemove } from 'react-icons/md'
-import { StartJobRequest, OverlaySettingsDto, fetchPreview, SkipSegment, loadGlobalSkipSegments, saveGlobalSkipSegments, listUserFonts, uploadFont, deleteUserFont, UserFontInfo } from '../api/posterSheetApi'
-import { isGridValid, maxFrames as calcMaxFrames } from '../utils/gridValidation'
+
+import type { OverlaySettingsDto, SkipSegment, StartJobRequest, UserFontInfo } from '../api/posterSheetApi';
+import { deleteUserFont, fetchPreview, listUserFonts, loadGlobalSkipSegments, saveGlobalSkipSegments, uploadFont } from '../api/posterSheetApi'
 import { useLocale } from '../i18n/context'
-import { Lightbox } from './Lightbox'
 import { downloadBlob } from '../utils/download'
+import { isGridValid, maxFrames as calcMaxFrames } from '../utils/gridValidation'
+import { Lightbox } from './Lightbox'
 import { TimeInput } from './SkipSegmentsModal'
 
 const THEMES = ['classic', 'dark', 'light', 'cinematic', 'minimal', 'transparent'] as const

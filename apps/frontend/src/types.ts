@@ -1,7 +1,11 @@
 export type GroupByMode = 'day' | 'week' | 'month' | 'quarter' | 'year'
+
 export type SortByMode = 'playedDate' | 'title' | 'favoritedAt' | 'releaseDate' | 'addedDate'
+
 export type SortOrder = 'asc' | 'desc'
+
 export type MediaFilter = 'video' | 'audio' | 'all'
+
 export type ViewMode = 'thumbnail' | 'poster' | 'list'
 
 export interface PlayRecord {

@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
-import { useLocale } from '../i18n/context'
+import { useEffect, useRef,useState } from 'react'
+
 import {
   getEnhancerStatus,
+  getGestureConfig,
   injectEnhancer,
   removeEnhancer,
-  getGestureConfig,
   setGestureConfig,
 } from '../api/playerEnhancerApi'
+import { useLocale } from '../i18n/context'
 
 interface Props {
   onClose: () => void

@@ -1,9 +1,10 @@
 import { Fragment } from 'react'
-import { useRef, useLayoutEffect } from 'react'
-import { RiArrowDropUpFill, RiArrowDropDownFill } from 'react-icons/ri'
-import type { TimeGroup, ViewMode, PlayRecord } from '../types'
-import { PlayRecordCard } from './PlayRecordCard'
+import { useLayoutEffect,useRef } from 'react'
+import { RiArrowDropDownFill,RiArrowDropUpFill } from 'react-icons/ri'
+
 import { useLocale } from '../i18n/context'
+import type { PlayRecord,TimeGroup, ViewMode } from '../types'
+import { PlayRecordCard } from './PlayRecordCard'
 
 interface Props {
   group: TimeGroup

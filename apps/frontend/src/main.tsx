@@ -1,8 +1,10 @@
-import { createRoot } from 'react-dom/client'
-import { App } from './components/App'
-import { detectLocale } from './i18n'
-import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
+
+import { createRoot } from 'react-dom/client'
+
+import { App } from './components/App'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { detectLocale } from './i18n'
 
 /** Update page title attribute and sidebar link text to match detected locale */
 function applyLocaleToPage(title: string): void {

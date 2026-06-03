@@ -1,5 +1,6 @@
 import { createContext } from 'react'
 import { useContext } from 'react'
+
 import type { Locale, Translations } from './index'
 import { getTranslations } from './index'
 

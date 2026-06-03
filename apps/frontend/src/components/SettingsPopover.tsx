@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react'
+import React, { useRef,useState } from 'react'
 import { MdSettings } from 'react-icons/md'
-import type { GroupByMode } from '../types'
+
 import { useLocale } from '../i18n/context'
+import type { GroupByMode } from '../types'
 import { Popover } from './Popover'
 
 interface Props {

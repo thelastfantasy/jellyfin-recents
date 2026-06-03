@@ -1,11 +1,13 @@
-import type { GroupByMode } from '../types'
-import type { Translations } from './types'
-import { zh } from './locales/zh'
-import { en } from './locales/en'
-import { ja } from './locales/ja'
 import { detectLang } from '@jfs/i18n'
 
+import type { GroupByMode } from '../types'
+import { en } from './locales/en'
+import { ja } from './locales/ja'
+import { zh } from './locales/zh'
+import type { Translations } from './types'
+
 export type { Translations } from './types'
+
 export type Locale = 'zh' | 'en' | 'ja'
 
 const LOCALES: Record<Locale, Translations> = { zh, en, ja }

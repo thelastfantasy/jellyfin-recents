@@ -1,4 +1,5 @@
-import { Api, Jellyfin } from '@jellyfin/sdk'
+import type { Api} from '@jellyfin/sdk';
+import { Jellyfin } from '@jellyfin/sdk'
 
 declare global {
   interface Window {

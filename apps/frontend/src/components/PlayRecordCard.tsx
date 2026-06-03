@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { MdPlayArrow, MdReplay, MdFavorite, MdFavoriteBorder, MdGridView, MdKeyboardArrowDown, MdContentCut } from 'react-icons/md'
-import type { PlayRecord, ViewMode } from '../types'
+import React, { useEffect, useRef,useState } from 'react'
+import { MdContentCut,MdFavorite, MdFavoriteBorder, MdGridView, MdKeyboardArrowDown, MdPlayArrow, MdReplay } from 'react-icons/md'
+
 import { getCurrentUserId } from '../api/jellyfinClient'
+import type { SkipSegment } from '../api/posterSheetApi'
+import { loadGlobalSkipSegments, loadStartJobRequest, mergeSegments,startJob } from '../api/posterSheetApi'
 import { formatPlayedDate } from '../i18n'
 import { useLocale } from '../i18n/context'
+import { addJob, getJobs,updateJob } from '../state/posterJobStore'
+import type { PlayRecord, ViewMode } from '../types'
+import { flyToQueue } from '../utils/flyToQueue'
 import { FolderViewPopover } from './FolderViewPopover'
 import { Popover } from './Popover'
-import { startJob, loadStartJobRequest, loadGlobalSkipSegments, mergeSegments } from '../api/posterSheetApi'
-import type { SkipSegment } from '../api/posterSheetApi'
-import { addJob, updateJob, getJobs } from '../state/posterJobStore'
-import { flyToQueue } from '../utils/flyToQueue'
 import { SkipSegmentsModal } from './SkipSegmentsModal'
 
 interface Props {

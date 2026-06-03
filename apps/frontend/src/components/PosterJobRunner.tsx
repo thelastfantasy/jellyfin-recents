@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
-import { pollStatus, getImageUrl, JobStatusDto } from '../api/posterSheetApi'
+import { useEffect,useState } from 'react'
+
+import type { JobStatusDto} from '../api/posterSheetApi';
+import { getImageUrl,pollStatus } from '../api/posterSheetApi'
 import { updateJob } from '../state/posterJobStore'
 
 interface Props {

@@ -1,11 +1,12 @@
-import { MdArrowDownward, MdArrowUpward, MdGridView, MdViewModule, MdViewList, MdBuild } from 'react-icons/md'
-import type { GroupByMode, MediaFilter, SortByMode, ViewMode, ViewSettings } from '../types'
+import { MdArrowDownward, MdArrowUpward, MdBuild,MdGridView, MdViewList, MdViewModule } from 'react-icons/md'
+
 import { useLocale } from '../i18n/context'
-import { SettingsPopover } from './SettingsPopover'
 import { registerPosterViewClick } from '../state/posterSheetUnlock'
-import { PosterSheetSettingsPanel } from './PosterSheetSettingsPanel'
+import type { GroupByMode, MediaFilter, SortByMode, ViewMode, ViewSettings } from '../types'
 import { PlayerEnhancerPanel } from './PlayerEnhancerPanel'
 import { Popover } from './Popover'
+import { PosterSheetSettingsPanel } from './PosterSheetSettingsPanel'
+import { SettingsPopover } from './SettingsPopover'
 
 interface Props {
   settings: ViewSettings

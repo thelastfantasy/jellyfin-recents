@@ -1,14 +1,16 @@
-import { getItemsApi } from '@jellyfin/sdk/lib/utils/api/items-api'
+import type {
+  BaseItemDto} from '@jellyfin/sdk/lib/generated-client';
 import {
-  BaseItemDto,
   BaseItemKind,
   ItemFields,
   ItemFilter,
   ItemSortBy,
   SortOrder,
 } from '@jellyfin/sdk/lib/generated-client'
-import { getApi, getCurrentUserId } from './jellyfinClient'
+import { getItemsApi } from '@jellyfin/sdk/lib/utils/api/items-api'
+
 import type { MediaFilter, PlayRecord } from '../types'
+import { getApi, getCurrentUserId } from './jellyfinClient'
 
 const VIDEO_TYPES: BaseItemKind[] = [BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Video]
 const AUDIO_TYPES: BaseItemKind[] = [BaseItemKind.Audio, BaseItemKind.MusicAlbum, BaseItemKind.MusicArtist]

@@ -1,12 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback,useEffect, useState } from 'react'
 import { MdGridView } from 'react-icons/md'
-import { Popover } from './Popover'
-import { getJobs, addJob, updateJob, removeJob, JobEntry } from '../state/posterJobStore'
+
 import { cancelJob, getImageUrl, listJobs } from '../api/posterSheetApi'
 import { useLocale } from '../i18n/context'
-import { PosterJobRunner } from './PosterJobRunner'
-import { Lightbox } from './Lightbox'
+import type { JobEntry} from '../state/posterJobStore';
+import { addJob, getJobs,removeJob, updateJob } from '../state/posterJobStore'
 import { downloadBlob } from '../utils/download'
+import { Lightbox } from './Lightbox'
+import { Popover } from './Popover'
+import { PosterJobRunner } from './PosterJobRunner'
 
 export function PosterQueueWidget() {
   const { t } = useLocale()
