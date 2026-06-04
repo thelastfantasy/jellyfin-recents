@@ -230,6 +230,10 @@ function FrameExportModalInner({
   const page = useAtomValue(pageAtom)
   const playbackMs = Math.round(videoEl.currentTime * 1000)
 
+  // ── 2. State ────────────────────────────────────────────────────────────────
+
+  const [firstThumbnailReady, setFirstThumbnailReady] = useState(false)
+
   // ── 3. SSE Streams ────────────────────────────────────────────────────────────
 
   const fpsRef = useRef({ num: 24, den: 1 });
@@ -282,6 +286,7 @@ function FrameExportModalInner({
           : f,
       ),
     );
+    setFirstThumbnailReady(true);
   }, []);
 
   const triggerPrefetch = useCallback(() => {
@@ -324,6 +329,7 @@ function FrameExportModalInner({
     if (itemId !== _itemId) {
       setFrameIndex(null);
       setFpsFrac({ num: 24, den: 1 });
+      setTimeout(() => setFirstThumbnailReady(false), 0);
     }
     setItemId(itemId);
     videoEl.pause();
@@ -356,6 +362,7 @@ function FrameExportModalInner({
       sPrefetchDone.value = 0;
       sPage.value = "grid";
       sLightboxIdx.value = null;
+      setTimeout(() => setFirstThumbnailReady(true), 0);
       return;
     }
     if (_frameIndex && _frameIndex.length > 0 && !_frames.length) {
@@ -516,7 +523,7 @@ function FrameExportModalInner({
               onExpandBack={expandBack}
               onExpandForward={expandForward}
               onGenerate={submitGenerate}
-              loading={!frameInfoReady}
+              loading={!frameInfoReady && !firstThumbnailReady}
             />
           )}
           {page === "progress" && (
