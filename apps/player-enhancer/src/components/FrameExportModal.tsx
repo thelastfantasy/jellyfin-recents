@@ -98,6 +98,31 @@ function findRangeFromCenter(
   return [rangeStart, rangeEnd];
 }
 
+function makeEntry(f: FrameInfoEntry): FrameEntry {
+  return {
+    posMs: f.ms,
+    fiIdx: f.frameIndex,
+    selected: true,
+    jpegUrl: "",
+    isJunk: false,
+    junkReason: null,
+  };
+}
+
+function applyFrameRange(
+  frames: FrameInfoEntry[],
+  center: number,
+  start: number,
+  end: number,
+) {
+  setFiMinIdx(start);
+  setFiMaxIdx(end);
+  const slice = frames.slice(start, end + 1);
+  setMinPosMs(slice[0]?.ms ?? center);
+  setMaxPosMs(slice[slice.length - 1]?.ms ?? center);
+  setFrames(slice.map(makeEntry));
+}
+
 // ── Generic SSE hook ────────────────────────────────────────────────────────
 
 /**
@@ -144,14 +169,14 @@ function useSse<T>(
           for (const item of data) {
             const result = parse(item);
             if (result === "done") {
-              if (acc.length > 0) finish();
+              finish();
               break;
             } else if (result !== null) acc.push(result);
           }
         } else {
           const result = parse(data);
           if (result === "done") {
-            if (acc.length > 0) finish();
+            finish();
           } else if (result !== null) {
             acc.push(result);
           }
@@ -314,18 +339,54 @@ function FrameExportModalInner({
 
   const generateMutation = useMutation(generateExportMutation());
 
-  // ── 5. Derived ──────────────────────────────────────────────────────────────
+  // ── 5. Helpers ──────────────────────────────────────────────────────────────
+
+  function framesPerSecond(): number {
+    return Math.round(_fpsFrac.num / _fpsFrac.den);
+  }
+
+  function triggerPrefetch() {
+    setPrefetchTrigger(String(Date.now()));
+  }
+
+  function markFrameReady(idx: number) {
+    setFrames(
+      _frames.map((f, i) =>
+        i === idx
+          ? {
+              ...f,
+              jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320),
+              loadError: false,
+            }
+          : f,
+      ),
+    );
+  }
+
+  function saveState() {
+    setSavedState({
+      itemId: _itemId,
+      frames: _frames.map((f) => ({ ...f })),
+      exportType: sExportType.value,
+      minPosMs: _minPosMs,
+      maxPosMs: _maxPosMs,
+      fpsFrac: { ..._fpsFrac },
+      lastClickedIdx: -1,
+      fiMinIdx: _fiMinIdx,
+      fiMaxIdx: _fiMaxIdx,
+    });
+  }
 
   // ── 6. Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     setVideoEl(videoEl);
-    setItemId(itemId);
     setActiveTaskId("");
     if (itemId !== _itemId) {
       setFrameIndex(null);
       setFpsFrac({ num: 24, den: 1 });
     }
+    setItemId(itemId);
     videoEl.pause();
     setBodyModalOpen(true);
     setGesturesSuspended(true);
@@ -336,18 +397,6 @@ function FrameExportModalInner({
   }, [fetchedName]);
 
   useEffect(() => {
-    if (frameInfoReady && _frameIndex && _frameIndex.length > 0 && !_frames.length) {
-      const centerIndex = findCenterFrameIndex(_frameIndex, playbackMs);
-      const [rangeStart, rangeEnd] = findRangeFromCenter(
-        _frameIndex,
-        centerIndex,
-      );
-      applyFrameRange(_frameIndex, playbackMs, rangeStart, rangeEnd);
-      triggerPrefetch();
-    }
-  }, [frameInfoSse.done]);
-
-  useEffect(() => {
     if (!prefetchSse.done) return;
     prefetchSse.items.forEach((fi) => {
       const idx = _frames.findIndex((f) => f.fiIdx === fi);
@@ -356,11 +405,12 @@ function FrameExportModalInner({
   }, [prefetchSse.done]);
 
   useEffect(() => {
+    const ms = Math.round(videoEl.currentTime * 1000);
     if (
       _savedState &&
       _savedState.itemId === itemId &&
-      playbackMs >= _savedState.minPosMs &&
-      playbackMs <= _savedState.maxPosMs
+      ms >= _savedState.minPosMs &&
+      ms <= _savedState.maxPosMs
     ) {
       setFrames(_savedState.frames.map((f) => ({ ...f })));
       sExportType.value = _savedState.exportType;
@@ -377,20 +427,17 @@ function FrameExportModalInner({
       return;
     }
     if (_frameIndex && _frameIndex.length > 0 && !_frames.length) {
-      const centerIndex = findCenterFrameIndex(_frameIndex, playbackMs);
-      const [rangeStart, rangeEnd] = findRangeFromCenter(
-        _frameIndex,
-        centerIndex,
-      );
+      const centerIndex = findCenterFrameIndex(_frameIndex, ms);
+      const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, centerIndex);
       sPage.value = "grid";
       sLightboxIdx.value = null;
-      applyFrameRange(_frameIndex, playbackMs, rangeStart, rangeEnd);
-      triggerPrefetch();
+      applyFrameRange(_frameIndex, ms, rangeStart, rangeEnd);
+      setTimeout(triggerPrefetch, 0);
       return;
     }
     sPage.value = "grid";
     sLightboxIdx.value = null;
-  }, [videoEl, itemId]);
+  }, [videoEl, itemId, frameInfoSse.done]);
 
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
@@ -497,69 +544,6 @@ function FrameExportModalInner({
     if (sLightboxIdx.value !== null) sLightboxIdx.value = null;
     else handleClose();
   }, []);
-
-  // ── 8. Helpers ──────────────────────────────────────────────────────────────
-
-  function framesPerSecond(): number {
-    return Math.round(_fpsFrac.num / _fpsFrac.den);
-  }
-
-  function triggerPrefetch() {
-    setPrefetchTrigger(String(Date.now()));
-  }
-
-  function makeEntry(f: FrameInfoEntry): FrameEntry {
-    return {
-      posMs: f.ms,
-      fiIdx: f.frameIndex,
-      selected: true,
-      jpegUrl: "",
-      isJunk: false,
-      junkReason: null,
-    };
-  }
-
-  function applyFrameRange(
-    frames: FrameInfoEntry[],
-    center: number,
-    start: number,
-    end: number,
-  ) {
-    setFiMinIdx(start);
-    setFiMaxIdx(end);
-    const slice = frames.slice(start, end + 1);
-    setMinPosMs(slice[0]?.ms ?? center);
-    setMaxPosMs(slice[slice.length - 1]?.ms ?? center);
-    setFrames(slice.map(makeEntry));
-  }
-
-  function markFrameReady(idx: number) {
-    setFrames(
-      _frames.map((f, i) =>
-        i === idx
-          ? {
-              ...f,
-              jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320),
-              loadError: false,
-            }
-          : f,
-      ),
-    );
-  }
-
-  function saveState() {
-    setSavedState({
-      itemId: _itemId,
-      frames: _frames.map((f) => ({ ...f })),
-      exportType: sExportType.value,
-      minPosMs: _minPosMs,
-      maxPosMs: _maxPosMs,
-      fpsFrac: { ..._fpsFrac },
-      lastClickedIdx: -1,
-      fiMinIdx: _fiMinIdx,
-      fiMaxIdx: _fiMaxIdx,
-    });
-  }
 
   // ── 9. Render ───────────────────────────────────────────────────────────────
 

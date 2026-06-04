@@ -15,7 +15,7 @@ at specs/010-monorepo-restructure/plan.md
 
 - 运行测试时**必须**用 `mise run test`，不得直接调用 cargo/vitest/dotnet 替代
 - 所有 make 目标均可通过 `mise run <task>` 调用；`.mise.toml` 中的任务可**自由添加**（特别是 make 目标的封装），无需征得用户同意
-- 绝不在用户未运行测试(C#),或check（rust）或lint（TypeScript）的情况下执行 `mise run update`
+- 绝不在用户未运行测试(C#),或check（rust）或eslint（TypeScript）的情况下执行 `mise run update`
 - 绝不在用户未确认的情况下直接部署到 jellyfin-dev 容器
 - `mise run update` 会重启容器，是破坏性操作
 - 各命令详情见 agents.md 中的测试命令章节
