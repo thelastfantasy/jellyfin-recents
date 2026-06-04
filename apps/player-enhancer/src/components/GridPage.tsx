@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai'
 import type { ChangeEvent } from 'react'
 
 import {
-  _fiMaxIdx, _fiMinIdx, _fpsFrac, _frameIndex, _frames, _maxPosMs,
+  _fi, _frames, _maxPosMs,
   _minPosMs, _videoEl, exportTypeAtom, frameInterval,
   framesAtom, modalPhaseAtom, paramsOpenAtom, prefetchDoneAtom,
   prefetchTotalAtom, setFrames, settingsAtom, sExportType, sParamsOpen,
@@ -37,10 +37,10 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
   const dur    = _videoEl?.duration ?? 0
   const maxMs  = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
   const playMs = (_videoEl?.currentTime ?? 0) * 1000
-  const atStart = playMs <= 1000 || (_frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0)
+  const atStart = playMs <= 1000 || (_fi.index ? _fi.minIdx <= 0 : _minPosMs <= 0)
   const atEnd   = (maxMs > 0 && maxMs - playMs < 1000)
-    || (_frameIndex
-      ? _fiMaxIdx >= (_frameIndex.length - 1)
+    || (_fi.index
+      ? _fi.maxIdx >= (_fi.index.length - 1)
       : (maxMs > 0 && _maxPosMs >= maxMs - frameInterval()))
   const countLabel = prefTotal > 0 && prefDone < prefTotal
     ? `${t('frameExport.loading')} ${prefDone}/${prefTotal}`
@@ -74,7 +74,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
 
   return (
     <div className="jfs-fe-osd">
-      {loading ? <FrameGridSkeleton count={Math.round(2 * _fpsFrac.num / _fpsFrac.den)} /> : <FrameGrid />}
+      {loading ? <FrameGridSkeleton count={Math.round(2 * _fi.fpsFrac.num / _fi.fpsFrac.den)} /> : <FrameGrid />}
       {paramsOpen && <ParamsPanel />}
       <div className="jfs-fe-row sep-t" id="jfs-fe-tbar">
         <span className="jfs-fe-title">{t('frameExport.title')}</span>

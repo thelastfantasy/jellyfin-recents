@@ -8,10 +8,7 @@ import { itemNameQuery } from "../api/jellyfinApi";
 import type { FrameEntry, FrameInfoEntry } from "../core/state";
 import {
   _feOpen,
-  _fiMaxIdx,
-  _fiMinIdx,
-  _fpsFrac,
-  _frameIndex,
+  _fi,
   _frames,
   _itemId,
   _maxPosMs,
@@ -172,7 +169,7 @@ function FrameExportModalInner({
   // ── 5. Helpers ──────────────────────────────────────────────────────────────
 
   function framesPerSecond(): number {
-    return Math.round(_fpsFrac.num / _fpsFrac.den);
+    return Math.round(_fi.fpsFrac.num / _fi.fpsFrac.den);
   }
 
   const markFrameReady = useCallback((idx: number) => {
@@ -212,10 +209,10 @@ function FrameExportModalInner({
       exportType: sExportType.value,
       minPosMs: _minPosMs,
       maxPosMs: _maxPosMs,
-      fpsFrac: { ..._fpsFrac },
+      fpsFrac: { ..._fi.fpsFrac },
       lastClickedIdx: -1,
-      fiMinIdx: _fiMinIdx,
-      fiMaxIdx: _fiMaxIdx,
+      fiMinIdx: _fi.minIdx,
+      fiMaxIdx: _fi.maxIdx,
     });
   }
 
@@ -274,13 +271,13 @@ function FrameExportModalInner({
     sPage.value = "grid";
     sLightboxIdx.value = null;
 
-    if (_frameIndex !== null && _frameIndex.length > 0) {
+    if (_fi.index !== null && _fi.index.length > 0) {
       // Repeat visit: show grid immediately, open SSE only for priority adjustment
-      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: _frameIndex.length })
+      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: _fi.index.length })
       if (!_frames.length) {
-        const center = findCenterFrameIndex(_frameIndex, ms);
-        const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, center);
-        applyFrameRange(_frameIndex, ms, rangeStart, rangeEnd);
+        const center = findCenterFrameIndex(_fi.index, ms);
+        const [rangeStart, rangeEnd] = findRangeFromCenter(_fi.index, center);
+        applyFrameRange(_fi.index, ms, rangeStart, rangeEnd);
         triggerPrefetch();
       }
       const es = openFrameInfoStream(itemId, ms, () => es.close(), () => {}, () => {});
@@ -330,13 +327,13 @@ function FrameExportModalInner({
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
   const expandBack = useCallback(() => {
-    if (!_frameIndex) return;
-    const step = framesPerSecond(), start = _fiMinIdx - step;
+    if (!_fi.index) return;
+    const step = framesPerSecond(), start = _fi.minIdx - step;
     if (start < 0) return;
     const oldMinPosMs = _minPosMs;
-    setFrames([..._frameIndex.slice(start, _fiMinIdx).map(makeEntry), ..._frames]);
+    setFrames([..._fi.index.slice(start, _fi.minIdx).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
-    setMinPosMs(_frameIndex[start].ms);
+    setMinPosMs(_fi.index[start].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
@@ -347,13 +344,13 @@ function FrameExportModalInner({
   }, [itemId, markFrameReady]);
 
   const expandForward = useCallback(() => {
-    if (!_frameIndex) return;
-    const step = framesPerSecond(), end = _fiMaxIdx + step;
-    if (end >= _frameIndex.length) return;
+    if (!_fi.index) return;
+    const step = framesPerSecond(), end = _fi.maxIdx + step;
+    if (end >= _fi.index.length) return;
     const oldMaxPosMs = _maxPosMs;
-    setFrames([..._frames, ..._frameIndex.slice(_fiMaxIdx + 1, end + 1).map(makeEntry)]);
+    setFrames([..._frames, ..._fi.index.slice(_fi.maxIdx + 1, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
-    setMaxPosMs(_frameIndex[end].ms);
+    setMaxPosMs(_fi.index[end].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import { openFrameInfoStream } from '../api/frameExportApi'
 import {
-  _frameIndex,
+  _fi,
   _itemId as _gItemId,
   setFpsFrac,
   setFrameIndex,
@@ -37,8 +37,8 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
       if (_gItemId !== preloadState.itemId) setFrameIndex(null)
     }
 
-    // 帧索引已对该 item 完整加载（_frameIndex !== null 即代表完整）→ 跳过请求
-    if (_frameIndex !== null && preloadState.itemId === id) {
+    // 帧索引已对该 item 完整加载（_fi.index !== null 即代表完整）→ 跳过请求
+    if (_fi.index !== null && preloadState.itemId === id) {
       startedRef.current = id
       return
     }

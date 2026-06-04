@@ -104,14 +104,10 @@ const _itemIdAtom            = atom('')
 const _activeTaskIdAtom      = atom('')
 const _minPosMsAtom          = atom(0)
 const _maxPosMsAtom          = atom(0)
-const _fpsFracAtom           = atom<FpsFrac>({ num: 24, den: 1 })
 const _lastClickedIdxAtom    = atom(-1)
 const _dragModeAtom          = atom(false)
 const _dragSelectValueAtom   = atom(false)
 const _suppressNextMousedownAtom = atom(false)
-const _frameIndexAtom        = atom<FrameInfoEntry[] | null>(null)
-const _fiMinIdxAtom          = atom(0)
-const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
 const _modalPhaseAtom        = atom<'skeleton' | 'loading'>('skeleton')
 const _modalMinimizedAtom     = atom(false)
@@ -149,8 +145,6 @@ export const minPosMsAtom     = _minPosMsAtom
 
 export const maxPosMsAtom     = _maxPosMsAtom
 
-export const fpsFracAtom      = _fpsFracAtom
-
 export const lastClickedIdxAtom = _lastClickedIdxAtom
 
 export const dragModeAtom     = _dragModeAtom
@@ -158,12 +152,6 @@ export const dragModeAtom     = _dragModeAtom
 export const dragSelectValueAtom = _dragSelectValueAtom
 
 export const suppressNextMousedownAtom = _suppressNextMousedownAtom
-
-export const frameIndexAtom   = _frameIndexAtom
-
-export const fiMinIdxAtom     = _fiMinIdxAtom
-
-export const fiMaxIdxAtom     = _fiMaxIdxAtom
 
 export const savedStateAtom   = _savedStateAtom
 
@@ -218,8 +206,6 @@ export const sMinPosMs         = ref(_minPosMsAtom)
 
 export const sMaxPosMs         = ref(_maxPosMsAtom)
 
-export const sFpsFrac          = ref(_fpsFracAtom)
-
 export const sLastClickedIdx   = ref(_lastClickedIdxAtom)
 
 export const sDragMode         = ref(_dragModeAtom)
@@ -227,12 +213,6 @@ export const sDragMode         = ref(_dragModeAtom)
 export const sDragSelectValue  = ref(_dragSelectValueAtom)
 
 export const sSuppressNextMousedown = ref(_suppressNextMousedownAtom)
-
-export const sFrameIndex       = ref(_frameIndexAtom)
-
-export const sFiMinIdx         = ref(_fiMinIdxAtom)
-
-export const sFiMaxIdx         = ref(_fiMaxIdxAtom)
 
 export const sSavedState       = ref(_savedStateAtom)
 
@@ -262,8 +242,6 @@ export let _minPosMs        = 1
 
 export let _maxPosMs        = 0
 
-export let _fpsFrac:        FpsFrac = { num: 24, den: 1 }
-
 export let _lastClickedIdx  = -1
 
 export let _dragMode        = false
@@ -278,8 +256,6 @@ export function setMinPosMs(v: number)                        { _minPosMs = v }
 
 export function setMaxPosMs(v: number)                        { _maxPosMs = v }
 
-export function setFpsFrac(v: FpsFrac)                        { _fpsFrac = v }
-
 export function setLastClickedIdx(v: number)                  { _lastClickedIdx = v }
 
 export function setDragMode(v: boolean)                       { _dragMode = v }
@@ -288,17 +264,22 @@ export function setDragSelectValue(v: boolean)                { _dragSelectValue
 
 export function setSuppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
 
-export let _frameIndex: FrameInfoEntry[] | null = null
+export interface FrameInfoState {
+  index:   FrameInfoEntry[] | null
+  minIdx:  number
+  maxIdx:  number
+  fpsFrac: FpsFrac
+}
 
-export let _fiMinIdx = 1
+export const _fi: FrameInfoState = { index: null, minIdx: 1, maxIdx: -1, fpsFrac: { num: 24, den: 1 } }
 
-export let _fiMaxIdx = -1
+export function setFrameIndex(v: FrameInfoEntry[] | null) { _fi.index   = v }
 
-export function setFrameIndex(v: FrameInfoEntry[] | null) { _frameIndex = v }
+export function setFiMinIdx(v: number)                    { _fi.minIdx  = v }
 
-export function setFiMinIdx(v: number)  { _fiMinIdx = v }
+export function setFiMaxIdx(v: number)                    { _fi.maxIdx  = v }
 
-export function setFiMaxIdx(v: number)  { _fiMaxIdx = v }
+export function setFpsFrac(v: FpsFrac)                    { _fi.fpsFrac = v }
 
 export let _savedState: SavedModalState | null = null
 
@@ -307,16 +288,16 @@ export function setSavedState(v: SavedModalState | null) { _savedState = v }
 // ── Derived helpers ──────────────────────────────────────────────────────────
 
 export function frameInterval(): number {
-  return _fpsFrac.den * 1000 / _fpsFrac.num
+  return _fi.fpsFrac.den * 1000 / _fi.fpsFrac.num
 }
 
 export function frameToMs(idx: number): number {
-  return Math.ceil(idx * _fpsFrac.den * 1000 / _fpsFrac.num)
+  return Math.ceil(idx * _fi.fpsFrac.den * 1000 / _fi.fpsFrac.num)
 }
 
 export function samplePositionsInRange(startMs: number, endMs: number): number[] {
-  const startIdx = Math.ceil(startMs * _fpsFrac.num / (_fpsFrac.den * 1000))
-  const endIdx   = Math.floor(endMs   * _fpsFrac.num / (_fpsFrac.den * 1000))
+  const startIdx = Math.ceil(startMs * _fi.fpsFrac.num / (_fi.fpsFrac.den * 1000))
+  const endIdx   = Math.floor(endMs   * _fi.fpsFrac.num / (_fi.fpsFrac.den * 1000))
   const positions: number[] = []
   for (let i = startIdx; i <= endIdx; i++) {
     positions.push(frameToMs(i))

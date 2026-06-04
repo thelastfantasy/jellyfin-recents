@@ -77,16 +77,81 @@ struct PrefetchJob {
 /// Cached frame index per video path: (pts_ms, is_keyframe)[], fps_num, fps_den
 type FrameIndexCache = Arc<(Vec<(i64, bool)>, i64, i64)>;
 
+// ── FrameIndexManager ─────────────────────────────────────────────────────────
+
+enum FrameInfoSubscription {
+    Cached(FrameIndexCache),
+    Existing(Arc<IndexProgress>),
+    New(Arc<IndexProgress>),
+}
+
+struct FrameIndexManager {
+    index:       Mutex<LruCache<PathBuf, FrameIndexCache>>,
+    in_progress: Mutex<HashMap<PathBuf, Arc<IndexProgress>>>,
+}
+
+impl FrameIndexManager {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            index:       Mutex::new(LruCache::new(NonZeroUsize::new(FRAME_INDEX_CAP).unwrap())),
+            in_progress: Mutex::new(HashMap::new()),
+        })
+    }
+
+    async fn get(&self, path: &Path) -> Option<FrameIndexCache> {
+        self.index.lock().await.get(path).cloned()
+    }
+
+    async fn put_if_absent(&self, path: PathBuf, idx: FrameIndexCache) {
+        let mut cache = self.index.lock().await;
+        if cache.peek(&path).is_none() {
+            cache.put(path, idx);
+        }
+    }
+
+    /// Returns the cached index, or builds it by demuxing the file and caches the result.
+    async fn get_or_build(&self, path: &Path) -> anyhow::Result<FrameIndexCache> {
+        if let Some(idx) = self.get(path).await {
+            return Ok(idx);
+        }
+        let p = path.to_path_buf();
+        let (frames, fps_num, fps_den) =
+            tokio::task::spawn_blocking(move || jfs_common::index_frames(&p)).await??;
+        let new_idx = Arc::new((frames, fps_num, fps_den));
+        self.put_if_absent(path.to_path_buf(), new_idx.clone()).await;
+        Ok(self.get(path).await.unwrap_or(new_idx))
+    }
+
+    /// Returns the cached index (Cached), or an IndexProgress to subscribe to
+    /// (Existing = already running Queue B, New = freshly created, caller must spawn Queue B).
+    async fn get_or_subscribe(&self, path: &Path) -> FrameInfoSubscription {
+        if let Some(idx) = self.get(path).await {
+            return FrameInfoSubscription::Cached(idx);
+        }
+        let mut map = self.in_progress.lock().await;
+        if let Some(p) = map.get(path) {
+            FrameInfoSubscription::Existing(p.clone())
+        } else {
+            let p = IndexProgress::new();
+            map.insert(path.to_path_buf(), p.clone());
+            FrameInfoSubscription::New(p)
+        }
+    }
+
+    async fn remove_progress(&self, path: &Path) {
+        self.in_progress.lock().await.remove(path);
+    }
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
 pub struct State {
     pub ram: Mutex<LruCache<RamKey, Vec<u8>>>,
     pub disk: Arc<DiskCache>,
     decode_sem: Arc<Semaphore>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
-    frame_index: Mutex<LruCache<PathBuf, FrameIndexCache>>,
-    /// Per-path Queue B deduplication: if an IndexProgress exists here, that path is
-    /// already being demuxed; new callers subscribe instead of spawning another Queue B.
-    index_in_progress: Mutex<HashMap<PathBuf, Arc<IndexProgress>>>,
+    pub fi: Arc<FrameIndexManager>,
 }
 
 impl State {
@@ -99,8 +164,7 @@ impl State {
             decode_sem: Arc::new(Semaphore::new(1)),
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
-            frame_index: Mutex::new(LruCache::new(NonZeroUsize::new(FRAME_INDEX_CAP).unwrap())),
-            index_in_progress: Mutex::new(HashMap::new()),
+            fi: FrameIndexManager::new(),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -119,31 +183,7 @@ fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
 /// Loads + demuxes the index on first use for the path.
 async fn resolve_frame_idx(state: &Arc<State>, path: &Path, frame_idx: i64) -> Option<i64> {
     if frame_idx < 0 { return None; }
-
-    // Fast path: already cached
-    {
-        let mut cache = state.frame_index.lock().await;
-        if let Some(idx) = cache.get(path) {
-            let fi = frame_idx as usize;
-            return if fi < idx.0.len() { Some(idx.0[fi].0) } else { None };
-        }
-    }
-
-    // Slow path: build index. Concurrent callers may race; the winner's insert wins.
-    let p = path.to_path_buf();
-    let (frames, fps_num, fps_den) =
-        tokio::task::spawn_blocking(move || jfs_common::index_frames(&p))
-            .await.ok()?.ok()?;
-    let new_idx = Arc::new((frames, fps_num, fps_den));
-
-    let idx = {
-        let mut cache = state.frame_index.lock().await;
-        if cache.peek(path).is_none() {
-            cache.put(path.to_path_buf(), new_idx.clone());
-        }
-        cache.get(path).unwrap().clone()
-    };
-
+    let idx = state.fi.get_or_build(path).await.ok()?;
     let fi = frame_idx as usize;
     if fi < idx.0.len() { Some(idx.0[fi].0) } else { None }
 }
@@ -402,22 +442,9 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     eprintln!("[frame-forge] ANIMATE progress sent, loading frame index...");
 
     // Load frame index for the first path (all frames share the same video)
-    let fi = if let Some((path, _)) = req.paths.first() {
-        let mut cache = state.frame_index.lock().await;
-        cache.get(path).cloned()
-    } else { None };
-    let fi = match fi {
-        Some(i) => i,
-        None => {
-            let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
-            let p_clone = p.clone();
-            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
-                jfs_common::index_frames(&p_clone)
-            }).await??;
-            let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.put(p, i.clone());
-            i
-        }
+    let fi = {
+        let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
+        state.fi.get_or_build(&p).await?
     };
     let (fi_frames, _, _) = fi.as_ref();
     eprintln!("[frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
@@ -609,22 +636,9 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     eprintln!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
 
     // Load frame index (same pattern as animate)
-    let fi = if let Some((path, _)) = req.paths.first() {
-        let mut cache = state.frame_index.lock().await;
-        cache.get(path).cloned()
-    } else { None };
-    let fi = match fi {
-        Some(i) => i,
-        None => {
-            let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
-            let p_clone = p.clone();
-            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
-                jfs_common::index_frames(&p_clone)
-            }).await??;
-            let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.put(p, i.clone());
-            i
-        }
+    let fi = {
+        let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
+        state.fi.get_or_build(&p).await?
     };
     let (fi_frames, _, _) = fi.as_ref();
 
@@ -761,25 +775,9 @@ async fn handle_index_frames(stream: &mut UnixStream, state: &Arc<State>) -> any
     stream.read_exact(&mut pbytes).await?;
     let path = PathBuf::from(String::from_utf8(pbytes)?);
 
-    // Check cache
-    {
-        let mut cache = state.frame_index.lock().await;
-        if let Some(idx) = cache.get(&path) {
+    let idx = state.fi.get_or_build(&path).await?;
     let (frames, fps_num, fps_den) = idx.as_ref();
-            return write_frame_index(stream, frames, *fps_num, *fps_den).await;
-        }
-    }
-
-    // Load frame index
-    let path_clone = path.clone();
-    let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
-        jfs_common::index_frames(&path_clone)
-    }).await??;
-
-    let idx = Arc::new((frames.clone(), fps_num, fps_den));
-    state.frame_index.lock().await.put(path, idx);
-
-    write_frame_index(stream, &frames, fps_num, fps_den).await
+    write_frame_index(stream, frames, *fps_num, *fps_den).await
 }
 
 // ── MSG_PREFETCH_RANGE (0x16): decode frames by index range ──────────
@@ -791,23 +789,7 @@ async fn handle_index_frames(stream: &mut UnixStream, state: &Arc<State>) -> any
 async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     let req = read_prefetch_range_req(stream).await?;
 
-    // Load/cache frame index
-    let idx = {
-        let mut cache = state.frame_index.lock().await;
-        cache.get(&req.path).cloned()
-    };
-    let idx = match idx {
-        Some(i) => i,
-        None => {
-            let path_clone = req.path.clone();
-            let (frames, fps_num, fps_den) = tokio::task::spawn_blocking(move || {
-                jfs_common::index_frames(&path_clone)
-            }).await??;
-            let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.put(req.path.clone(), i.clone());
-            i
-        }
-    };
+    let idx = state.fi.get_or_build(&req.path).await?;
 
     let (frames, _, _) = idx.as_ref();
     let si = req.start_idx.max(0) as usize;
@@ -907,31 +889,26 @@ async fn queue_a_demux(
     let p_end = current_time_ms + 1000;
 
     // Fast path: use in-memory index (populated by queue_b or resolve_frame_idx)
-    {
-        let mut cache = state.frame_index.lock().await;
-        if let Some(idx) = cache.get(&path) {
-            let idx = idx.clone();
-            drop(cache);
-            let (frames, _, _) = idx.as_ref();
-            let start = frames.partition_point(|(ms, _)| *ms < p_start);
-            let mut batch = Vec::new();
-            let mut sent = 0usize;
-            for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
-                if *ms > p_end { break; }
-                batch.push((start + i, *ms, *is_key));
-                if batch.len() >= BATCH_SIZE {
-                    tx.send(make_batch(&batch)).ok();
-                    sent += batch.len();
-                    batch.clear();
-                }
-            }
-            if !batch.is_empty() {
-                sent += batch.len();
+    if let Some(idx) = state.fi.get(&path).await {
+        let (frames, _, _) = idx.as_ref();
+        let start = frames.partition_point(|(ms, _)| *ms < p_start);
+        let mut batch = Vec::new();
+        let mut sent = 0usize;
+        for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
+            if *ms > p_end { break; }
+            batch.push((start + i, *ms, *is_key));
+            if batch.len() >= BATCH_SIZE {
                 tx.send(make_batch(&batch)).ok();
+                sent += batch.len();
+                batch.clear();
             }
-            eprintln!("[bench][queue_a] +{}ms fast_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
-            return Ok(());
         }
+        if !batch.is_empty() {
+            sent += batch.len();
+            tx.send(make_batch(&batch)).ok();
+        }
+        eprintln!("[bench][queue_a] +{}ms fast_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+        return Ok(());
     }
 
     // Slow path: open file, seek, demux ±1s window
@@ -1056,13 +1033,8 @@ async fn queue_b_demux(
     let (fps_num, fps_den, all_frames) = result;
 
     // 写入帧索引缓存，供后续请求直接使用
-    {
-        let new_idx = Arc::new((all_frames, fps_num, fps_den));
-        let mut cache = state.frame_index.lock().await;
-        if cache.peek(&path).is_none() {
-            cache.put(path.clone(), new_idx);
-        }
-    }
+    let new_idx = Arc::new((all_frames, fps_num, fps_den));
+    state.fi.put_if_absent(path.clone(), new_idx).await;
 
     // fps 结束信号（max_ms = i64::MAX 为终止标记）
     let end_data = format!("data: {}\n\n", serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
@@ -1070,7 +1042,7 @@ async fn queue_b_demux(
     progress.finish();
 
     // 从 in_progress 移除，后续请求走缓存快路径
-    state.index_in_progress.lock().await.remove(&path);
+    state.fi.remove_progress(&path).await;
 
     Ok(())
 }
@@ -1088,36 +1060,31 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
     let t0 = bench_now_ms();
     eprintln!("[bench][frameinfo] recv current_time_ms={} abs={t0}", req.current_time_ms);
 
-    // ── 分支 1：帧索引已完整缓存 ─────────────────────────────────────────────
-    if let Some(idx) = state.frame_index.lock().await.get(&req.path) {
-        let idx = idx.clone();
-        let (frames, fps_num, fps_den) = idx.as_ref();
-        eprintln!("[bench][frameinfo] +{}ms branch=cache_hit frames={}", bench_now_ms() - t0, frames.len());
-        let entries: Vec<(usize, i64, bool)> = frames.iter().enumerate()
-            .map(|(i, &(ms, is_key))| (i, ms, is_key))
-            .collect();
-        for chunk in entries.chunks(BATCH_SIZE) {
-            write_chunk(stream, &make_batch(chunk)).await?;
+    // ── 分支 1/2/3：根据缓存状态分发 ─────────────────────────────────────────
+    let progress = match state.fi.get_or_subscribe(&req.path).await {
+        FrameInfoSubscription::Cached(idx) => {
+            let (frames, fps_num, fps_den) = idx.as_ref();
+            eprintln!("[bench][frameinfo] +{}ms branch=cache_hit frames={}", bench_now_ms() - t0, frames.len());
+            let entries: Vec<(usize, i64, bool)> = frames.iter().enumerate()
+                .map(|(i, &(ms, is_key))| (i, ms, is_key))
+                .collect();
+            for chunk in entries.chunks(BATCH_SIZE) {
+                write_chunk(stream, &make_batch(chunk)).await?;
+            }
+            let end = format!("data: {}\n\n",
+                serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
+            write_chunk(stream, end.as_bytes()).await?;
+            stream.write_u32_le(0).await?;
+            stream.flush().await?;
+            eprintln!("[bench][frameinfo] +{}ms cache_hit_done", bench_now_ms() - t0);
+            return Ok(());
         }
-        let end = format!("data: {}\n\n",
-            serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
-        write_chunk(stream, end.as_bytes()).await?;
-        stream.write_u32_le(0).await?;
-        stream.flush().await?;
-        eprintln!("[bench][frameinfo] +{}ms cache_hit_done", bench_now_ms() - t0);
-        return Ok(());
-    }
-
-    // ── 分支 2/3：获取或新建 IndexProgress ───────────────────────────────────
-    let progress = {
-        let mut in_prog = state.index_in_progress.lock().await;
-        if let Some(p) = in_prog.get(&req.path) {
+        FrameInfoSubscription::Existing(p) => {
             eprintln!("[bench][frameinfo] +{}ms branch=subscribe_existing_queue_b", bench_now_ms() - t0);
-            p.clone() // 订阅现有 Queue B
-        } else {
+            p
+        }
+        FrameInfoSubscription::New(p) => {
             eprintln!("[bench][frameinfo] +{}ms branch=new_queue_b_spawn", bench_now_ms() - t0);
-            let p = IndexProgress::new();
-            in_prog.insert(req.path.clone(), p.clone());
             let state_b = state.clone();
             let path_b = req.path.clone();
             let p_b = p.clone();
@@ -1308,7 +1275,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let t0 = bench_now_ms();
     eprintln!("[bench][prefetch] recv current_time_ms={current_time_ms} range=[{range_start_ms},{range_end_ms}] include_current={include_current} abs={t0}");
 
-    let frame_idx = get_or_build_frame_index(state, &path).await?;
+    let frame_idx = state.fi.get_or_build(&path).await?;
     let (frames, _, _) = frame_idx.as_ref();
     eprintln!("[bench][prefetch] +{}ms frame_index_ready frames={}", bench_now_ms() - t0, frames.len());
 
@@ -1385,30 +1352,6 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     Ok(())
 }
 
-async fn get_or_build_frame_index(state: &Arc<State>, path: &Path) -> anyhow::Result<FrameIndexCache> {
-    {
-        let mut cache = state.frame_index.lock().await;
-        if let Some(idx) = cache.get(path) {
-            return Ok(idx.clone());
-        }
-    }
-
-    let p = path.to_path_buf();
-    let (frames, fps_num, fps_den) =
-        tokio::task::spawn_blocking(move || jfs_common::index_frames(&p))
-            .await??;
-    let new_idx = Arc::new((frames, fps_num, fps_den));
-
-    let idx = {
-        let mut cache = state.frame_index.lock().await;
-        if cache.peek(path).is_none() {
-            cache.put(path.to_path_buf(), new_idx.clone());
-        }
-        cache.get(path).unwrap().clone()
-    };
-
-    Ok(idx)
-}
 
 fn read_u32(buf: &[u8; 4]) -> u32 {
     u32::from_le_bytes(*buf)
