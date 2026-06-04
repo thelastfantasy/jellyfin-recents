@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use lru::LruCache;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
 
 use jfs_common::DiskCache;
 use jfs_common::FrameIndexEntry;
@@ -24,6 +24,7 @@ const MSG_PREFETCH_RANGE: u8 = 0x16;
 const MSG_INDEX_FRAMES_STREAM: u8 = 0x17;
 const MSG_PREFETCH_STREAM: u8 = 0x18;
 const MSG_PREFETCH_RANGE_STREAM: u8 = 0x19;
+const MSG_DEBUG_DUMP:           u8 = 0x1A;
 
 const RAM_CACHE_CAP: usize = 100;
 const FRAME_INDEX_CAP: usize = 20;
@@ -86,24 +87,27 @@ enum FrameInfoSubscription {
 }
 
 struct FrameIndexManager {
-    index:       Mutex<LruCache<PathBuf, FrameIndexCache>>,
+    // RwLock: concurrent reads (peek, no LRU-order update) without serialisation.
+    // Writes (put) are rare — only on first load or cache miss.
+    index:       RwLock<LruCache<PathBuf, FrameIndexCache>>,
     in_progress: Mutex<HashMap<PathBuf, Arc<IndexProgress>>>,
 }
 
 impl FrameIndexManager {
     fn new() -> Arc<Self> {
         Arc::new(Self {
-            index:       Mutex::new(LruCache::new(NonZeroUsize::new(FRAME_INDEX_CAP).unwrap())),
+            index:       RwLock::new(LruCache::new(NonZeroUsize::new(FRAME_INDEX_CAP).unwrap())),
             in_progress: Mutex::new(HashMap::new()),
         })
     }
 
+    // peek() — doesn't update LRU order; safe with a shared read lock.
     async fn get(&self, path: &Path) -> Option<FrameIndexCache> {
-        self.index.lock().await.get(path).cloned()
+        self.index.read().await.peek(path).cloned()
     }
 
     async fn put_if_absent(&self, path: PathBuf, idx: FrameIndexCache) {
-        let mut cache = self.index.lock().await;
+        let mut cache = self.index.write().await;
         if cache.peek(&path).is_none() {
             cache.put(path, idx);
         }
@@ -292,6 +296,12 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
             MSG_PREFETCH_RANGE_STREAM => {
                 if let Err(e) = handle_prefetch_range_stream(&mut stream, &state).await {
                     eprintln!("[frame-forge] prefetch_range_stream error: {e}");
+                    break;
+                }
+            }
+            MSG_DEBUG_DUMP => {
+                if let Err(e) = handle_debug_dump(&mut stream, &state).await {
+                    eprintln!("[frame-forge] debug_dump error: {e}");
                     break;
                 }
             }
@@ -1352,6 +1362,36 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     Ok(())
 }
 
+
+// ── MSG_DEBUG_DUMP (0x1A): return internal state as JSON ────────────────────
+/// Request: (no body)
+/// Response: [json_len(4)][json_bytes]
+async fn handle_debug_dump(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
+    let ram_len = state.ram.lock().await.len();
+    let fi_cached: Vec<String> = {
+        let cache = state.fi.index.read().await;
+        cache.iter().map(|(p, _)| p.to_string_lossy().into_owned()).collect()
+    };
+    let fi_in_progress: Vec<String> = {
+        let map = state.fi.in_progress.lock().await;
+        map.keys().map(|p| p.to_string_lossy().into_owned()).collect()
+    };
+    let prefetch_queued = state.in_progress.lock().await.len();
+
+    let json = serde_json::json!({
+        "ramEntries":     ram_len,
+        "ramCap":         RAM_CACHE_CAP,
+        "fiCached":       fi_cached,
+        "fiCap":          FRAME_INDEX_CAP,
+        "fiInProgress":   fi_in_progress,
+        "prefetchQueued": prefetch_queued,
+    });
+    let bytes = json.to_string().into_bytes();
+    stream.write_all(&(bytes.len() as u32).to_le_bytes()).await?;
+    stream.write_all(&bytes).await?;
+    stream.flush().await?;
+    Ok(())
+}
 
 fn read_u32(buf: &[u8; 4]) -> u32 {
     u32::from_le_bytes(*buf)

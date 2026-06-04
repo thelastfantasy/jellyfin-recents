@@ -19,6 +19,7 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgPrefetchRange = 0x16;
     private const byte MsgPrefetchStream = 0x18;
     private const byte MsgPrefetchRangeStream = 0x19;
+    private const byte MsgDebugDump          = 0x1A;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -819,6 +820,45 @@ public sealed class FrameExportService : IDisposable
             _logger.LogWarning("[FrameExport] PrefetchStreamAsync error: {Ex}", ex.Message);
             try { _socket?.Dispose(); } catch { }
             _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends MSG_DEBUG_DUMP (0x1A) to frame-forge and returns the JSON state snapshot.
+    /// Fields: ramEntries, ramCap, fiCached[], fiCap, fiInProgress[], prefetchQueued.
+    /// </summary>
+    public async Task<string> GetDebugDumpAsync(CancellationToken ct = default)
+    {
+        if (!IsAvailable) return "{}";
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await sock.SendAsync(new byte[] { MsgDebugDump }, SocketFlags.None, ct).ConfigureAwait(false);
+
+                var lenBuf = new byte[4];
+                await ReceiveExactAsync(sock, lenBuf, 4, ct).ConfigureAwait(false);
+                var len = (int)BinaryPrimitives.ReadUInt32LittleEndian(lenBuf);
+
+                var jsonBuf = new byte[len];
+                await ReceiveExactAsync(sock, jsonBuf, len, ct).ConfigureAwait(false);
+                return Encoding.UTF8.GetString(jsonBuf);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning("[FrameExport] debug dump socket error: {Ex}", ex.Message);
+                try { _socket?.Dispose(); } catch { }
+                _socket = null;
+                return "{}";
+            }
         }
         finally
         {

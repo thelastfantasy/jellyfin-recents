@@ -391,6 +391,17 @@ public class FrameExportController : ControllerBase
         });
     }
 
+    /// <summary>GET /FrameExport/Debug — frame-forge internal state snapshot (RAM/FI cache, prefetch queue)</summary>
+    [HttpGet("Debug")]
+    public async Task<IActionResult> GetDebug(CancellationToken ct)
+    {
+        if (!_frameExport.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "frame-forge not available");
+
+        var json = await _frameExport.GetDebugDumpAsync(ct);
+        return Content(json, "application/json");
+    }
+
     /// <summary>
     /// GET /FrameExport/QualityThresholds — read current thresholds
     /// PUT /FrameExport/QualityThresholds — update thresholds (admin-only in practice)
