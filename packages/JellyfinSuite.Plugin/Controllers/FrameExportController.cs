@@ -212,20 +212,6 @@ public class FrameExportController : ControllerBase
                     ? req.Params.CustomHeight ?? 0
                     : req.Params.CustomWidth ?? 0;
 
-                // Map resolution preset to target pixels
-                if (targetPx == 0 && resolutionPreset != "original")
-                {
-                    targetPx = resolutionPreset switch
-                    {
-                        "1080p" => 1080,
-                        "720p" => 720,
-                        "480p" => 480,
-                        "360p" => 360,
-                        _ => 0
-                    };
-                    resizeMode = "width";
-                }
-
                 byte[]? output = req.Type switch
                 {
                     "animate" => await _frameExport.SubmitAnimateTaskAsync(
@@ -233,7 +219,7 @@ public class FrameExportController : ControllerBase
                         resizeMode, targetPx, req.Params.Speed, req.Params.LoopCount,
                         req.Params.CropX ?? 0f, req.Params.CropY ?? 0f,
                         req.Params.CropW ?? 0f, req.Params.CropH ?? 0f,
-                        req.Params.Quality, task.Cts.Token),
+                        req.Params.Quality, resolutionPreset, task.Cts.Token),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
                         task, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
                         task.Cts.Token),

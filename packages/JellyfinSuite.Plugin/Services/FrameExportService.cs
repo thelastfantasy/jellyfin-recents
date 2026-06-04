@@ -431,7 +431,7 @@ public sealed class FrameExportService : IDisposable
         string format,   // "gif" or "webp"
         string resizeMode, int targetPx, float speed, int loopCount,
         float cropX = 0f, float cropY = 0f, float cropW = 0f, float cropH = 0f,
-        float quality = 0.75f,
+        float quality = 0.75f, string resolutionPreset = "original",
         CancellationToken ct = default)
     {
         if (!IsAvailable) return null;
@@ -468,6 +468,9 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(cropW), 0, 4);
         ms.Write(BitConverter.GetBytes(cropH), 0, 4);
         ms.Write(BitConverter.GetBytes(quality), 0, 4);
+        var presetBytes = Encoding.UTF8.GetBytes(resolutionPreset);
+        ms.Write(BitConverter.GetBytes((uint)presetBytes.Length), 0, 4);
+        ms.Write(presetBytes, 0, presetBytes.Length);
 
         var reqBuf = ms.ToArray();
         try

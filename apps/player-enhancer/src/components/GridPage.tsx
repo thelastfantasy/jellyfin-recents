@@ -2,11 +2,10 @@ import { useAtomValue } from 'jotai'
 import type { ChangeEvent } from 'react'
 
 import {
-_fiMaxIdx, _fiMinIdx, _frameIndex, _frames, _maxPosMs,
-_minPosMs, _videoEl, exportTypeAtom,   frameInterval,
-  framesAtom,   modalPhaseAtom,
-paramsOpenAtom, prefetchDoneAtom,
-prefetchTotalAtom,   setFrames, settingsAtom,   sExportType, sParamsOpen,
+  _fiMaxIdx, _fiMinIdx, _frameIndex, _frames, _fpsFrac, _maxPosMs,
+  _minPosMs, _videoEl, exportTypeAtom, frameInterval,
+  framesAtom, modalPhaseAtom, paramsOpenAtom, prefetchDoneAtom,
+  prefetchTotalAtom, setFrames, settingsAtom, sExportType, sParamsOpen,
   updateSettings,
 } from '../core/state'
 import { t } from '../lib/i18n'
@@ -75,7 +74,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
 
   return (
     <div className="jfs-fe-osd">
-      {loading ? <FrameGridSkeleton count={48} /> : <FrameGrid />}
+      {loading ? <FrameGridSkeleton count={Math.round(2 * _fpsFrac.num / _fpsFrac.den)} /> : <FrameGrid />}
       {paramsOpen && <ParamsPanel />}
       <div className="jfs-fe-row sep-t" id="jfs-fe-tbar">
         <span className="jfs-fe-title">{t('frameExport.title')}</span>

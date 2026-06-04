@@ -459,15 +459,26 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         }).collect();
     }
 
-    let (tw, th) = if req.target_px > 0 {
+    let effective_px = if req.target_px > 0 {
+        req.target_px
+    } else {
+        match req.resolution_preset.as_str() {
+            "1080p" => 1080,
+            "720p"  => 720,
+            "480p"  => 480,
+            "360p"  => 360,
+            _       => 0,
+        }
+    };
+    let (tw, th) = if effective_px > 0 {
         let first = &images[0];
         let (fw, fh) = (first.width(), first.height());
         if req.resize_mode == 0x02 {
-            let ratio = req.target_px as f64 / fh as f64;
-            ((fw as f64 * ratio) as u32, req.target_px)
+            let ratio = effective_px as f64 / fh as f64;
+            ((fw as f64 * ratio) as u32, effective_px)
         } else {
-            let ratio = req.target_px as f64 / fw as f64;
-            (req.target_px, (fh as f64 * ratio) as u32)
+            let ratio = effective_px as f64 / fw as f64;
+            (effective_px, (fh as f64 * ratio) as u32)
         }
     } else {
         (images[0].width(), images[0].height())

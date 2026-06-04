@@ -104,11 +104,12 @@ pub(crate) struct AnimateReq {
     pub paths: Vec<(std::path::PathBuf, i64)>, // (path, frame_idx)
     pub format: u16,      // 0x01=GIF, 0x02=WebP
     pub resize_mode: u16, // 0x01=width, 0x02=height
-    pub target_px: u32,   // custom pixel value
+    pub target_px: u32,   // custom pixel value (0 means use resolution_preset)
     pub speed: f32,       // playback speed multiplier (1.0 = real-time)
     pub loop_count: u16,
     pub crop: Option<(f32, f32, f32, f32)>, // (x, y, w, h) normalized 0-1；None = 不裁切
     pub quality: f32,     // 0.0 = lossless, 0.01-1.0 = lossy quality
+    pub resolution_preset: String, // "original"|"1080p"|"720p"|"480p"|"360p"
 }
 
 pub(crate) async fn read_animate_req(
@@ -175,7 +176,14 @@ pub(crate) async fn read_animate_req(
 
     let mut q_buf = [0u8; 4]; stream.read_exact(&mut q_buf).await?; let quality = f32::from_le_bytes(q_buf);
 
-    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality })
+    let mut preset_len_buf = [0u8; 4];
+    stream.read_exact(&mut preset_len_buf).await?;
+    let preset_len = u32::from_le_bytes(preset_len_buf) as usize;
+    let mut preset_bytes = vec![0u8; preset_len];
+    stream.read_exact(&mut preset_bytes).await?;
+    let resolution_preset = String::from_utf8(preset_bytes).unwrap_or_default();
+
+    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
 }
 
 // ── MSG_PREFETCH_RANGE (0x16) ───────────────────────────────────────
