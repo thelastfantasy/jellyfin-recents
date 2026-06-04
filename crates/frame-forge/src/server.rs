@@ -888,6 +888,7 @@ async fn queue_a_demux(
     tx: mpsc::UnboundedSender<Vec<u8>>,
     state: Arc<State>,
 ) -> anyhow::Result<()> {
+    let t0 = bench_now_ms();
     let p_start = (current_time_ms - 1000).max(0);
     let p_end = current_time_ms + 1000;
 
@@ -900,24 +901,29 @@ async fn queue_a_demux(
             let (frames, _, _) = idx.as_ref();
             let start = frames.partition_point(|(ms, _)| *ms < p_start);
             let mut batch = Vec::new();
+            let mut sent = 0usize;
             for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
                 if *ms > p_end { break; }
                 batch.push((start + i, *ms, *is_key));
                 if batch.len() >= BATCH_SIZE {
                     tx.send(make_batch(&batch)).ok();
+                    sent += batch.len();
                     batch.clear();
                 }
             }
             if !batch.is_empty() {
+                sent += batch.len();
                 tx.send(make_batch(&batch)).ok();
             }
+            eprintln!("[bench][queue_a] +{}ms fast_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
             return Ok(());
         }
     }
 
     // Slow path: open file, seek, demux ±1s window
+    eprintln!("[bench][queue_a] +{}ms slow_path_open_file abs={}", bench_now_ms() - t0, bench_now_ms());
     let tx_inner = tx.clone();
-    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+    let sent = tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
         use ffmpeg_next as ff;
         let mut ictx = ff::format::input(&path)
             .map_err(|e| anyhow::anyhow!("open {:?}: {}", path, e))?;
@@ -939,6 +945,7 @@ async fn queue_a_demux(
         ictx.seek(p_start * 1000, ..p_start * 1000)?;
 
         let mut batch = Vec::new();
+        let mut total = 0usize;
 
         for (stream, pkt) in ictx.packets() {
             if stream.index() != stream_idx { continue; }
@@ -953,6 +960,7 @@ async fn queue_a_demux(
 
             let fi = compute_frame_idx(ms, fps_num, fps_den) as usize;
             batch.push((fi, ms, pkt.is_key()));
+            total += 1;
 
             if batch.len() >= BATCH_SIZE {
                 tx_inner.send(make_batch(&batch)).ok();
@@ -964,8 +972,9 @@ async fn queue_a_demux(
             tx_inner.send(make_batch(&batch)).ok();
         }
 
-        Ok(())
+        Ok(total)
     }).await??;
+    eprintln!("[bench][queue_a] +{}ms slow_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
 
     Ok(())
 }
@@ -1060,10 +1069,14 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
     let req = read_index_frames_stream_req(stream).await?;
     stream.write_u32_le(req.request_id).await?;
 
+    let t0 = bench_now_ms();
+    eprintln!("[bench][frameinfo] recv current_time_ms={} abs={t0}", req.current_time_ms);
+
     // ── 分支 1：帧索引已完整缓存 ─────────────────────────────────────────────
     if let Some(idx) = state.frame_index.lock().await.get(&req.path) {
         let idx = idx.clone();
         let (frames, fps_num, fps_den) = idx.as_ref();
+        eprintln!("[bench][frameinfo] +{}ms branch=cache_hit frames={}", bench_now_ms() - t0, frames.len());
         let entries: Vec<(usize, i64, bool)> = frames.iter().enumerate()
             .map(|(i, &(ms, is_key))| (i, ms, is_key))
             .collect();
@@ -1075,6 +1088,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
         write_chunk(stream, end.as_bytes()).await?;
         stream.write_u32_le(0).await?;
         stream.flush().await?;
+        eprintln!("[bench][frameinfo] +{}ms cache_hit_done", bench_now_ms() - t0);
         return Ok(());
     }
 
@@ -1082,8 +1096,10 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
     let progress = {
         let mut in_prog = state.index_in_progress.lock().await;
         if let Some(p) = in_prog.get(&req.path) {
+            eprintln!("[bench][frameinfo] +{}ms branch=subscribe_existing_queue_b", bench_now_ms() - t0);
             p.clone() // 订阅现有 Queue B
         } else {
+            eprintln!("[bench][frameinfo] +{}ms branch=new_queue_b_spawn", bench_now_ms() - t0);
             let p = IndexProgress::new();
             in_prog.insert(req.path.clone(), p.clone());
             let state_b = state.clone();
@@ -1145,12 +1161,17 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
     }
 
     let mut normal_queue_finished = false;
+    let mut first_a_written = false;
 
     loop {
         tokio::select! {
             biased;
 
             Some(bytes) = high_rx.recv() => {
+                if !first_a_written {
+                    first_a_written = true;
+                    eprintln!("[bench][frameinfo] +{}ms FIRST_QUEUE_A_CHUNK bytes={}", bench_now_ms() - t0, bytes.len());
+                }
                 write_chunk(stream, &bytes).await?;
             }
 
@@ -1167,6 +1188,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
 
     stream.write_u32_le(0).await?;
     stream.flush().await?;
+    eprintln!("[bench][frameinfo] +{}ms stream_done", bench_now_ms() - t0);
     Ok(())
 }
 
@@ -1267,8 +1289,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let range_end_ms = current_time_ms.saturating_add(req.after_ms);
     let include_current = req.include_current;
 
+    let t0 = bench_now_ms();
+    eprintln!("[bench][prefetch] recv current_time_ms={current_time_ms} range=[{range_start_ms},{range_end_ms}] include_current={include_current} abs={t0}");
+
     let frame_idx = get_or_build_frame_index(state, &path).await?;
     let (frames, _, _) = frame_idx.as_ref();
+    eprintln!("[bench][prefetch] +{}ms frame_index_ready frames={}", bench_now_ms() - t0, frames.len());
 
     let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
     let mut to_process: Vec<(i64, i64)> = Vec::new();
@@ -1278,11 +1304,20 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         to_process.push(((start + i) as i64, ms));
     }
     drop(frame_idx);
+    eprintln!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
+
+    let mut first_ready = false;
+    let mut cache_hits = 0usize;
 
     for (fi_idx, pos_ms) in to_process {
         {
             let ram = state.ram.lock().await;
             if ram.peek(&(path.clone(), pos_ms, width)).is_some() {
+                if !first_ready {
+                    first_ready = true;
+                    eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=ram abs={}", bench_now_ms() - t0, bench_now_ms());
+                }
+                cache_hits += 1;
                 let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
                 write_chunk(stream, line.as_bytes()).await?;
                 continue;
@@ -1290,6 +1325,11 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
 
         if state.disk.exists(&item_id, &path, pos_ms, width) {
+            if !first_ready {
+                first_ready = true;
+                eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=disk abs={}", bench_now_ms() - t0, bench_now_ms());
+            }
+            cache_hits += 1;
             let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
             write_chunk(stream, line.as_bytes()).await?;
             continue;
@@ -1301,6 +1341,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         let ram_state = state.clone();
 
         let _permit = state.decode_sem.clone().acquire_owned().await?;
+        eprintln!("[bench][prefetch] +{}ms decode_start fi={fi_idx} pos_ms={pos_ms}", bench_now_ms() - t0);
         let result = tokio::task::spawn_blocking(move || {
             jfs_common::decode_and_encode(&path_c, pos_ms, width)
         }).await;
@@ -1310,6 +1351,10 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                 let fi = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
                 disk.write(&item_id_c, &path, fi, pos_ms, width, &bytes);
                 ram_state.ram.lock().await.put((path.clone(), pos_ms, width), bytes);
+                if !first_ready {
+                    first_ready = true;
+                    eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=decoded abs={}", bench_now_ms() - t0, bench_now_ms());
+                }
                 let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
                 write_chunk(stream, line.as_bytes()).await?;
             }
@@ -1317,6 +1362,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
     }
 
+    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} abs={}", bench_now_ms() - t0, bench_now_ms());
     write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;
@@ -1351,5 +1397,12 @@ fn read_u32(buf: &[u8; 4]) -> u32 {
 
 fn read_i64(buf: &[u8; 8]) -> i64 {
     i64::from_le_bytes(*buf)
+}
+
+fn bench_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 

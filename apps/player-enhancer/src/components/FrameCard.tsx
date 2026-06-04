@@ -2,6 +2,7 @@ import { useAtomValue } from 'jotai'
 
 import type { FrameEntry } from '../core/state'
 import { _itemId, prefetchDoneAtom,prefetchTotalAtom } from '../core/state'
+import { bench } from '../lib/bench'
 import { t } from '../lib/i18n'
 import { formatTime } from '../lib/utils'
 
@@ -51,6 +52,7 @@ export function FrameCard({
           src={frame.jpegUrl}
           alt={formatTime(frame.posMs)}
           onError={() => onLoadError(idx)}
+          onLoad={() => bench.once('first_img_load', 'first_img_loaded', { idx, posMs: frame.posMs })}
         />
       )
       : <div className="jfs-fe-loading"><div className="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>

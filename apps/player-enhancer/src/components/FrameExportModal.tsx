@@ -47,6 +47,7 @@ import {
   sSettings,
 } from "../core/state";
 import { setGesturesSuspended } from "../hooks/useGestures";
+import { bench } from "../lib/bench";
 import { t } from "../lib/i18n";
 import { CropPopover } from "./CropPopover";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -175,6 +176,7 @@ function FrameExportModalInner({
   }
 
   const markFrameReady = useCallback((idx: number) => {
+    bench.once('first_thumb_ready', 'first_thumb_url_set', { idx })
     setFrames(
       _frames.map((f, i) =>
         i === idx
@@ -190,6 +192,7 @@ function FrameExportModalInner({
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
     const beforeSeconds = (centerMs - _minPosMs) / 1000;
     const afterSeconds = (_maxPosMs - centerMs) / 1000;
+    bench.mark('prefetch_triggered', { centerMs, beforeSeconds, afterSeconds })
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
       { currentTimeMs: centerMs, beforeSeconds, afterSeconds, includeCurrentFrame: true, width: 320 },
@@ -219,6 +222,8 @@ function FrameExportModalInner({
   // ── 6. Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    bench.reset()
+    bench.mark('modal_open', { itemId, posMs: Math.round(videoEl.currentTime * 1000) })
     setVideoEl(videoEl);
     setActiveTaskId("");
     if (itemId !== _itemId) {
@@ -271,6 +276,7 @@ function FrameExportModalInner({
 
     if (_frameIndex !== null && _frameIndex.length > 0) {
       // Repeat visit: show grid immediately, open SSE only for priority adjustment
+      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: _frameIndex.length })
       if (!_frames.length) {
         const center = findCenterFrameIndex(_frameIndex, ms);
         const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, center);
@@ -283,15 +289,18 @@ function FrameExportModalInner({
 
     // First visit: build frame index incrementally from SSE
     let gridShown = _frames.length > 0; // savedState may have set frames already
+    bench.mark('frameinfo_sse_open', { ms, savedStateFrames: _frames.length })
 
     const es = openFrameInfoStream(
       itemId, ms,
       (batch) => {
+        bench.once('frameinfo_first_batch', 'frameinfo_first_batch_recv', { count: batch.length })
         frameAccRef.current = [...frameAccRef.current, ...batch];
         const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
         setFrameIndex(sorted);
         if (!gridShown) {
           gridShown = true;
+          bench.mark('grid_shown', { framesInRange: sorted.length })
           const center = findCenterFrameIndex(sorted, ms);
           const [rangeStart, rangeEnd] = findRangeFromCenter(sorted, center);
           applyFrameRange(sorted, ms, rangeStart, rangeEnd);
