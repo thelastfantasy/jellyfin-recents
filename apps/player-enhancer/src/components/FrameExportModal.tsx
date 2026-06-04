@@ -244,11 +244,11 @@ function FrameExportModalInner({
   const fpsRef = useRef({ num: 24, den: 1 });
 
   const frameInfoSse = useSse<FrameInfoEntry>(
-    // _frameIndex !== null → 帧索引已由后台预加载完整建立，跳过重复请求
-    () => (_frameIndex === null && !!itemId && !Number.isNaN(playbackMs))
+    () => (!!itemId && !Number.isNaN(playbackMs))
       ? apiUrl(suite.frameInfoStream(itemId, playbackMs))
       : null,
     (data) => {
+      if (_frameIndex !== null) return 'done'  // index already built; connection triggers priority adjustment only
       if (data?.fps) {
         fpsRef.current = data.fps
         return 'done'
@@ -262,7 +262,7 @@ function FrameExportModalInner({
   const frameInfoReady = frameInfoSse.done || (_frameIndex !== null && _frameIndex.length > 0)
 
   useEffect(() => {
-    if (frameInfoSse.done) {
+    if (frameInfoSse.done && _frameIndex === null) {
       setFpsFrac(fpsRef.current);
       if (frameInfoSse.items.length > 0) {
         const sorted = [...frameInfoSse.items].sort((a, b) => a.ms - b.ms)
@@ -388,27 +388,37 @@ function FrameExportModalInner({
 
   const expandBack = useCallback(() => {
     if (!_frameIndex) return;
-    const step = framesPerSecond(),
-      start = _fiMinIdx - step;
+    const step = framesPerSecond(), start = _fiMinIdx - step;
     if (start < 0) return;
-    const entries = _frameIndex.slice(start, _fiMinIdx).map(makeEntry);
-    setFrames([...entries, ..._frames]);
+    const oldMinPosMs = _minPosMs;
+    setFrames([..._frameIndex.slice(start, _fiMinIdx).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
     setMinPosMs(_frameIndex[start].ms);
-    triggerPrefetch();
-  }, [triggerPrefetch]);
+    prefetchAbortRef.current?.abort();
+    prefetchAbortRef.current = openPrefetchRangeStream(
+      itemId,
+      { currentTimeMs: oldMinPosMs, beforeSeconds: 1, afterSeconds: 0, includeCurrentFrame: false, width: 320 },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
+      () => {}, () => {},
+    );
+  }, [itemId, markFrameReady]);
 
   const expandForward = useCallback(() => {
     if (!_frameIndex) return;
-    const step = framesPerSecond(),
-      end = _fiMaxIdx + step;
+    const step = framesPerSecond(), end = _fiMaxIdx + step;
     if (end >= _frameIndex.length) return;
-    const entries = _frameIndex.slice(_fiMaxIdx + 1, end + 1).map(makeEntry);
-    setFrames([..._frames, ...entries]);
+    const oldMaxPosMs = _maxPosMs;
+    setFrames([..._frames, ..._frameIndex.slice(_fiMaxIdx + 1, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
     setMaxPosMs(_frameIndex[end].ms);
-    triggerPrefetch();
-  }, [triggerPrefetch]);
+    prefetchAbortRef.current?.abort();
+    prefetchAbortRef.current = openPrefetchRangeStream(
+      itemId,
+      { currentTimeMs: oldMaxPosMs, beforeSeconds: 0, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
+      () => {}, () => {},
+    );
+  }, [itemId, markFrameReady]);
 
   const submitGenerate = useCallback(() => {
     const exportType = sExportType.value;

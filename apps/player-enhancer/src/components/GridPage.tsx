@@ -35,12 +35,14 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
   const removedCount = frames.filter(f => f.removed).length
   const isMobile     = window.innerWidth < 600
 
-  const dur   = _videoEl?.duration ?? 0
-  const maxMs = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
-  const atStart = _frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0
-  const atEnd   = _frameIndex
-    ? _fiMaxIdx >= (_frameIndex.length - 1)
-    : (maxMs > 0 && _maxPosMs >= maxMs - frameInterval())
+  const dur    = _videoEl?.duration ?? 0
+  const maxMs  = (isFinite(dur) && dur > 0) ? dur * 1000 : 0
+  const playMs = (_videoEl?.currentTime ?? 0) * 1000
+  const atStart = playMs <= 1000 || (_frameIndex ? _fiMinIdx <= 0 : _minPosMs <= 0)
+  const atEnd   = (maxMs > 0 && maxMs - playMs < 1000)
+    || (_frameIndex
+      ? _fiMaxIdx >= (_frameIndex.length - 1)
+      : (maxMs > 0 && _maxPosMs >= maxMs - frameInterval()))
   const countLabel = prefTotal > 0 && prefDone < prefTotal
     ? `${t('frameExport.loading')} ${prefDone}/${prefTotal}`
     : `${isMobile ? '' : t('frameExport.selected') + ' '}${selectedCount}/${visible.length}`
