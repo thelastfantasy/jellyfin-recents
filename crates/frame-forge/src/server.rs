@@ -26,6 +26,7 @@ const MSG_PREFETCH_STREAM: u8 = 0x18;
 const MSG_PREFETCH_RANGE_STREAM: u8 = 0x19;
 
 const RAM_CACHE_CAP: usize = 100;
+const FRAME_INDEX_CAP: usize = 20;
 const PREFETCH_WORKERS: usize = 2;
 const PREFETCH_QUEUE_CAP: usize = 64;
 
@@ -82,7 +83,7 @@ pub struct State {
     decode_sem: Arc<Semaphore>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
-    frame_index: Mutex<HashMap<PathBuf, FrameIndexCache>>,
+    frame_index: Mutex<LruCache<PathBuf, FrameIndexCache>>,
     /// Per-path Queue B deduplication: if an IndexProgress exists here, that path is
     /// already being demuxed; new callers subscribe instead of spawning another Queue B.
     index_in_progress: Mutex<HashMap<PathBuf, Arc<IndexProgress>>>,
@@ -98,7 +99,7 @@ impl State {
             decode_sem: Arc::new(Semaphore::new(1)),
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
-            frame_index: Mutex::new(HashMap::new()),
+            frame_index: Mutex::new(LruCache::new(NonZeroUsize::new(FRAME_INDEX_CAP).unwrap())),
             index_in_progress: Mutex::new(HashMap::new()),
         });
         let rx = Arc::new(Mutex::new(rx));
@@ -121,15 +122,14 @@ async fn resolve_frame_idx(state: &Arc<State>, path: &Path, frame_idx: i64) -> O
 
     // Fast path: already cached
     {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         if let Some(idx) = cache.get(path) {
             let fi = frame_idx as usize;
             return if fi < idx.0.len() { Some(idx.0[fi].0) } else { None };
         }
     }
 
-    // Slow path: build index. Concurrent callers may also build; entry().or_insert() ensures
-    // only one result survives and the lock-protected insert is always consistent.
+    // Slow path: build index. Concurrent callers may race; the winner's insert wins.
     let p = path.to_path_buf();
     let (frames, fps_num, fps_den) =
         tokio::task::spawn_blocking(move || jfs_common::index_frames(&p))
@@ -138,7 +138,10 @@ async fn resolve_frame_idx(state: &Arc<State>, path: &Path, frame_idx: i64) -> O
 
     let idx = {
         let mut cache = state.frame_index.lock().await;
-        cache.entry(path.to_path_buf()).or_insert(new_idx).clone()
+        if cache.peek(path).is_none() {
+            cache.put(path.to_path_buf(), new_idx.clone());
+        }
+        cache.get(path).unwrap().clone()
     };
 
     let fi = frame_idx as usize;
@@ -400,7 +403,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     // Load frame index for the first path (all frames share the same video)
     let fi = if let Some((path, _)) = req.paths.first() {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         cache.get(path).cloned()
     } else { None };
     let fi = match fi {
@@ -412,7 +415,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                 jfs_common::index_frames(&p_clone)
             }).await??;
             let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.insert(p, i.clone());
+            state.frame_index.lock().await.put(p, i.clone());
             i
         }
     };
@@ -607,7 +610,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
 
     // Load frame index (same pattern as animate)
     let fi = if let Some((path, _)) = req.paths.first() {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         cache.get(path).cloned()
     } else { None };
     let fi = match fi {
@@ -619,7 +622,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
                 jfs_common::index_frames(&p_clone)
             }).await??;
             let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.insert(p, i.clone());
+            state.frame_index.lock().await.put(p, i.clone());
             i
         }
     };
@@ -760,7 +763,7 @@ async fn handle_index_frames(stream: &mut UnixStream, state: &Arc<State>) -> any
 
     // Check cache
     {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         if let Some(idx) = cache.get(&path) {
     let (frames, fps_num, fps_den) = idx.as_ref();
             return write_frame_index(stream, frames, *fps_num, *fps_den).await;
@@ -774,7 +777,7 @@ async fn handle_index_frames(stream: &mut UnixStream, state: &Arc<State>) -> any
     }).await??;
 
     let idx = Arc::new((frames.clone(), fps_num, fps_den));
-    state.frame_index.lock().await.insert(path, idx);
+    state.frame_index.lock().await.put(path, idx);
 
     write_frame_index(stream, &frames, fps_num, fps_den).await
 }
@@ -790,7 +793,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
 
     // Load/cache frame index
     let idx = {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         cache.get(&req.path).cloned()
     };
     let idx = match idx {
@@ -801,7 +804,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
                 jfs_common::index_frames(&path_clone)
             }).await??;
             let i = Arc::new((frames, fps_num, fps_den));
-            state.frame_index.lock().await.insert(req.path.clone(), i.clone());
+            state.frame_index.lock().await.put(req.path.clone(), i.clone());
             i
         }
     };
@@ -905,7 +908,7 @@ async fn queue_a_demux(
 
     // Fast path: use in-memory index (populated by queue_b or resolve_frame_idx)
     {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         if let Some(idx) = cache.get(&path) {
             let idx = idx.clone();
             drop(cache);
@@ -1056,7 +1059,9 @@ async fn queue_b_demux(
     {
         let new_idx = Arc::new((all_frames, fps_num, fps_den));
         let mut cache = state.frame_index.lock().await;
-        cache.entry(path.clone()).or_insert(new_idx);
+        if cache.peek(&path).is_none() {
+            cache.put(path.clone(), new_idx);
+        }
     }
 
     // fps 结束信号（max_ms = i64::MAX 为终止标记）
@@ -1382,7 +1387,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
 
 async fn get_or_build_frame_index(state: &Arc<State>, path: &Path) -> anyhow::Result<FrameIndexCache> {
     {
-        let cache = state.frame_index.lock().await;
+        let mut cache = state.frame_index.lock().await;
         if let Some(idx) = cache.get(path) {
             return Ok(idx.clone());
         }
@@ -1396,7 +1401,10 @@ async fn get_or_build_frame_index(state: &Arc<State>, path: &Path) -> anyhow::Re
 
     let idx = {
         let mut cache = state.frame_index.lock().await;
-        cache.entry(path.to_path_buf()).or_insert(new_idx).clone()
+        if cache.peek(path).is_none() {
+            cache.put(path.to_path_buf(), new_idx.clone());
+        }
+        cache.get(path).unwrap().clone()
     };
 
     Ok(idx)
