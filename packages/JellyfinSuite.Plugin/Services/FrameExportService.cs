@@ -18,6 +18,7 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgIndexFrames = 0x15;
     private const byte MsgPrefetchRange = 0x16;
     private const byte MsgPrefetchStream = 0x18;
+    private const byte MsgPrefetchRangeStream = 0x19;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -692,6 +693,69 @@ public sealed class FrameExportService : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning("[FrameExport] FrameIndexStreamAsync error: {Ex}", ex.Message);
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends MSG_PREFETCH_RANGE_STREAM (0x19) to frame-forge with a time range.
+    /// Rust resolves frames from in-memory frameinfo, decodes each, SSEs per frame + done signal.
+    /// Response uses length-prefixed chunks (same as FrameIndexStreamAsync).
+    /// </summary>
+    public async Task PrefetchRangeStreamAsync(
+        string filePath, Guid itemId, long currentTimeMs,
+        double beforeSeconds, double afterSeconds, bool includeCurrentFrame, int width,
+        Stream output, CancellationToken ct = default)
+    {
+        if (!IsAvailable) return;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var pathBytes = Encoding.UTF8.GetBytes(filePath);
+            var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
+            var beforeMs = (long)(beforeSeconds * 1000);
+            var afterMs  = (long)(afterSeconds  * 1000);
+
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4];
+            var pos = 0;
+            buf[pos++] = MsgPrefetchRangeStream;
+            itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
+            pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), currentTimeMs); pos += 8;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), beforeMs); pos += 8;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), afterMs); pos += 8;
+            buf[pos++] = (byte)(includeCurrentFrame ? 1 : 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width);
+
+            await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            // Read length-prefixed chunks and forward directly to output
+            var lenBuf = new byte[4];
+            while (true)
+            {
+                await ReceiveExactAsync(sock, lenBuf, 4, ct).ConfigureAwait(false);
+                var chunkLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(lenBuf);
+                if (chunkLen == 0) break;
+
+                var chunk = new byte[chunkLen];
+                await ReceiveExactAsync(sock, chunk, chunkLen, ct).ConfigureAwait(false);
+                await output.WriteAsync(chunk, ct).ConfigureAwait(false);
+                await output.FlushAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("[FrameExport] PrefetchRangeStreamAsync error: {Ex}", ex.Message);
             try { _socket?.Dispose(); } catch { }
             _socket = null;
         }

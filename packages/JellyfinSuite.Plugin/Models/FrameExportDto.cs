@@ -2,6 +2,17 @@ using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.JellyfinSuite.Models;
 
+// ── POST /FrameExport/PrefetchReady/{itemId} ────────────────────────
+
+public class PrefetchRangeStreamRequest
+{
+    [JsonPropertyName("currentTimeMs")]       public long   CurrentTimeMs       { get; set; }
+    [JsonPropertyName("beforeSeconds")]       public double BeforeSeconds        { get; set; } = 1.0;
+    [JsonPropertyName("afterSeconds")]        public double AfterSeconds         { get; set; } = 1.0;
+    [JsonPropertyName("includeCurrentFrame")] public bool   IncludeCurrentFrame  { get; set; } = true;
+    [JsonPropertyName("width")]               public int    Width                { get; set; } = 320;
+}
+
 // ── POST /FrameExport/Prefetch/{itemId} ─────────────────────────────
 
 public class PrefetchRequest

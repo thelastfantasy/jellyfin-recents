@@ -137,12 +137,11 @@ public class FrameExportController : ControllerBase
         return Accepted();
     }
 
-/// <summary>POST /FrameExport/PrefetchReady/{itemId}?width=320 — SSE stream of decoded frames, fiIdx list in body.</summary>
+/// <summary>POST /FrameExport/PrefetchReady/{itemId} — SSE stream of decoded frames in time range.</summary>
     [HttpPost("PrefetchReady/{itemId:guid}")]
     public async Task PrefetchReady(
         [FromRoute] Guid itemId,
-        [FromQuery] int width = 320,
-        [FromBody] long[]? fiIdx = null,
+        [FromBody] PrefetchRangeStreamRequest req,
         CancellationToken ct = default)
     {
         if (!_frameExport.IsAvailable)
@@ -158,15 +157,16 @@ public class FrameExportController : ControllerBase
             return;
         }
 
-        var indices = fiIdx ?? Array.Empty<long>();
-
         await _frameExport.EnsureStartedAsync(ct);
 
         Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
         Response.Headers["Cache-Control"] = "no-cache, no-store";
         Response.Headers["X-Accel-Buffering"] = "no";
 
-        await _frameExport.PrefetchStreamAsync(item.Path, itemId, width, indices, Response.Body, ct);
+        await _frameExport.PrefetchRangeStreamAsync(
+            item.Path, itemId, req.CurrentTimeMs,
+            req.BeforeSeconds, req.AfterSeconds, req.IncludeCurrentFrame,
+            req.Width, Response.Body, ct);
     }
 
     /// <summary>

@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, Mutex, Semaphore};
 
 use jfs_common::DiskCache;
 use jfs_common::FrameIndexEntry;
-use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, write_ack, write_jpeg_response};
+use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
 const MSG_SINGLE_FRAME: u8 = 0x10;
@@ -23,6 +23,7 @@ const MSG_INDEX_FRAMES: u8 = 0x15;
 const MSG_PREFETCH_RANGE: u8 = 0x16;
 const MSG_INDEX_FRAMES_STREAM: u8 = 0x17;
 const MSG_PREFETCH_STREAM: u8 = 0x18;
+const MSG_PREFETCH_RANGE_STREAM: u8 = 0x19;
 
 const RAM_CACHE_CAP: usize = 100;
 const PREFETCH_WORKERS: usize = 2;
@@ -242,6 +243,12 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
             MSG_PREFETCH_STREAM => {
                 if let Err(e) = handle_prefetch_stream(&mut stream, &state).await {
                     eprintln!("[frame-forge] prefetch_stream error: {e}");
+                    break;
+                }
+            }
+            MSG_PREFETCH_RANGE_STREAM => {
+                if let Err(e) = handle_prefetch_range_stream(&mut stream, &state).await {
+                    eprintln!("[frame-forge] prefetch_range_stream error: {e}");
                     break;
                 }
             }
@@ -1242,6 +1249,100 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
     }
 
     Ok(())
+}
+
+// ── MSG_PREFETCH_RANGE_STREAM (0x19): time-range prefetch with done signal ───
+/// Rust resolves frames from in-memory frameinfo (building it if not cached),
+/// decodes/caches each, SSEs {"frameReady":fi_idx} per frame + {"done":true}.
+/// Response uses length-prefixed chunks for clean socket termination.
+async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let req = read_prefetch_range_stream_req(stream).await?;
+    let item_id = req.item_id;
+    let path = req.path;
+    let width = req.width;
+    let current_time_ms = req.current_time_ms;
+    let range_start_ms = current_time_ms.saturating_sub(req.before_ms);
+    let range_end_ms = current_time_ms.saturating_add(req.after_ms);
+    let include_current = req.include_current;
+
+    let frame_idx = get_or_build_frame_index(state, &path).await?;
+    let (frames, _, _) = frame_idx.as_ref();
+
+    let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
+    let mut to_process: Vec<(i64, i64)> = Vec::new();
+    for (i, &(ms, _)) in frames[start..].iter().enumerate() {
+        if ms > range_end_ms { break; }
+        if !include_current && ms == current_time_ms { continue; }
+        to_process.push(((start + i) as i64, ms));
+    }
+    drop(frame_idx);
+
+    for (fi_idx, pos_ms) in to_process {
+        {
+            let ram = state.ram.lock().await;
+            if ram.peek(&(path.clone(), pos_ms, width)).is_some() {
+                let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+                write_chunk(stream, line.as_bytes()).await?;
+                continue;
+            }
+        }
+
+        if state.disk.exists(&item_id, &path, pos_ms, width) {
+            let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+            write_chunk(stream, line.as_bytes()).await?;
+            continue;
+        }
+
+        let path_c = path.clone();
+        let item_id_c = item_id.clone();
+        let disk = state.disk.clone();
+        let ram_state = state.clone();
+
+        let _permit = state.decode_sem.clone().acquire_owned().await?;
+        let result = tokio::task::spawn_blocking(move || {
+            jfs_common::decode_and_encode(&path_c, pos_ms, width)
+        }).await;
+
+        match result {
+            Ok(Ok((bytes, actual_pts_ms, fps_num, fps_den))) => {
+                let fi = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
+                disk.write(&item_id_c, &path, fi, pos_ms, width, &bytes);
+                ram_state.ram.lock().await.put((path.clone(), pos_ms, width), bytes);
+                let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+                write_chunk(stream, line.as_bytes()).await?;
+            }
+            _ => {}
+        }
+    }
+
+    write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
+    stream.write_u32_le(0).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+async fn get_or_build_frame_index(state: &Arc<State>, path: &Path) -> anyhow::Result<FrameIndexCache> {
+    {
+        let cache = state.frame_index.lock().await;
+        if let Some(idx) = cache.get(path) {
+            return Ok(idx.clone());
+        }
+    }
+
+    let p = path.to_path_buf();
+    let (frames, fps_num, fps_den) =
+        tokio::task::spawn_blocking(move || jfs_common::index_frames(&p))
+            .await??;
+    let new_idx = Arc::new((frames, fps_num, fps_den));
+
+    let idx = {
+        let mut cache = state.frame_index.lock().await;
+        cache.entry(path.to_path_buf()).or_insert(new_idx).clone()
+    };
+
+    Ok(idx)
 }
 
 fn read_u32(buf: &[u8; 4]) -> u32 {

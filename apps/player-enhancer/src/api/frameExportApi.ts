@@ -1,6 +1,5 @@
 import type { FrameInfoEntry } from '../core/state'
-
-import { fetchApi } from '../lib/fetchApi'
+import { apiUrl, fetchApi } from '../lib/fetchApi'
 import { getAccessToken, getApiBaseUrl } from '../lib/utils'
 import { suite } from './routes'
 
@@ -65,3 +64,57 @@ export const deleteResultMutation = () => ({
     await fetchApi(suite.frameExport.result(taskId), { method: 'DELETE' })
   },
 })
+
+export interface PrefetchRangeParams {
+  currentTimeMs: number
+  beforeSeconds: number
+  afterSeconds: number
+  includeCurrentFrame: boolean
+  width: number
+}
+
+export function openPrefetchRangeStream(
+  itemId: string,
+  params: PrefetchRangeParams,
+  onFrameReady: (fiIdx: number) => void,
+  onDone: () => void,
+  onError: () => void,
+): AbortController {
+  const abort = new AbortController()
+  const url = apiUrl(suite.frameExport.prefetchReady(itemId))
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(params),
+    signal: abort.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok || !res.body) { onError(); return }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data?.done) { onDone(); reader.cancel(); return }
+              if (typeof data?.frameReady === 'number') onFrameReady(data.frameReady)
+            } catch { /* ignore */ }
+          }
+        }
+      } catch {
+        onError()
+      }
+    })
+    .catch((err: unknown) => {
+      if ((err as { name?: string })?.name !== 'AbortError') onError()
+    })
+  return abort
+}

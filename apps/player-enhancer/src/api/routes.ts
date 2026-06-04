@@ -23,8 +23,8 @@ export const suite = {
         ? `${base()}/JellyfinSuite/FrameExport/${encodeURIComponent(id)}?frameIdx=${fiIdx}&width=${width}`
         : `${base()}/JellyfinSuite/FrameExport/${encodeURIComponent(id)}?positionMs=${Math.round(posMs)}&width=${width}`,
 
-    prefetchReady: (id: string, width: number) =>
-      `${base()}/JellyfinSuite/FrameExport/PrefetchReady/${encodeURIComponent(id)}?width=${width}`,
+    prefetchReady: (id: string) =>
+      `${base()}/JellyfinSuite/FrameExport/PrefetchReady/${encodeURIComponent(id)}`,
 
     generate:     () => `${base()}/JellyfinSuite/FrameExport/Generate`,
     taskProgress: (taskId: string) => `${base()}/JellyfinSuite/FrameExport/TaskProgress?taskId=${encodeURIComponent(taskId)}`,

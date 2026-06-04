@@ -264,6 +264,58 @@ pub(crate) async fn write_list_cached(
     Ok(())
 }
 
+// ── MSG_PREFETCH_RANGE_STREAM (0x19) ────────────────────────────────
+// Wire: [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
+
+pub(crate) struct PrefetchRangeStreamReq {
+    pub item_id: String,
+    pub path: std::path::PathBuf,
+    pub current_time_ms: i64,
+    pub before_ms: i64,
+    pub after_ms: i64,
+    pub include_current: bool,
+    pub width: u32,
+}
+
+pub(crate) async fn read_prefetch_range_stream_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<PrefetchRangeStreamReq> {
+    use tokio::io::AsyncReadExt;
+
+    let mut id_buf = [0u8; 32];
+    stream.read_exact(&mut id_buf).await?;
+    let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
+
+    let mut pl_buf = [0u8; 4];
+    stream.read_exact(&mut pl_buf).await?;
+    let path_len = u32::from_le_bytes(pl_buf) as usize;
+    let mut pbytes = vec![0u8; path_len];
+    stream.read_exact(&mut pbytes).await?;
+    let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
+
+    let mut ct_buf = [0u8; 8];
+    stream.read_exact(&mut ct_buf).await?;
+    let current_time_ms = i64::from_le_bytes(ct_buf);
+
+    let mut bm_buf = [0u8; 8];
+    stream.read_exact(&mut bm_buf).await?;
+    let before_ms = i64::from_le_bytes(bm_buf);
+
+    let mut am_buf = [0u8; 8];
+    stream.read_exact(&mut am_buf).await?;
+    let after_ms = i64::from_le_bytes(am_buf);
+
+    let mut ic_buf = [0u8; 1];
+    stream.read_exact(&mut ic_buf).await?;
+    let include_current = ic_buf[0] != 0;
+
+    let mut w_buf = [0u8; 4];
+    stream.read_exact(&mut w_buf).await?;
+    let width = u32::from_le_bytes(w_buf);
+
+    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, before_ms, after_ms, include_current, width })
+}
+
 // ── MSG_INDEX_FRAMES_STREAM (0x17) ──────────────────────────────────
 // Wire: [request_id(4)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)]
 

@@ -3,7 +3,7 @@ import { getDefaultStore, useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { frameUrl, generateExportMutation } from "../api/frameExportApi";
+import { frameUrl, generateExportMutation, openPrefetchRangeStream } from "../api/frameExportApi";
 import { itemNameQuery } from "../api/jellyfinApi";
 import { suite } from "../api/routes";
 import type { FrameEntry, FrameInfoEntry } from "../core/state";
@@ -18,7 +18,6 @@ import {
   _maxPosMs,
   _minPosMs,
   _savedState,
-  _videoEl,
   modalMinimizedAtom,
   pageAtom,
   setActiveTaskId,
@@ -227,12 +226,9 @@ function FrameExportModalInner({
   }, [])
 
   const rootRef = useRef<HTMLDivElement>(null)
+  const prefetchAbortRef = useRef<AbortController | null>(null)
   const page = useAtomValue(pageAtom)
   const playbackMs = Math.round(videoEl.currentTime * 1000)
-
-  // ── 2. State ────────────────────────────────────────────────────────────────
-
-  const [prefetchTrigger, setPrefetchTrigger] = useState<string | null>(null);
 
   // ── 3. SSE Streams ────────────────────────────────────────────────────────────
 
@@ -266,73 +262,6 @@ function FrameExportModalInner({
     }
   }, [frameInfoSse.done]);
 
-  // ── prefetch SSE (POST) ─────────────────────────────────────────────────
-
-  const [prefetchItems, setPrefetchItems] = useState<number[]>([]);
-  const [prefetchDone, setPrefetchDoneState] = useState(false);
-
-  useEffect(() => {
-    if (!prefetchTrigger) return;
-    const idx = _frames.map((f) => f.fiIdx).filter((i) => i >= 0);
-    if (idx.length === 0) return;
-    const url = apiUrl(suite.frameExport.prefetchReady(itemId, 320));
-    const abort = new AbortController();
-    fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
-      body: JSON.stringify(idx),
-      signal: abort.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok || !res.body) {
-          setPrefetchDoneState(true);
-          return;
-        }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const items: number[] = [];
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data?.done) {
-                  reader.cancel();
-                  setPrefetchDoneState(true);
-                  return;
-                }
-                if (typeof data?.frameReady === "number")
-                  items.push(data.frameReady);
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        } finally {
-          setPrefetchItems(items);
-          setPrefetchDoneState(true);
-        }
-      })
-      .catch(() => {
-        setPrefetchDoneState(true);
-      });
-    return () => {
-      abort.abort();
-    };
-  }, [prefetchTrigger]);
-
-  const prefetchSse = { items: prefetchItems, done: prefetchDone };
-
   const { data: fetchedName } = useQuery(itemNameQuery(itemId));
 
   // ── 4. Mutations ────────────────────────────────────────────────────────────
@@ -345,23 +274,33 @@ function FrameExportModalInner({
     return Math.round(_fpsFrac.num / _fpsFrac.den);
   }
 
-  function triggerPrefetch() {
-    setPrefetchTrigger(String(Date.now()));
-  }
-
-  function markFrameReady(idx: number) {
+  const markFrameReady = useCallback((idx: number) => {
     setFrames(
       _frames.map((f, i) =>
         i === idx
-          ? {
-              ...f,
-              jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320),
-              loadError: false,
-            }
+          ? { ...f, jpegUrl: frameUrl(_itemId, f.fiIdx, f.posMs, 320), loadError: false }
           : f,
       ),
     );
-  }
+  }, []);
+
+  const triggerPrefetch = useCallback(() => {
+    prefetchAbortRef.current?.abort();
+    if (_minPosMs > _maxPosMs) return;
+    const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
+    const beforeSeconds = (centerMs - _minPosMs) / 1000;
+    const afterSeconds = (_maxPosMs - centerMs) / 1000;
+    prefetchAbortRef.current = openPrefetchRangeStream(
+      itemId,
+      { currentTimeMs: centerMs, beforeSeconds, afterSeconds, includeCurrentFrame: true, width: 320 },
+      (fiIdx) => {
+        const idx = _frames.findIndex((f) => f.fiIdx === fiIdx);
+        if (idx >= 0) markFrameReady(idx);
+      },
+      () => {},
+      () => {},
+    );
+  }, [itemId, markFrameReady]);
 
   function saveState() {
     setSavedState({
@@ -396,13 +335,6 @@ function FrameExportModalInner({
     if (fetchedName) setItemTitle(fetchedName);
   }, [fetchedName]);
 
-  useEffect(() => {
-    if (!prefetchSse.done) return;
-    prefetchSse.items.forEach((fi) => {
-      const idx = _frames.findIndex((f) => f.fiIdx === fi);
-      if (idx >= 0) markFrameReady(idx);
-    });
-  }, [prefetchSse.done]);
 
   useEffect(() => {
     const ms = Math.round(videoEl.currentTime * 1000);
@@ -437,7 +369,11 @@ function FrameExportModalInner({
     }
     sPage.value = "grid";
     sLightboxIdx.value = null;
-  }, [videoEl, itemId, frameInfoSse.done]);
+  }, [videoEl, itemId, frameInfoSse.done, triggerPrefetch]);
+
+  useEffect(() => {
+    return () => { prefetchAbortRef.current?.abort(); };
+  }, []);
 
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
@@ -451,7 +387,7 @@ function FrameExportModalInner({
     setFiMinIdx(start);
     setMinPosMs(_frameIndex[start].ms);
     triggerPrefetch();
-  }, []);
+  }, [triggerPrefetch]);
 
   const expandForward = useCallback(() => {
     if (!_frameIndex) return;
@@ -463,7 +399,7 @@ function FrameExportModalInner({
     setFiMaxIdx(end);
     setMaxPosMs(_frameIndex[end].ms);
     triggerPrefetch();
-  }, []);
+  }, [triggerPrefetch]);
 
   const submitGenerate = useCallback(() => {
     const exportType = sExportType.value;
