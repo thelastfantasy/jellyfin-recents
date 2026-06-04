@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai'
 import type { ChangeEvent } from 'react'
 
 import {
-  _fiMaxIdx, _fiMinIdx, _frameIndex, _frames, _fpsFrac, _maxPosMs,
+  _fiMaxIdx, _fiMinIdx, _fpsFrac, _frameIndex, _frames, _maxPosMs,
   _minPosMs, _videoEl, exportTypeAtom, frameInterval,
   framesAtom, modalPhaseAtom, paramsOpenAtom, prefetchDoneAtom,
   prefetchTotalAtom, setFrames, settingsAtom, sExportType, sParamsOpen,
