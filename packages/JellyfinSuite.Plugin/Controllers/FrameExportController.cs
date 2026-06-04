@@ -64,12 +64,12 @@ public class FrameExportController : ControllerBase
 
         var fi = frameIdx ?? -1;
         await _frameExport.EnsureStartedAsync(ct);
-        var (jpeg, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, fi, width, itemId, ct);
-        if (jpeg == null || jpeg.Length == 0)
+        var (imageBytes, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, fi, width, itemId, ct);
+        if (imageBytes == null || imageBytes.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
         Response.Headers["X-Frame-Quality"] = System.Text.Json.JsonSerializer.Serialize(new { qualityFlags });
         Response.Headers["X-Frame-Pts-Ms"] = actualPtsMs.ToString();
-        return File(jpeg, "image/jpeg");
+        return File(imageBytes, "image/webp");
     }
 
     /// <summary>

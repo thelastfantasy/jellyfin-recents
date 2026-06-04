@@ -219,10 +219,17 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
         let item_id = job.item_id.clone();
 
         match tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path, pos_ms, width)).await {
-            Ok(Ok((bytes, actual_pts_ms, fps_num, fps_den))) => {
-                let frame_idx = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-                disk.write(&item_id, &job.path, frame_idx, pos_ms, width, &bytes);
-                state.ram.lock().await.put((job.path, pos_ms, width), bytes);
+            Ok(Ok(r)) => {
+                let frame_idx = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
+                if !r.webp_orig.is_empty() {
+                    disk.write(&item_id, &job.path, frame_idx, pos_ms, 0, &r.webp_orig);
+                }
+                disk.write(&item_id, &job.path, frame_idx, pos_ms, width, &r.webp);
+                let mut ram = state.ram.lock().await;
+                if !r.webp_orig.is_empty() {
+                    ram.put((job.path.clone(), pos_ms, 0), r.webp_orig);
+                }
+                ram.put((job.path, pos_ms, width), r.webp);
                 eprintln!("[frame-forge] PREFETCH done: {item_id} f{frame_idx}@{pos_ms}ms w={width}");
             }
             Ok(Err(e)) => eprintln!("[frame-forge] prefetch decode error: {e}"),
@@ -324,18 +331,18 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
     // 1. RAM cache
     let ram_key: RamKey = (req.path.clone(), pos_ms, req.width);
     let cached = state.ram.lock().await.get(&ram_key).cloned();
-    if let Some(jpeg) = cached {
-        let img = image::load_from_memory(&jpeg)?;
+    if let Some(webp) = cached {
+        let img = image::load_from_memory(&webp)?;
         let flags = detect_quality(&img).to_bitmask();
-        return write_jpeg_response(stream, req.request_id, &jpeg, flags, -1).await;
+        return write_jpeg_response(stream, req.request_id, &webp, flags, -1).await;
     }
 
     // 2. Disk cache
-    if let Some(jpeg) = state.disk.read(&req.item_id, &req.path, pos_ms, req.width) {
-        state.ram.lock().await.put(ram_key, jpeg.clone());
-        let img = image::load_from_memory(&jpeg)?;
+    if let Some(webp) = state.disk.read(&req.item_id, &req.path, pos_ms, req.width) {
+        state.ram.lock().await.put(ram_key, webp.clone());
+        let img = image::load_from_memory(&webp)?;
         let flags = detect_quality(&img).to_bitmask();
-        return write_jpeg_response(stream, req.request_id, &jpeg, flags, -1).await;
+        return write_jpeg_response(stream, req.request_id, &webp, flags, -1).await;
     }
 
     // 3. Decode on demand (blocking)
@@ -351,11 +358,14 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
     .await;
 
     match result {
-        Ok(Ok((jpeg, actual_pts_ms, fps_num, fps_den))) => {
-            let frame_idx = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-            state_clone.disk.write(&req.item_id, &req.path, frame_idx, pos_ms, req.width, &jpeg);
-            state_clone.ram.lock().await.put(ck, jpeg.clone());
-            let img = match image::load_from_memory(&jpeg) {
+        Ok(Ok(r)) => {
+            let frame_idx = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
+            if !r.webp_orig.is_empty() {
+                state_clone.disk.write(&req.item_id, &req.path, frame_idx, pos_ms, 0, &r.webp_orig);
+            }
+            state_clone.disk.write(&req.item_id, &req.path, frame_idx, pos_ms, req.width, &r.webp);
+            state_clone.ram.lock().await.put(ck, r.webp.clone());
+            let img = match image::load_from_memory(&r.webp) {
                 Ok(i) => i,
                 Err(e) => {
                     eprintln!("[frame-forge] image decode error: {e}");
@@ -364,7 +374,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
                 }
             };
             let flags = detect_quality(&img).to_bitmask();
-            write_jpeg_response(stream, req.request_id, &jpeg, flags, actual_pts_ms).await?;
+            write_jpeg_response(stream, req.request_id, &r.webp, flags, r.pts_ms).await?;
         }
         Ok(Err(e)) => {
             eprintln!("[frame-forge] decode error: {e}");
@@ -443,7 +453,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     let req = crate::protocol::read_animate_req(stream).await?;
     eprintln!(
-        "[frame-forge] ANIMATE task={} frames={} fmt={} speed={}",
+        "[frame-forge] ANIMATE task={} frames={} fmt={:?} speed={}",
         req.task_id, req.paths.len(), req.format, req.speed
     );
 
@@ -470,10 +480,10 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
             0
         };
         eprintln!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
-        let (bytes, pts_ms, _fps_num, _fps_den) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+        let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
 
-        images.push(image::load_from_memory(&bytes)?);
-        actual_pts_vec.push(pts_ms);
+        images.push(image::load_from_memory(&r.webp)?);
+        actual_pts_vec.push(r.pts_ms);
         if i == 0 { eprintln!("[frame-forge] ANIMATE first frame decoded"); }
         send_progress(
             stream, "running", "decoding",
@@ -502,18 +512,12 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     let effective_px = if req.target_px > 0 {
         req.target_px
     } else {
-        match req.resolution_preset.as_str() {
-            "1080p" => 1080,
-            "720p"  => 720,
-            "480p"  => 480,
-            "360p"  => 360,
-            _       => 0,
-        }
+        req.resolution_preset.to_px()
     };
     let (tw, th) = if effective_px > 0 {
         let first = &images[0];
         let (fw, fh) = (first.width(), first.height());
-        if req.resize_mode == 0x02 {
+        if req.resize_mode == crate::protocol::ResizeMode::Height {
             let ratio = effective_px as f64 / fh as f64;
             ((fw as f64 * ratio) as u32, effective_px)
         } else {
@@ -544,7 +548,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     let encode_handle = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
         let n = images.len();
-        if format == 0x02 {
+        if format.is_webp() {
             use image::imageops;
             use webpx::AnimationEncoder;
             use enough::Unstoppable;
@@ -661,8 +665,8 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         } else {
             0
         };
-        let (bytes, ..) = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
-        images.push(image::load_from_memory(&bytes)?);
+        let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+        images.push(image::load_from_memory(&r.webp)?);
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, req.paths.len() as u32,
@@ -709,7 +713,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     let enc_format = req.format;
     let enc_quality = req.quality;
     let output = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
-        if enc_format == 0x02 {
+        if enc_format.is_webp() {
             let rgba = result.to_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
             let data = if enc_quality <= 0.0 {
@@ -1250,10 +1254,17 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
         }).await;
 
         match result {
-            Ok(Ok((bytes, actual_pts_ms, fps_num, fps_den))) => {
-                let fi = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-                disk.write(&item_id_c, &path, fi, pos_ms, width, &bytes);
-                ram_state.ram.lock().await.put((path.clone(), pos_ms, width), bytes);
+            Ok(Ok(r)) => {
+                let fi = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
+                if !r.webp_orig.is_empty() {
+                    disk.write(&item_id_c, &path, fi, pos_ms, 0, &r.webp_orig);
+                }
+                disk.write(&item_id_c, &path, fi, pos_ms, width, &r.webp);
+                let mut ram = ram_state.ram.lock().await;
+                if !r.webp_orig.is_empty() {
+                    ram.put((path.clone(), pos_ms, 0), r.webp_orig);
+                }
+                ram.put((path.clone(), pos_ms, width), r.webp);
                 let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
                 stream.write_all(line.as_bytes()).await?;
             }
@@ -1340,10 +1351,17 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }).await;
 
         match result {
-            Ok(Ok((bytes, actual_pts_ms, fps_num, fps_den))) => {
-                let fi = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-                disk.write(&item_id_c, &path, fi, pos_ms, width, &bytes);
-                ram_state.ram.lock().await.put((path.clone(), pos_ms, width), bytes);
+            Ok(Ok(r)) => {
+                let fi = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
+                if !r.webp_orig.is_empty() {
+                    disk.write(&item_id_c, &path, fi, pos_ms, 0, &r.webp_orig);
+                }
+                disk.write(&item_id_c, &path, fi, pos_ms, width, &r.webp);
+                let mut ram = ram_state.ram.lock().await;
+                if !r.webp_orig.is_empty() {
+                    ram.put((path.clone(), pos_ms, 0), r.webp_orig);
+                }
+                ram.put((path.clone(), pos_ms, width), r.webp);
                 if !first_ready {
                     first_ready = true;
                     eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=decoded abs={}", bench_now_ms() - t0, bench_now_ms());

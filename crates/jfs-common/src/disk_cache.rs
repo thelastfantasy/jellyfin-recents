@@ -37,6 +37,7 @@ impl DiskCache {
         let index_file = cache_dir.join("index.txt");
         let _ = std::fs::create_dir_all(&cache_dir);
         sweep_legacy_dirs(&cache_dir, &index_file);
+        sweep_legacy_jpgs(&cache_dir);
         let index = load_index(&cache_dir, &index_file).unwrap_or_else(|_| rebuild_index(label, &cache_dir, &index_file));
         eprintln!(
             "[{label}] disk cache: {:.1} MB used / {:.0} MB cap ({} entries)",
@@ -48,7 +49,7 @@ impl DiskCache {
     }
 
     fn frame_path(&self, item_id: &str, frame_idx: i64, pos_ms: i64, width: u32) -> PathBuf {
-        self.cache_dir.join(item_id).join(format!("{frame_idx}_{}_{width}.jpg", format_pos_ms(pos_ms)))
+        self.cache_dir.join(item_id).join(format!("{frame_idx}_{}_{width}.webp", format_pos_ms(pos_ms)))
     }
 
     pub fn read(&self, item_id: &str, video_path: &Path, pos_ms: i64, width: u32) -> Option<Vec<u8>> {
@@ -242,6 +243,21 @@ fn sweep_legacy_dirs(cache_dir: &Path, index_file: &Path) {
     }
 }
 
+/// Remove old .jpg files left from before the WebP migration.
+fn sweep_legacy_jpgs(cache_dir: &Path) {
+    let Ok(dirs) = std::fs::read_dir(cache_dir) else { return };
+    for dir in dirs.flatten() {
+        if !dir.path().is_dir() { continue; }
+        let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
+        for file in files.flatten() {
+            let name = file.file_name();
+            if name.to_string_lossy().ends_with(".jpg") {
+                let _ = std::fs::remove_file(file.path());
+            }
+        }
+    }
+}
+
 // ── index I/O ─────────────────────────────────────────────────────────────────
 //
 // Format (space-separated, one entry per line):
@@ -283,7 +299,7 @@ fn load_index(cache_dir: &Path, index_file: &Path) -> Result<Index, Box<dyn std:
         let size: u64 = parts[4].parse()?;
         let ts: u64 = parts[5].parse()?;
         let vmtime: u64 = parts.get(6).and_then(|s| s.parse().ok()).unwrap_or(0);
-        if cache_dir.join(&item_id).join(format!("{frame_idx}_{}_{width}.jpg", format_pos_ms(pos_ms))).exists() {
+        if cache_dir.join(&item_id).join(format!("{frame_idx}_{}_{width}.webp", format_pos_ms(pos_ms))).exists() {
             entries.insert((item_id, pos_ms, width), Entry { frame_idx, size, written_at: ts, video_mtime: vmtime });
         }
     }
@@ -303,8 +319,8 @@ fn rebuild_index(label: &str, cache_dir: &Path, index_file: &Path) -> Index {
         for file in files.flatten() {
             let name = file.file_name();
             let stem = name.to_string_lossy();
-            // Parse "{frame_idx}_{HHhMMmSSsNNNms}_{width}.jpg"
-            let stem = match stem.strip_suffix(".jpg") { Some(s) => s, None => continue };
+            // Parse "{frame_idx}_{HHhMMmSSsNNNms}_{width}.webp"
+            let stem = match stem.strip_suffix(".webp") { Some(s) => s, None => continue };
             let (rest, width_str) = match stem.rsplit_once('_') { Some(p) => p, None => continue };
             let (frame_idx_str, pos_ms_str) = match rest.split_once('_') { Some(p) => p, None => continue };
             let frame_idx: i64 = match frame_idx_str.parse() { Ok(v) => v, Err(_) => continue };

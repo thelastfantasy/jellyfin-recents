@@ -179,11 +179,15 @@ public sealed class FrameExportService : IDisposable
 
                 return (jpegData, flags, actualPtsMs);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                InvalidateSocket();
+                throw;
+            }
+            catch (Exception ex)
             {
                 _logger.LogWarning("[FrameExport] socket error — resetting: {Ex}", ex.Message);
-                try { _socket?.Dispose(); } catch { }
-                _socket = null;
+                InvalidateSocket();
                 return (null, 0, 0);
             }
         }
@@ -244,11 +248,15 @@ public sealed class FrameExportService : IDisposable
             var ack = new byte[8];
             await ReceiveExactAsync(sock, ack, 8, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] prefetch socket error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
         }
         finally
         {
@@ -295,11 +303,15 @@ public sealed class FrameExportService : IDisposable
             var ack = new byte[8];
             await ReceiveExactAsync(sock, ack, 8, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] prefetch_range socket error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
         }
         finally
         {
@@ -348,11 +360,15 @@ public sealed class FrameExportService : IDisposable
                 result.Add(BinaryPrimitives.ReadInt64LittleEndian(body.AsSpan(i * 16))); // frame_idx
             return result;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] list_cached socket error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
             return Array.Empty<long>();
         }
         finally
@@ -412,11 +428,15 @@ public sealed class FrameExportService : IDisposable
 
             return new FrameIndexDto { Frames = frames, Fps = new FpsFracDto { Num = fpsNum, Den = fpsDen } };
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] FrameIndexAsync error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
             return null;
         }
         finally
@@ -694,11 +714,15 @@ public sealed class FrameExportService : IDisposable
                 await output.FlushAsync(ct).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] FrameIndexStreamAsync error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
         }
         finally
         {
@@ -757,11 +781,15 @@ public sealed class FrameExportService : IDisposable
                 await output.FlushAsync(ct).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] PrefetchRangeStreamAsync error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
         }
         finally
         {
@@ -815,11 +843,15 @@ public sealed class FrameExportService : IDisposable
                 await output.FlushAsync(ct).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] PrefetchStreamAsync error: {Ex}", ex.Message);
-            try { _socket?.Dispose(); } catch { }
-            _socket = null;
+            InvalidateSocket();
         }
         finally
         {
@@ -852,11 +884,15 @@ public sealed class FrameExportService : IDisposable
                 await ReceiveExactAsync(sock, jsonBuf, len, ct).ConfigureAwait(false);
                 return Encoding.UTF8.GetString(jsonBuf);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                InvalidateSocket();
+                throw;
+            }
+            catch (Exception ex)
             {
                 _logger.LogWarning("[FrameExport] debug dump socket error: {Ex}", ex.Message);
-                try { _socket?.Dispose(); } catch { }
-                _socket = null;
+                InvalidateSocket();
                 return "{}";
             }
         }

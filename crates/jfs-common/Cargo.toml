@@ -7,3 +7,5 @@ edition = "2021"
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
+webpx = "0.3.4"
+enough = "0.4.4"

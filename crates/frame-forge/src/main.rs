@@ -182,11 +182,11 @@ mod tests {
         let mut images = Vec::with_capacity(n);
         let mut last_pts: Option<i64> = None;
         for &pos in pts_slice {
-            let (bytes, pts, _, _) = decode_and_encode(video, pos, 160)
+            let r = decode_and_encode(video, pos, 160)
                 .unwrap_or_else(|e| panic!("decode_and_encode @{pos}ms: {e}"));
-            if last_pts == Some(pts) { continue; }
-            last_pts = Some(pts);
-            images.push(image::load_from_memory(&bytes).expect("bad JPEG from decoder"));
+            if last_pts == Some(r.pts_ms) { continue; }
+            last_pts = Some(r.pts_ms);
+            images.push(image::load_from_memory(&r.webp).expect("bad WebP from decoder"));
         }
         assert_eq!(
             images.len(), n,
@@ -213,9 +213,9 @@ mod tests {
 
         let mut actual = Vec::with_capacity(n);
         for &pos in head {
-            let (_, pts, _, _) = decode_and_encode(video, pos, 160)
+            let r = decode_and_encode(video, pos, 160)
                 .unwrap_or_else(|e| panic!("decode @{pos}ms: {e}"));
-            actual.push(pts);
+            actual.push(r.pts_ms);
         }
         let unique: HashSet<i64> = actual.iter().cloned().collect();
         assert_eq!(
@@ -241,9 +241,9 @@ mod tests {
 
         let mut actual = Vec::with_capacity(n);
         for &pos in tail {
-            let (_, pts, _, _) = decode_and_encode(video, pos, 160)
+            let r = decode_and_encode(video, pos, 160)
                 .unwrap_or_else(|e| panic!("decode @{pos}ms: {e}"));
-            actual.push(pts);
+            actual.push(r.pts_ms);
         }
         let unique: HashSet<i64> = actual.iter().cloned().collect();
         assert_eq!(

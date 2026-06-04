@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::ptr;
 
-/// Returns (jpeg_bytes, actual_pts_ms, fps_num, fps_den).
-/// actual_pts_ms is the real decoded frame timestamp; fps_num/fps_den are the stream frame rate.
-pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<(Vec<u8>, i64, i64, i64)> {
+/// Decode one frame and encode to WebP. Returns a `DecodeResult`.
+/// `webp` = WebP at target_width (lossy if width > 0, lossless if width == 0).
+/// `webp_orig` = WebP lossless at native frame size (empty when target_width == 0).
+pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<DecodeResult> {
     use ffmpeg_next as ff;
     use ffmpeg_next::threading;
 
@@ -106,9 +107,6 @@ pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<
     }
 
     let frame = best.context("no frame decoded")?;
-    let jpeg = encode_jpeg(&frame, target_width)?;
-
-    // Convert best_pts to ms, normalized by stream start so frame #0 = first content frame.
     let actual_pts_ms = if tb.0 != 0 && tb.1 != 0 {
         let raw_ms = (best_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
         (raw_ms - stream_start_ms).max(0)
@@ -116,7 +114,23 @@ pub fn decode_and_encode(path: &Path, pos_ms: i64, target_width: u32) -> Result<
         pos_ms
     };
 
-    Ok((jpeg, actual_pts_ms, fps_num, fps_den))
+    let (webp, webp_orig) = if target_width == 0 {
+        (encode_webp_lossless(&frame)?, vec![])
+    } else {
+        let thumb = encode_webp_lossy(&frame, target_width, 85.0)?;
+        let orig  = encode_webp_lossless(&frame)?;
+        (thumb, orig)
+    };
+
+    Ok(DecodeResult { webp, webp_orig, pts_ms: actual_pts_ms, fps_num, fps_den })
+}
+
+pub struct DecodeResult {
+    pub webp:      Vec<u8>,
+    pub webp_orig: Vec<u8>,
+    pub pts_ms:    i64,
+    pub fps_num:   i64,
+    pub fps_den:   i64,
 }
 
 /// Enumerate all video frame timestamps by demuxing (no decoding).
@@ -193,7 +207,10 @@ pub fn index_frames(path: &Path) -> Result<(Vec<(i64, bool)>, i64, i64)> {
     Ok((frames, fps_num, fps_den))
 }
 
-fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<Vec<u8>> {
+// ── WebP encoding helpers ────────────────────────────────────────────────────
+
+/// Convert ffmpeg frame to packed RGBA bytes at the given target width (0 = original size).
+fn frame_to_rgba(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<(Vec<u8>, u32, u32)> {
     use ffmpeg_next::ffi::*;
 
     let aspect = frame.width() as f64 / frame.height() as f64;
@@ -207,7 +224,6 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
 
     unsafe {
         let src = frame.as_ptr();
-
         let src_fmt: AVPixelFormat = std::mem::transmute((*src).format);
 
         let src_is_full_range = matches!(
@@ -217,6 +233,7 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
                 | AVPixelFormat::AV_PIX_FMT_YUVJ444P
                 | AVPixelFormat::AV_PIX_FMT_YUVJ440P
         ) || (*src).color_range == AVColorRange::AVCOL_RANGE_JPEG;
+
         let src_fmt_nd = match src_fmt {
             AVPixelFormat::AV_PIX_FMT_YUVJ420P => AVPixelFormat::AV_PIX_FMT_YUV420P,
             AVPixelFormat::AV_PIX_FMT_YUVJ422P => AVPixelFormat::AV_PIX_FMT_YUV422P,
@@ -226,45 +243,28 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
         };
 
         let sws = sws_getContext(
-            (*src).width,
-            (*src).height,
-            src_fmt_nd,
-            w,
-            h,
-            AVPixelFormat::AV_PIX_FMT_YUV420P,
+            (*src).width, (*src).height, src_fmt_nd,
+            w, h, AVPixelFormat::AV_PIX_FMT_RGBA,
             SWS_BILINEAR as i32,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            ptr::null(),
+            ptr::null_mut(), ptr::null_mut(), ptr::null(),
         );
-        if sws.is_null() {
-            anyhow::bail!("sws_getContext failed");
-        }
+        anyhow::ensure!(!sws.is_null(), "sws_getContext failed");
 
         let coeffs = sws_getCoefficients(SWS_CS_DEFAULT as i32);
         sws_setColorspaceDetails(
             sws,
-            coeffs,
-            if src_is_full_range { 1 } else { 0 },
-            coeffs,
-            1,
-            0,
-            1 << 16,
-            1 << 16,
+            coeffs, if src_is_full_range { 1 } else { 0 },
+            coeffs, 1,
+            0, 1 << 16, 1 << 16,
         );
 
         let mut dst = av_frame_alloc();
-        if dst.is_null() {
-            sws_freeContext(sws);
-            anyhow::bail!("av_frame_alloc failed");
-        }
-        (*dst).format = AVPixelFormat::AV_PIX_FMT_YUV420P as i32;
-        (*dst).color_range = AVColorRange::AVCOL_RANGE_JPEG;
-        (*dst).width = w;
+        if dst.is_null() { sws_freeContext(sws); anyhow::bail!("av_frame_alloc failed"); }
+        (*dst).format = AVPixelFormat::AV_PIX_FMT_RGBA as i32;
+        (*dst).width  = w;
         (*dst).height = h;
         if av_frame_get_buffer(dst, 0) < 0 {
-            av_frame_free(&mut dst);
-            sws_freeContext(sws);
+            av_frame_free(&mut dst); sws_freeContext(sws);
             anyhow::bail!("av_frame_get_buffer failed");
         }
 
@@ -272,62 +272,41 @@ fn encode_jpeg(frame: &ffmpeg_next::frame::Video, target_width: u32) -> Result<V
             sws,
             (*src).data.as_ptr() as *const *const u8,
             (*src).linesize.as_ptr(),
-            0,
-            (*src).height,
+            0, (*src).height,
             (*dst).data.as_mut_ptr() as *mut *mut u8,
             (*dst).linesize.as_mut_ptr(),
         );
         sws_freeContext(sws);
 
-        let codec = avcodec_find_encoder(AVCodecID::AV_CODEC_ID_MJPEG);
-        if codec.is_null() {
-            av_frame_free(&mut dst);
-            anyhow::bail!("MJPEG encoder not found");
+        // Copy packed RGBA, stripping stride padding
+        let stride    = (*dst).linesize[0] as usize;
+        let row_bytes = w as usize * 4;
+        let mut rgba  = Vec::with_capacity(row_bytes * h as usize);
+        let data_ptr  = (*dst).data[0];
+        for row in 0..h as usize {
+            let slice = std::slice::from_raw_parts(data_ptr.add(row * stride), row_bytes);
+            rgba.extend_from_slice(slice);
         }
 
-        let mut enc = avcodec_alloc_context3(codec);
-        if enc.is_null() {
-            av_frame_free(&mut dst);
-            anyhow::bail!("avcodec_alloc_context3 failed");
-        }
-
-        (*enc).width = w;
-        (*enc).height = h;
-        (*enc).pix_fmt = AVPixelFormat::AV_PIX_FMT_YUVJ420P;
-        (*enc).time_base = AVRational { num: 1, den: 25 };
-        (*enc).flags |= AV_CODEC_FLAG_QSCALE as i32;
-        (*enc).global_quality = (FF_QP2LAMBDA * 5) as i32;
-
-        if avcodec_open2(enc, codec, ptr::null_mut()) < 0 {
-            avcodec_free_context(&mut enc);
-            av_frame_free(&mut dst);
-            anyhow::bail!("avcodec_open2 failed");
-        }
-
-        (*dst).pts = 0;
-        (*dst).quality = (FF_QP2LAMBDA * 5) as i32;
-
-        if avcodec_send_frame(enc, dst) < 0 {
-            avcodec_free_context(&mut enc);
-            av_frame_free(&mut dst);
-            anyhow::bail!("avcodec_send_frame failed");
-        }
-
-        let mut pkt = av_packet_alloc();
-        let mut jpeg = Vec::new();
-        if !pkt.is_null() && avcodec_receive_packet(enc, pkt) == 0 {
-            let data = std::slice::from_raw_parts((*pkt).data, (*pkt).size as usize);
-            jpeg.extend_from_slice(data);
-        }
-        if !pkt.is_null() {
-            av_packet_free(&mut pkt);
-        }
-        avcodec_free_context(&mut enc);
         av_frame_free(&mut dst);
-
-        if jpeg.is_empty() {
-            anyhow::bail!("JPEG encode produced no output");
-        }
-        Ok(jpeg)
+        Ok((rgba, w as u32, h as u32))
     }
+}
+
+fn encode_webp_lossy(frame: &ffmpeg_next::frame::Video, target_width: u32, quality: f32) -> Result<Vec<u8>> {
+    let (rgba, w, h) = frame_to_rgba(frame, target_width)?;
+    let out = webpx::Encoder::new_rgba(&rgba, w, h)
+        .quality(quality)
+        .encode(enough::Unstoppable)
+        .map_err(|e| anyhow::anyhow!("WebP lossy encode: {e}"))?;
+    Ok(out.to_vec())
+}
+
+fn encode_webp_lossless(frame: &ffmpeg_next::frame::Video) -> Result<Vec<u8>> {
+    let (rgba, w, h) = frame_to_rgba(frame, 0)?;
+    let out = webpx::Encoder::new_rgba(&rgba, w, h)
+        .lossless(true)
+        .encode(enough::Unstoppable)
+        .map_err(|e| anyhow::anyhow!("WebP lossless encode: {e}"))?;
+    Ok(out.to_vec())
 }

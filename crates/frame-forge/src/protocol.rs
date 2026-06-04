@@ -97,19 +97,74 @@ pub(crate) async fn write_ack(
     Ok(())
 }
 
-// 鈹€鈹€ ANIMATE request (0x11) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── ANIMATE request (0x11) ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnimFormat {
+    Gif,
+    WebP,
+}
+
+impl AnimFormat {
+    pub fn from_u16(v: u16) -> Self {
+        if v == 0x02 { Self::WebP } else { Self::Gif }
+    }
+    pub fn is_webp(self) -> bool { matches!(self, Self::WebP) }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeMode {
+    Width,
+    Height,
+}
+
+impl ResizeMode {
+    pub fn from_u16(v: u16) -> Self {
+        if v == 0x02 { Self::Height } else { Self::Width }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolutionPreset {
+    Original,
+    P1080,
+    P720,
+    P480,
+    P360,
+}
+
+impl ResolutionPreset {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "1080p" => Self::P1080,
+            "720p"  => Self::P720,
+            "480p"  => Self::P480,
+            "360p"  => Self::P360,
+            _       => Self::Original,
+        }
+    }
+    pub fn to_px(self) -> u32 {
+        match self {
+            Self::P1080 => 1080,
+            Self::P720  => 720,
+            Self::P480  => 480,
+            Self::P360  => 360,
+            Self::Original => 0,
+        }
+    }
+}
 
 pub(crate) struct AnimateReq {
     pub task_id: String,
     pub paths: Vec<(std::path::PathBuf, i64)>, // (path, frame_idx)
-    pub format: u16,      // 0x01=GIF, 0x02=WebP
-    pub resize_mode: u16, // 0x01=width, 0x02=height
+    pub format: AnimFormat,
+    pub resize_mode: ResizeMode,
     pub target_px: u32,   // custom pixel value (0 means use resolution_preset)
     pub speed: f32,       // playback speed multiplier (1.0 = real-time)
     pub loop_count: u16,
     pub crop: Option<(f32, f32, f32, f32)>, // (x, y, w, h) normalized 0-1；None = 不裁切
     pub quality: f32,     // 0.0 = lossless, 0.01-1.0 = lossy quality
-    pub resolution_preset: String, // "original"|"1080p"|"720p"|"480p"|"360p"
+    pub resolution_preset: ResolutionPreset,
 }
 
 pub(crate) async fn read_animate_req(
@@ -149,11 +204,11 @@ pub(crate) async fn read_animate_req(
 
     let mut fmt_buf = [0u8; 2];
     stream.read_exact(&mut fmt_buf).await?;
-    let format = u16::from_le_bytes(fmt_buf);
+    let format = AnimFormat::from_u16(u16::from_le_bytes(fmt_buf));
 
     let mut rm_buf = [0u8; 2];
     stream.read_exact(&mut rm_buf).await?;
-    let resize_mode = u16::from_le_bytes(rm_buf);
+    let resize_mode = ResizeMode::from_u16(u16::from_le_bytes(rm_buf));
 
     let mut tp_buf = [0u8; 4];
     stream.read_exact(&mut tp_buf).await?;
@@ -181,7 +236,7 @@ pub(crate) async fn read_animate_req(
     let preset_len = u32::from_le_bytes(preset_len_buf) as usize;
     let mut preset_bytes = vec![0u8; preset_len];
     stream.read_exact(&mut preset_bytes).await?;
-    let resolution_preset = String::from_utf8(preset_bytes).unwrap_or_default();
+    let resolution_preset = ResolutionPreset::from_str(&String::from_utf8(preset_bytes).unwrap_or_default());
 
     Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
 }
