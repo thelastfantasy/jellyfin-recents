@@ -46,6 +46,7 @@ export default defineConfig({
     },
     outDir: resolve(__dirname, '../../packages/JellyfinSuite.Plugin/Web'),
     emptyOutDir: false,
+    sourcemap: process.env.DEPLOY_MAP === '1' ? 'inline' as const : false,
     rollupOptions: {
       output: {
         plugins: [inlineCssPlugin()],

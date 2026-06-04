@@ -8,6 +8,7 @@ $RepoRoot = (Get-Location).Path
 
 Write-Host "=== Building frontend ==="
 Set-Location "$RepoRoot/apps/frontend"
+$env:DEPLOY_MAP = '1'
 pnpm run build
 if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 
@@ -64,7 +65,6 @@ docker cp "$RepoRoot/build/plugin/poster-gen-linux-x64" jellyfin-dev:/config/plu
 docker cp "$RepoRoot/packages/JellyfinSuite.Plugin/seek-preview-linux-x64" jellyfin-dev:/config/plugins/JellyfinSuite/seek-preview-linux-x64
 docker cp "$RepoRoot/packages/JellyfinSuite.Plugin/frame-forge-linux-x64" jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
 docker cp "$RepoRoot/packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js" jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
-docker cp "$RepoRoot/packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js.map" jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js.map
 docker cp "$RepoRoot/packages/JellyfinSuite.Plugin/meta.json" jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 docker restart jellyfin-dev
 

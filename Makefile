@@ -15,10 +15,10 @@ endif
         build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release
 
 build-frontend:
-	cd apps/frontend && pnpm run build
+	cd apps/frontend && DEPLOY_MAP=1 pnpm run build
 
 build-enhancer:
-	cd apps/player-enhancer && pnpm install && pnpm run build
+	cd apps/player-enhancer && pnpm install && DEPLOY_MAP=1 pnpm run build
 
 # Build Linux Rust binary via Docker (cross 在 Windows 上有工具链检测 bug，改用 docker run 直接编译)
 build-poster-gen:
@@ -95,8 +95,6 @@ update: build-poster-gen build
 		jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
 		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
-	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js.map \
-		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js.map
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/meta.json \
 		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 	docker restart jellyfin-dev
@@ -119,8 +117,6 @@ update-quick:
 		jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
 		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
-	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js.map \
-		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js.map
 	MSYS_NO_PATHCONV=1 docker cp packages/JellyfinSuite.Plugin/meta.json \
 		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
 	docker restart jellyfin-dev
