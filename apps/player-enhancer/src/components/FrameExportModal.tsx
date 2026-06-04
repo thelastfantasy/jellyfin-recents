@@ -1,11 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { atom, getDefaultStore, useAtomValue, useSetAtom } from "jotai";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import { frameUrl, generateExportMutation, openPrefetchRangeStream } from "../api/frameExportApi";
+import { frameUrl, generateExportMutation, openFrameInfoStream, openPrefetchRangeStream } from "../api/frameExportApi";
 import { itemNameQuery } from "../api/jellyfinApi";
-import { suite } from "../api/routes";
 import type { FrameEntry, FrameInfoEntry } from "../core/state";
 import {
   _feOpen,
@@ -48,7 +47,6 @@ import {
   sSettings,
 } from "../core/state";
 import { setGesturesSuspended } from "../hooks/useGestures";
-import { apiUrl } from "../lib/fetchApi";
 import { t } from "../lib/i18n";
 import { CropPopover } from "./CropPopover";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -123,81 +121,6 @@ function applyFrameRange(
   setFrames(slice.map(makeEntry));
 }
 
-// ── Generic SSE hook ────────────────────────────────────────────────────────
-
-/**
- * Opens an EventSource, parses each JSON message via `parse`,
- * accumulates valid items, and signals `done` when the stream ends.
- * `getUrl` returns null to skip the connection.
- */
-function useSse<T>(
-  getUrl: () => string | null,
-  parse: (data: any) => T | null | "done",
-  deps: React.DependencyList,
-): { items: T[]; done: boolean } {
-  const [state, setState] = useState<{ items: T[]; done: boolean }>({
-    items: [],
-    done: false,
-  });
-
-  useEffect(() => {
-    const url = getUrl();
-    if (!url) return;
-    const acc: T[] = [];
-    const es = new EventSource(url);
-    let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      if (acc.length === 0) {
-        es.close();
-        setState({ items: [], done: true });
-      }
-    }, 30000);
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      es.close();
-      setState({ items: [...acc], done: true });
-    };
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (Array.isArray(data)) {
-          for (const item of data) {
-            const result = parse(item);
-            if (result === "done") {
-              finish();
-              break;
-            } else if (result !== null) acc.push(result);
-          }
-        } else {
-          const result = parse(data);
-          if (result === "done") {
-            finish();
-          } else if (result !== null) {
-            acc.push(result);
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-    es.onerror = () => {
-      // only finish on error if we already received data
-      if (acc.length > 0) finish();
-    };
-    return () => {
-      if (timer) clearTimeout(timer);
-      es.close();
-    };
-  }, deps);
-
-  return state;
-}
-
 // ── Inner modal ───────────────────────────────────────────────────────────────
 
 function FrameExportModalInner({
@@ -229,47 +152,15 @@ function FrameExportModalInner({
   const rootRef = useRef<HTMLDivElement>(null)
   const prefetchAbortRef = useRef<AbortController | null>(null)
   const page = useAtomValue(pageAtom)
-  const playbackMs = Math.round(videoEl.currentTime * 1000)
 
   // ── 2. State ────────────────────────────────────────────────────────────────
 
-  const firstThumbnailReadyAtom = useMemo(
-    () => atom(get => get(framesAtom).some(f => f.jpegUrl !== '')),
-    [],
-  )
-  const firstThumbnailReady = useAtomValue(firstThumbnailReadyAtom)
+  const hasFramesAtom = useMemo(() => atom(get => get(framesAtom).length > 0), [])
+  const hasFrames = useAtomValue(hasFramesAtom)
 
-  // ── 3. SSE Streams ────────────────────────────────────────────────────────────
+  // ── 3. Frame index accumulator ───────────────────────────────────────────────
 
-  const fpsRef = useRef({ num: 24, den: 1 });
-
-  const frameInfoSse = useSse<FrameInfoEntry>(
-    () => (!!itemId && !Number.isNaN(playbackMs))
-      ? apiUrl(suite.frameInfoStream(itemId, playbackMs))
-      : null,
-    (data) => {
-      if (_frameIndex !== null) return 'done'  // index already built; connection triggers priority adjustment only
-      if (data?.fps) {
-        fpsRef.current = data.fps
-        return 'done'
-      }
-      if (data && typeof data.ms === 'number') return data as FrameInfoEntry
-      return null
-    },
-    [itemId],
-  )
-
-  const frameInfoReady = frameInfoSse.done || (_frameIndex !== null && _frameIndex.length > 0)
-
-  useEffect(() => {
-    if (frameInfoSse.done && _frameIndex === null) {
-      setFpsFrac(fpsRef.current);
-      if (frameInfoSse.items.length > 0) {
-        const sorted = [...frameInfoSse.items].sort((a, b) => a.ms - b.ms)
-        setFrameIndex(sorted)
-      }
-    }
-  }, [frameInfoSse.done]);
+  const frameAccRef = useRef<FrameInfoEntry[]>([])
 
   const { data: fetchedName } = useQuery(itemNameQuery(itemId));
 
@@ -333,6 +224,7 @@ function FrameExportModalInner({
     if (itemId !== _itemId) {
       setFrameIndex(null);
       setFpsFrac({ num: 24, den: 1 });
+      setFrames([]);
     }
     setItemId(itemId);
     videoEl.pause();
@@ -344,7 +236,7 @@ function FrameExportModalInner({
     if (fetchedName) setItemTitle(fetchedName);
   }, [fetchedName]);
 
-
+  // savedState restore — runs before the streaming effect (definition order)
   useEffect(() => {
     const ms = Math.round(videoEl.currentTime * 1000);
     if (
@@ -365,20 +257,62 @@ function FrameExportModalInner({
       sPrefetchDone.value = 0;
       sPage.value = "grid";
       sLightboxIdx.value = null;
-      return;
     }
-    if (_frameIndex && _frameIndex.length > 0 && !_frames.length) {
-      const centerIndex = findCenterFrameIndex(_frameIndex, ms);
-      const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, centerIndex);
-      sPage.value = "grid";
-      sLightboxIdx.value = null;
-      applyFrameRange(_frameIndex, ms, rangeStart, rangeEnd);
-      triggerPrefetch();
-      return;
-    }
+  }, [videoEl, itemId]);
+
+  // frameInfo streaming — incremental: Queue A batch shows grid, Queue B fills index
+  useEffect(() => {
+    frameAccRef.current = [];
+    if (!itemId) return;
+
+    const ms = Math.round(videoEl.currentTime * 1000);
     sPage.value = "grid";
     sLightboxIdx.value = null;
-  }, [videoEl, itemId, frameInfoSse.done, triggerPrefetch]);
+
+    if (_frameIndex !== null && _frameIndex.length > 0) {
+      // Repeat visit: show grid immediately, open SSE only for priority adjustment
+      if (!_frames.length) {
+        const center = findCenterFrameIndex(_frameIndex, ms);
+        const [rangeStart, rangeEnd] = findRangeFromCenter(_frameIndex, center);
+        applyFrameRange(_frameIndex, ms, rangeStart, rangeEnd);
+        triggerPrefetch();
+      }
+      const es = openFrameInfoStream(itemId, ms, () => es.close(), () => {}, () => {});
+      return () => es.close();
+    }
+
+    // First visit: build frame index incrementally from SSE
+    let gridShown = _frames.length > 0; // savedState may have set frames already
+
+    const es = openFrameInfoStream(
+      itemId, ms,
+      (batch) => {
+        frameAccRef.current = [...frameAccRef.current, ...batch];
+        const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
+        setFrameIndex(sorted);
+        if (!gridShown) {
+          gridShown = true;
+          const center = findCenterFrameIndex(sorted, ms);
+          const [rangeStart, rangeEnd] = findRangeFromCenter(sorted, center);
+          applyFrameRange(sorted, ms, rangeStart, rangeEnd);
+          triggerPrefetch();
+        }
+      },
+      (fps) => {
+        setFpsFrac(fps);
+        const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
+        const seen = new Set<number>();
+        setFrameIndex(sorted.filter(f => {
+          if (seen.has(f.frameIndex)) return false;
+          seen.add(f.frameIndex);
+          return true;
+        }));
+      },
+      () => {},
+    );
+
+    return () => es.close();
+  }, [itemId, triggerPrefetch]);
 
   useEffect(() => {
     return () => { prefetchAbortRef.current?.abort(); };
@@ -535,7 +469,7 @@ function FrameExportModalInner({
               onExpandBack={expandBack}
               onExpandForward={expandForward}
               onGenerate={submitGenerate}
-              loading={!frameInfoReady && !firstThumbnailReady}
+              loading={!hasFrames}
             />
           )}
           {page === "progress" && (
