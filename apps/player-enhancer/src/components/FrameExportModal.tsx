@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getDefaultStore, useAtomValue, useSetAtom } from "jotai";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { atom, getDefaultStore, useAtomValue, useSetAtom } from "jotai";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { frameUrl, generateExportMutation, openPrefetchRangeStream } from "../api/frameExportApi";
@@ -18,6 +18,7 @@ import {
   _maxPosMs,
   _minPosMs,
   _savedState,
+  framesAtom,
   modalMinimizedAtom,
   pageAtom,
   setActiveTaskId,
@@ -232,7 +233,11 @@ function FrameExportModalInner({
 
   // ── 2. State ────────────────────────────────────────────────────────────────
 
-  const [firstThumbnailReady, setFirstThumbnailReady] = useState(false)
+  const firstThumbnailReadyAtom = useMemo(
+    () => atom(get => get(framesAtom).some(f => f.jpegUrl !== '')),
+    [],
+  )
+  const firstThumbnailReady = useAtomValue(firstThumbnailReadyAtom)
 
   // ── 3. SSE Streams ────────────────────────────────────────────────────────────
 
@@ -286,7 +291,6 @@ function FrameExportModalInner({
           : f,
       ),
     );
-    setFirstThumbnailReady(true);
   }, []);
 
   const triggerPrefetch = useCallback(() => {
@@ -329,7 +333,6 @@ function FrameExportModalInner({
     if (itemId !== _itemId) {
       setFrameIndex(null);
       setFpsFrac({ num: 24, den: 1 });
-      setTimeout(() => setFirstThumbnailReady(false), 0);
     }
     setItemId(itemId);
     videoEl.pause();
@@ -362,7 +365,6 @@ function FrameExportModalInner({
       sPrefetchDone.value = 0;
       sPage.value = "grid";
       sLightboxIdx.value = null;
-      setTimeout(() => setFirstThumbnailReady(true), 0);
       return;
     }
     if (_frameIndex && _frameIndex.length > 0 && !_frames.length) {
@@ -371,7 +373,7 @@ function FrameExportModalInner({
       sPage.value = "grid";
       sLightboxIdx.value = null;
       applyFrameRange(_frameIndex, ms, rangeStart, rangeEnd);
-      setTimeout(triggerPrefetch, 0);
+      triggerPrefetch();
       return;
     }
     sPage.value = "grid";
