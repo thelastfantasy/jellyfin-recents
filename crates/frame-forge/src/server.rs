@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lru::LruCache;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -30,6 +31,40 @@ const PREFETCH_QUEUE_CAP: usize = 64;
 // RAM cache key: (path, pos_ms, width)
 type RamKey = (PathBuf, i64, u32);
 
+/// Shared state for an in-progress Queue B demux on a single path.
+/// Multiple `handle_index_frames_stream` callers for the same path share one IndexProgress
+/// instead of spawning duplicate Queue B tasks.
+struct IndexProgress {
+    /// Accumulated SSE batch payloads (Arc to share between bridge tasks without copying).
+    batches: std::sync::Mutex<Vec<(Arc<Vec<u8>>, i64)>>,
+    /// Fired whenever a new batch is pushed or `finish` is called.
+    notify: tokio::sync::Notify,
+    /// Set to true once Queue B has pushed all data (including the fps end signal).
+    done: AtomicBool,
+}
+
+impl IndexProgress {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            batches: std::sync::Mutex::new(Vec::new()),
+            notify: tokio::sync::Notify::new(),
+            done: AtomicBool::new(false),
+        })
+    }
+
+    /// Push a batch from any thread (called from spawn_blocking or async).
+    fn push(&self, data: Vec<u8>, max_ms: i64) {
+        self.batches.lock().unwrap().push((Arc::new(data), max_ms));
+        self.notify.notify_waiters();
+    }
+
+    /// Mark as done; unblocks all waiting bridge tasks.
+    fn finish(&self) {
+        self.done.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+}
+
 struct PrefetchJob {
     item_id: String,
     path: PathBuf,
@@ -47,6 +82,9 @@ pub struct State {
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
     frame_index: Mutex<HashMap<PathBuf, FrameIndexCache>>,
+    /// Per-path Queue B deduplication: if an IndexProgress exists here, that path is
+    /// already being demuxed; new callers subscribe instead of spawning another Queue B.
+    index_in_progress: Mutex<HashMap<PathBuf, Arc<IndexProgress>>>,
 }
 
 impl State {
@@ -60,6 +98,7 @@ impl State {
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
             frame_index: Mutex::new(HashMap::new()),
+            index_in_progress: Mutex::new(HashMap::new()),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -78,22 +117,31 @@ fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
 /// Loads + demuxes the index on first use for the path.
 async fn resolve_frame_idx(state: &Arc<State>, path: &Path, frame_idx: i64) -> Option<i64> {
     if frame_idx < 0 { return None; }
-    let cache = state.frame_index.lock().await;
-    let idx = match cache.get(path) { Some(i) => i.clone(), None => {
-        drop(cache);
-        let p = path.to_path_buf();
-        let p2 = p.clone();
-        let (frames, fps_num, fps_den) = match tokio::task::spawn_blocking(move || jfs_common::index_frames(&p)).await {
-            Ok(Ok(v)) => v,
-            _ => return None,
-        };
-        let i = Arc::new((frames, fps_num, fps_den));
-        state.frame_index.lock().await.insert(p2, i.clone());
-        i
-    }};
-    let (frames, _, _) = idx.as_ref();
+
+    // Fast path: already cached
+    {
+        let cache = state.frame_index.lock().await;
+        if let Some(idx) = cache.get(path) {
+            let fi = frame_idx as usize;
+            return if fi < idx.0.len() { Some(idx.0[fi].0) } else { None };
+        }
+    }
+
+    // Slow path: build index. Concurrent callers may also build; entry().or_insert() ensures
+    // only one result survives and the lock-protected insert is always consistent.
+    let p = path.to_path_buf();
+    let (frames, fps_num, fps_den) =
+        tokio::task::spawn_blocking(move || jfs_common::index_frames(&p))
+            .await.ok()?.ok()?;
+    let new_idx = Arc::new((frames, fps_num, fps_den));
+
+    let idx = {
+        let mut cache = state.frame_index.lock().await;
+        cache.entry(path.to_path_buf()).or_insert(new_idx).clone()
+    };
+
     let fi = frame_idx as usize;
-    if fi < frames.len() { Some(frames[fi].0) } else { None }
+    if fi < idx.0.len() { Some(idx.0[fi].0) } else { None }
 }
 
 async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc<State>) {
@@ -825,142 +873,289 @@ async fn write_chunk(stream: &mut UnixStream, bytes: &[u8]) -> std::io::Result<(
     Ok(())
 }
 
-/// 队列 A：seek demux ±1s，用估计帧号发送 SSE
+/// 队列 A：seek demux ±1s，用估计帧号发送 SSE。
+/// 若该路径的帧索引已缓存，直接 binary_search，无需打开文件。
 async fn queue_a_demux(
     path: PathBuf,
     current_time_ms: i64,
     tx: mpsc::UnboundedSender<Vec<u8>>,
+    state: Arc<State>,
 ) -> anyhow::Result<()> {
     let p_start = (current_time_ms - 1000).max(0);
     let p_end = current_time_ms + 1000;
 
+    // Fast path: use in-memory index (populated by queue_b or resolve_frame_idx)
+    {
+        let cache = state.frame_index.lock().await;
+        if let Some(idx) = cache.get(&path) {
+            let idx = idx.clone();
+            drop(cache);
+            let (frames, _, _) = idx.as_ref();
+            let start = frames.partition_point(|(ms, _)| *ms < p_start);
+            let mut batch = Vec::new();
+            for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
+                if *ms > p_end { break; }
+                batch.push((start + i, *ms, *is_key));
+                if batch.len() >= BATCH_SIZE {
+                    tx.send(make_batch(&batch)).ok();
+                    batch.clear();
+                }
+            }
+            if !batch.is_empty() {
+                tx.send(make_batch(&batch)).ok();
+            }
+            return Ok(());
+        }
+    }
+
+    // Slow path: open file, seek, demux ±1s window
     let tx_inner = tx.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         use ffmpeg_next as ff;
-        let mut ictx = ff::format::input(&path).map_err(|e| anyhow::anyhow!("open {:?}: {}", path, e))?;
-        let stream_idx = ictx.streams().best(ff::media::Type::Video)
-            .ok_or_else(|| anyhow::anyhow!("no video stream"))?.index();
-        
-        // 估计帧号用
-        let (fps_num, fps_den) = {
+        let mut ictx = ff::format::input(&path)
+            .map_err(|e| anyhow::anyhow!("open {:?}: {}", path, e))?;
+
+        let (stream_idx, fps_num, fps_den, stream_start_ms) = {
             let s = ictx.streams().best(ff::media::Type::Video)
-                .ok_or_else(|| anyhow::anyhow!("no video"))?;
+                .ok_or_else(|| anyhow::anyhow!("no video stream"))?;
             let rate = s.avg_frame_rate();
-            (rate.0 as i64, if rate.1 > 0 { rate.1 as i64 } else { 1 })
+            let fps_num = rate.0 as i64;
+            let fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
+            let tb = s.time_base();
+            let start_pts = s.start_time().max(0);
+            let sms = if start_pts > 0 && tb.0 != 0 && tb.1 != 0 {
+                (start_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+            } else { 0 };
+            (s.index(), fps_num, fps_den, sms)
         };
-        
-        ictx.seek((p_start as i64) * 1000, ..(p_start as i64) * 1000)?;
-        
+
+        ictx.seek(p_start * 1000, ..p_start * 1000)?;
+
         let mut batch = Vec::new();
-        
+
         for (stream, pkt) in ictx.packets() {
             if stream.index() != stream_idx { continue; }
             let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
-            let ms = (pts as f64 * stream.time_base().numerator() as f64 * 1000.0 
-                     / stream.time_base().denominator() as f64) as i64;
-            
+            let tb = stream.time_base();
+            let raw_ms = (pts as f64 * tb.numerator() as f64 * 1000.0
+                         / tb.denominator() as f64) as i64;
+            let ms = (raw_ms - stream_start_ms).max(0);
+
             if ms < p_start { continue; }
             if ms > p_end { break; }
-            
-            let fi = ((ms * fps_num + fps_den * 500) / (fps_den * 1000)) as usize;
+
+            let fi = compute_frame_idx(ms, fps_num, fps_den) as usize;
             batch.push((fi, ms, pkt.is_key()));
-            
+
             if batch.len() >= BATCH_SIZE {
                 tx_inner.send(make_batch(&batch)).ok();
                 batch.clear();
             }
         }
-        
+
         if !batch.is_empty() {
             tx_inner.send(make_batch(&batch)).ok();
         }
-        
+
         Ok(())
     }).await??;
 
     Ok(())
 }
 
-/// 队列 B：从 0 顺序 demux，通过共享 channel 发送，末尾发 fps 消息
+/// 队列 B：从 0 顺序全量 demux（无 skip），通过 IndexProgress 广播给所有订阅者。
+/// 完成后将完整帧索引写入 state.frame_index，并从 index_in_progress 中移除自身。
 async fn queue_b_demux(
     path: PathBuf,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    progress: Arc<IndexProgress>,
+    state: Arc<State>,
 ) -> anyhow::Result<()> {
-    let tx_inner = tx.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, i64)> {
+    let path_spawn = path.clone();
+    let progress_inner = progress.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, i64, Vec<(i64, bool)>)> {
         use ffmpeg_next as ff;
-        let mut ictx = ff::format::input(&path).map_err(|e| anyhow::anyhow!("open {:?}: {}", path, e))?;
-        let stream_idx = ictx.streams().best(ff::media::Type::Video)
-            .ok_or_else(|| anyhow::anyhow!("no video stream"))?.index();
-        
-        let (fps_num, fps_den) = {
+        let mut ictx = ff::format::input(&path_spawn)
+            .map_err(|e| anyhow::anyhow!("open {:?}: {}", path_spawn, e))?;
+
+        let (stream_idx, fps_num, fps_den, stream_start_ms) = {
             let s = ictx.streams().best(ff::media::Type::Video)
-                .ok_or_else(|| anyhow::anyhow!("no video"))?;
+                .ok_or_else(|| anyhow::anyhow!("no video stream"))?;
             let rate = s.avg_frame_rate();
-            (rate.0 as i64, if rate.1 > 0 { rate.1 as i64 } else { 1 })
+            let fps_num = rate.0 as i64;
+            let fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
+            let tb = s.time_base();
+            let start_pts = s.start_time().max(0);
+            let sms = if start_pts > 0 && tb.0 != 0 && tb.1 != 0 {
+                (start_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+            } else { 0 };
+            (s.index(), fps_num, fps_den, sms)
         };
-        
-        let mut batch = Vec::new();
-        let mut fi = 0;
-        
+
+        let mut all_frames: Vec<(i64, bool)> = Vec::new();
+        let mut batch: Vec<(usize, i64, bool)> = Vec::new();
+        let mut max_ms_in_batch = 0_i64;
+
         for (stream, pkt) in ictx.packets() {
             if stream.index() != stream_idx { continue; }
             let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
-            let ms = (pts as f64 * stream.time_base().numerator() as f64 * 1000.0 
-                     / stream.time_base().denominator() as f64) as i64;
-            
-            batch.push((fi, ms, pkt.is_key()));
-            fi += 1;
-            
+            let tb = stream.time_base();
+            let raw_ms = (pts as f64 * tb.numerator() as f64 * 1000.0
+                         / tb.denominator() as f64) as i64;
+            let ms = (raw_ms - stream_start_ms).max(0);
+            let is_key = pkt.is_key();
+
+            let fi = all_frames.len(); // 用顺序计数作为帧号，与 index_frames 一致
+            all_frames.push((ms, is_key));
+            batch.push((fi, ms, is_key));
+            max_ms_in_batch = max_ms_in_batch.max(ms);
+
             if batch.len() >= BATCH_SIZE {
-                tx_inner.send(make_batch(&batch)).ok();
+                progress_inner.push(make_batch(&batch), max_ms_in_batch);
                 batch.clear();
+                max_ms_in_batch = 0;
             }
         }
-        
+
         if !batch.is_empty() {
-            tx_inner.send(make_batch(&batch)).ok();
+            progress_inner.push(make_batch(&batch), max_ms_in_batch);
         }
-        
-        Ok((fps_num, fps_den))
+
+        Ok((fps_num, fps_den, all_frames))
     }).await??;
 
-    // 发送 fps 消息作为流结束信号
-    let end_data = format!("data: {}\n\n", serde_json::json!({ "fps": { "num": result.0, "den": result.1 } }));
-    tx.send(end_data.into_bytes()).ok();
+    let (fps_num, fps_den, all_frames) = result;
+
+    // 写入帧索引缓存，供后续请求直接使用
+    {
+        let new_idx = Arc::new((all_frames, fps_num, fps_den));
+        let mut cache = state.frame_index.lock().await;
+        cache.entry(path.clone()).or_insert(new_idx);
+    }
+
+    // fps 结束信号（max_ms = i64::MAX 为终止标记）
+    let end_data = format!("data: {}\n\n", serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
+    progress.push(end_data.into_bytes(), i64::MAX);
+    progress.finish();
+
+    // 从 in_progress 移除，后续请求走缓存快路径
+    state.index_in_progress.lock().await.remove(&path);
 
     Ok(())
 }
 
 /// INDEX_FRAMES_STREAM (0x17): SSE stream of frame index.
-/// 共享 channel：Queue A（优先 seek demux）+ Queue B（顺序 demux）都发到同一 channel
-async fn handle_index_frames_stream(stream: &mut UnixStream, _state: Arc<State>) -> anyhow::Result<()> {
+/// 三路分支：
+///   1. 缓存命中 → 直接从 state.frame_index 发送全量数据，无需打开文件
+///   2. 同路径 Queue B 正在运行 → 订阅其 IndexProgress，回放已有批次 + 等待新批次
+///   3. 首次请求 → 创建 IndexProgress，spawn Queue B
+/// Queue A（±1s 高优先级窗口）始终先于 Queue B 数据发出。
+async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) -> anyhow::Result<()> {
     let req = read_index_frames_stream_req(stream).await?;
-
     stream.write_u32_le(req.request_id).await?;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-
-    // Queue B（全量 demux，精确帧号）
-    let tx_b = tx.clone();
-    let path_b = req.path.clone();
-    tokio::spawn(async move {
-        if let Err(e) = queue_b_demux(path_b, tx_b).await {
-            eprintln!("[frame-forge] queue_b_demux error: {e}");
+    // ── 分支 1：帧索引已完整缓存 ─────────────────────────────────────────────
+    if let Some(idx) = state.frame_index.lock().await.get(&req.path) {
+        let idx = idx.clone();
+        let (frames, fps_num, fps_den) = idx.as_ref();
+        let entries: Vec<(usize, i64, bool)> = frames.iter().enumerate()
+            .map(|(i, &(ms, is_key))| (i, ms, is_key))
+            .collect();
+        for chunk in entries.chunks(BATCH_SIZE) {
+            write_chunk(stream, &make_batch(chunk)).await?;
         }
-    });
+        let end = format!("data: {}\n\n",
+            serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
+        write_chunk(stream, end.as_bytes()).await?;
+        stream.write_u32_le(0).await?;
+        stream.flush().await?;
+        return Ok(());
+    }
 
-    // Queue A（优先 seek demux，估计帧号）
-    let tx_a = tx;
-    let path_a = req.path.clone();
-    tokio::spawn(async move {
-        if let Err(e) = queue_a_demux(path_a, req.current_time_ms, tx_a).await {
-            eprintln!("[frame-forge] queue_a_demux error: {e}");
+    // ── 分支 2/3：获取或新建 IndexProgress ───────────────────────────────────
+    let progress = {
+        let mut in_prog = state.index_in_progress.lock().await;
+        if let Some(p) = in_prog.get(&req.path) {
+            p.clone() // 订阅现有 Queue B
+        } else {
+            let p = IndexProgress::new();
+            in_prog.insert(req.path.clone(), p.clone());
+            let state_b = state.clone();
+            let path_b = req.path.clone();
+            let p_b = p.clone();
+            tokio::spawn(async move {
+                if let Err(e) = queue_b_demux(path_b, p_b, state_b).await {
+                    eprintln!("[frame-forge] queue_b_demux error: {e}");
+                }
+            });
+            p
         }
-    });
+    };
 
-    while let Some(bytes) = rx.recv().await {
-        write_chunk(stream, &bytes).await?;
+    // Queue A：高优先级，demux ±1s 窗口，先于 Queue B 数据到达前端
+    let (high_tx, mut high_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    {
+        let path_a = req.path.clone();
+        let tx_a = high_tx.clone();
+        let state_a = state.clone();
+        let t = req.current_time_ms;
+        tokio::spawn(async move {
+            if let Err(e) = queue_a_demux(path_a, t, tx_a, state_a).await {
+                eprintln!("[frame-forge] queue_a_demux error: {e}");
+            }
+        });
+    }
+
+    // Bridge：回放 IndexProgress 中已有批次，再等待新批次，直至 done
+    let (normal_tx, mut normal_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    {
+        let bp = progress;
+        tokio::spawn(async move {
+            let mut next = 0usize;
+            loop {
+                // 取出自上次以来新增的批次
+                let snapshot: Vec<(Arc<Vec<u8>>, i64)> = {
+                    let b = bp.batches.lock().unwrap();
+                    b[next..].iter().map(|(a, m)| (a.clone(), *m)).collect()
+                };
+                let count = snapshot.len();
+                for (arc_data, _max_ms) in snapshot {
+                    normal_tx.send((*arc_data).clone()).ok();
+                }
+                next += count;
+
+                if bp.done.load(Ordering::Acquire) {
+                    // done 标记与最后一次 push 之间的竞态：再 drain 一次
+                    let b = bp.batches.lock().unwrap();
+                    for (arc_data, _) in &b[next..] {
+                        normal_tx.send((**arc_data).clone()).ok();
+                    }
+                    break;
+                }
+                bp.notify.notified().await;
+            }
+            // normal_tx 在此 drop → 关闭 channel → normal_rx 返回 None
+        });
+    }
+
+    let mut normal_queue_finished = false;
+
+    loop {
+        tokio::select! {
+            biased;
+
+            Some(bytes) = high_rx.recv() => {
+                write_chunk(stream, &bytes).await?;
+            }
+
+            msg = normal_rx.recv() => {
+                match msg {
+                    Some(bytes) => write_chunk(stream, &bytes).await?,
+                    None => normal_queue_finished = true,
+                }
+            }
+        }
+
+        if normal_queue_finished && high_rx.is_empty() { break; }
     }
 
     stream.write_u32_le(0).await?;

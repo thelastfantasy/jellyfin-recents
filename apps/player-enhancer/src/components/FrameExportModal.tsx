@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { frameUrl, generateExportMutation } from "../api/frameExportApi";
 import { itemNameQuery } from "../api/jellyfinApi";
 import { suite } from "../api/routes";
-import type { FrameEntry } from "../core/state";
+import type { FrameEntry, FrameInfoEntry } from "../core/state";
 import {
   _feOpen,
   _fiMaxIdx,
@@ -67,8 +67,6 @@ function setBodyModalOpen(open: boolean) {
   if (open) document.body.classList.add(MODAL_BODY_CLASS);
   else document.body.classList.remove(MODAL_BODY_CLASS);
 }
-
-type FrameInfoEntry = { ms: number; isKey: boolean; frameIndex: number };
 
 function findCenterFrameIndex(
   frames: FrameInfoEntry[],
@@ -216,27 +214,29 @@ function FrameExportModalInner({
   const fpsRef = useRef({ num: 24, den: 1 });
 
   const frameInfoSse = useSse<FrameInfoEntry>(
-    () =>
-      !!itemId && !Number.isNaN(playbackMs)
-        ? apiUrl(suite.frameInfoStream(itemId, playbackMs))
-        : null,
+    // _frameIndex !== null → 帧索引已由后台预加载完整建立，跳过重复请求
+    () => (_frameIndex === null && !!itemId && !Number.isNaN(playbackMs))
+      ? apiUrl(suite.frameInfoStream(itemId, playbackMs))
+      : null,
     (data) => {
       if (data?.fps) {
-        fpsRef.current = data.fps;
-        return "done";
+        fpsRef.current = data.fps
+        return 'done'
       }
-      if (data && typeof data.ms === "number") return data as FrameInfoEntry;
-      return null;
+      if (data && typeof data.ms === 'number') return data as FrameInfoEntry
+      return null
     },
     [itemId],
-  );
+  )
+
+  const frameInfoReady = frameInfoSse.done || (_frameIndex !== null && _frameIndex.length > 0)
 
   useEffect(() => {
     if (frameInfoSse.done) {
       setFpsFrac(fpsRef.current);
       if (frameInfoSse.items.length > 0) {
-        const sorted = [...frameInfoSse.items].sort((a, b) => a.ms - b.ms);
-        setFrameIndex(sorted);
+        const sorted = [...frameInfoSse.items].sort((a, b) => a.ms - b.ms)
+        setFrameIndex(sorted)
       }
     }
   }, [frameInfoSse.done]);
@@ -336,12 +336,7 @@ function FrameExportModalInner({
   }, [fetchedName]);
 
   useEffect(() => {
-    if (
-      frameInfoSse.done &&
-      _frameIndex &&
-      _frameIndex.length > 0 &&
-      !_frames.length
-    ) {
+    if (frameInfoReady && _frameIndex && _frameIndex.length > 0 && !_frames.length) {
       const centerIndex = findCenterFrameIndex(_frameIndex, playbackMs);
       const [rangeStart, rangeEnd] = findRangeFromCenter(
         _frameIndex,
@@ -381,7 +376,7 @@ function FrameExportModalInner({
       sLightboxIdx.value = null;
       return;
     }
-    if (_frameIndex && _frameIndex.length > 0) {
+    if (_frameIndex && _frameIndex.length > 0 && !_frames.length) {
       const centerIndex = findCenterFrameIndex(_frameIndex, playbackMs);
       const [rangeStart, rangeEnd] = findRangeFromCenter(
         _frameIndex,
@@ -601,7 +596,7 @@ function FrameExportModalInner({
               onExpandBack={expandBack}
               onExpandForward={expandForward}
               onGenerate={submitGenerate}
-              loading={!frameInfoSse.done}
+              loading={!frameInfoReady}
             />
           )}
           {page === "progress" && (

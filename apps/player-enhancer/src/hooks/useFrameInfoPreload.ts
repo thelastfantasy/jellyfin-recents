@@ -2,8 +2,11 @@ import { useEffect, useRef } from 'react'
 
 import { openFrameInfoStream } from '../api/frameExportApi'
 import {
-_itemId as _gItemId,
-  setFpsFrac, setFrameIndex, } from '../core/state'
+  _frameIndex,
+  _itemId as _gItemId,
+  setFpsFrac,
+  setFrameIndex,
+} from '../core/state'
 
 const preloadState = {
   evSrc: null as EventSource | null,
@@ -34,11 +37,17 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
       if (_gItemId !== preloadState.itemId) setFrameIndex(null)
     }
 
+    // 帧索引已对该 item 完整加载（_frameIndex !== null 即代表完整）→ 跳过请求
+    if (_frameIndex !== null && preloadState.itemId === id) {
+      startedRef.current = id
+      return
+    }
+
     startedRef.current = id
     preloadState.itemId = id
     preloadState.aborted = false
 
-    const accumulated = new Array<{ ms: number; isKey: boolean; frameIndex: number }>()
+    const accumulated: Array<{ ms: number; isKey: boolean; frameIndex: number }> = []
     let done = false
 
     const evSrc = openFrameInfoStream(id, 0,
@@ -50,6 +59,7 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
         if (preloadState.aborted || done) return
         done = true
         setFpsFrac(fps)
+        accumulated.sort((a, b) => a.ms - b.ms)
         setFrameIndex(accumulated)
         preloadState.evSrc = null
         evSrc.close()

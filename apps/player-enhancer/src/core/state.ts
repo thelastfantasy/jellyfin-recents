@@ -34,6 +34,14 @@ export interface FrameEntry {
   actualPtsMs?: number
 }
 
+/** 单帧的帧索引信息，由 FrameInfoStream SSE 流构建。
+ *  _frameIndex !== null 即代表该项目的帧索引已完整加载（fps 信号已收到）。 */
+export interface FrameInfoEntry {
+  ms:         number
+  isKey:      boolean
+  frameIndex: number
+}
+
 export interface SavedModalState {
   itemId:         string
   frames:         FrameEntry[]
@@ -101,7 +109,7 @@ const _lastClickedIdxAtom    = atom(-1)
 const _dragModeAtom          = atom(false)
 const _dragSelectValueAtom   = atom(false)
 const _suppressNextMousedownAtom = atom(false)
-const _frameIndexAtom        = atom<Array<{ ms: number; isKey: boolean; frameIndex: number }> | null>(null)
+const _frameIndexAtom        = atom<FrameInfoEntry[] | null>(null)
 const _fiMinIdxAtom          = atom(0)
 const _fiMaxIdxAtom          = atom(-1)
 const _savedStateAtom        = atom<SavedModalState | null>(null)
@@ -280,13 +288,13 @@ export function setDragSelectValue(v: boolean)                { _dragSelectValue
 
 export function setSuppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
 
-export let _frameIndex: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null = null
+export let _frameIndex: FrameInfoEntry[] | null = null
 
 export let _fiMinIdx = 1
 
 export let _fiMaxIdx = -1
 
-export function setFrameIndex(v: Array<{ ms: number; isKey: boolean; frameIndex: number }> | null) { _frameIndex = v }
+export function setFrameIndex(v: FrameInfoEntry[] | null) { _frameIndex = v }
 
 export function setFiMinIdx(v: number)  { _fiMinIdx = v }
 

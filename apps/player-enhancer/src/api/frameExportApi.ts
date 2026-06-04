@@ -1,12 +1,13 @@
 import { fetchApi } from '../lib/fetchApi'
 import { getAccessToken,getApiBaseUrl } from '../lib/utils'
 import { suite } from './routes'
+import type { FrameInfoEntry } from '../core/state'
 
 export function frameUrl(itemId: string, fiIdx: number, posMs: number, width: number): string {
   return suite.frameExport.jpeg(itemId, fiIdx, posMs, width)
 }
 
-export type FrameBatchCallback = (frames: Array<{ ms: number; isKey: boolean; frameIndex: number }>) => void
+export type FrameBatchCallback = (frames: FrameInfoEntry[]) => void
 
 export type FpsCallback = (fps: { num: number; den: number }) => void
 
