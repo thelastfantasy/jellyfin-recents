@@ -64,12 +64,24 @@ run = "make test-frontend"
 description = "运行 C# xUnit 测试"
 run = "make test-csharp"
 
+[tasks.gen-spec]
+description = "从 C# DTO 反射生成插件 OpenAPI 3.2 spec（packages/api-types/openapi.json）"
+run = "dotnet run --project packages/JfsSpecGen -- --out packages/api-types/openapi.json"
+
+[tasks.gen-client]
+description = "从插件 spec 生成 orval 类型 + HTTP 客户端（packages/api-types/src/client/）"
+run = "pnpm --filter @jfs/api-types run gen-client"
+
 [tasks.gen-types]
-description = "从 C# DTO 反射生成 OpenAPI 3.1 spec，再生成 TypeScript 类型（无需运行容器）"
-run = "dotnet run --project packages/JfsSpecGen -- --out packages/api-types/openapi.json && node scripts/gen-plugin-types.mjs --file=packages/api-types/openapi.json"
+description = "完整 codegen 流程：生成 spec → orval 客户端 → openapi-typescript 兜底类型"
+run = "mise run gen-spec && mise run gen-client && node scripts/gen-plugin-types.mjs --file=packages/api-types/openapi.json"
+
+[tasks.fetch-jellyfin-spec]
+description = "从运行中的 jellyfin-dev 下载官方 Jellyfin OpenAPI spec（一次性操作）"
+run = "node scripts/fetch-jellyfin-spec.mjs"
 
 [tasks.gen-types-from-server]
-description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（旧流程，需要容器已启动）"
+description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（旧流程，仅供参考）"
 run = "node scripts/gen-plugin-types.mjs"
 
 [tasks.workflow-test]

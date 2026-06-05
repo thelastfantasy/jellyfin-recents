@@ -7,8 +7,9 @@ namespace Jellyfin.Plugin.JellyfinSuite.Models;
 public class PrefetchRangeStreamRequest
 {
     [JsonPropertyName("currentTimeMs")]       public long   CurrentTimeMs       { get; set; }
-    [JsonPropertyName("beforeSeconds")]       public double BeforeSeconds        { get; set; } = 1.0;
-    [JsonPropertyName("afterSeconds")]        public double AfterSeconds         { get; set; } = 1.0;
+    [JsonPropertyName("currentFrameIndex")]   public long?  CurrentFrameIndex   { get; set; }
+    [JsonPropertyName("beforeSeconds")]       public double? BeforeSeconds       { get; set; }
+    [JsonPropertyName("afterSeconds")]        public double? AfterSeconds        { get; set; }
     [JsonPropertyName("includeCurrentFrame")] public bool   IncludeCurrentFrame  { get; set; } = true;
     [JsonPropertyName("width")]               public int    Width                { get; set; } = 320;
 }

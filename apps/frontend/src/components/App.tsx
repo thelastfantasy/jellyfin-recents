@@ -72,6 +72,7 @@ export function App({ locale }: Props) {
       const v = settings.pageSizes[g] ?? DEFAULTS[g]
       handleSettingsChange({ pageSize: v })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function fetchData(s: ViewSettings, page: number) {
@@ -106,7 +107,9 @@ export function App({ locale }: Props) {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData(settings, pageIndex).finally(() => { skipSpinnerRef.current = false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, pageIndex])
 
   function handleSettingsChange(patch: Partial<ViewSettings>) {

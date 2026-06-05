@@ -2,7 +2,20 @@
   "name": "@jfs/api-types",
   "version": "0.1.0",
   "private": true,
+  "scripts": {
+    "gen-client": "orval"
+  },
+  "devDependencies": {
+    "orval": "^8.15.0"
+  },
   "exports": {
-    ".": "./src/jellyfin-api.ts"
+    ".": "./src/index.ts",
+    "./fetcher": "./src/fetcher.ts",
+    "./client/frame-export": "./src/client/frame-export/frame-export.ts",
+    "./client/jellyfin-suite": "./src/client/jellyfin-suite/jellyfin-suite.ts",
+    "./client/play-history": "./src/client/play-history/play-history.ts",
+    "./client/poster-sheet": "./src/client/poster-sheet/poster-sheet.ts",
+    "./client/seek-preview": "./src/client/seek-preview/seek-preview.ts",
+    "./model": "./src/model/index.ts"
   }
 }

@@ -11,6 +11,7 @@ interface ChapterInfo {
   name: string
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const window: Window & { ApiClient?: any }
 
 async function fetchChapters(itemId: string, chapterWord: string): Promise<ChapterInfo[]> {
@@ -19,8 +20,11 @@ async function fetchChapters(itemId: string, chapterWord: string): Promise<Chapt
   try {
     const userId = apiClient.getCurrentUserId()
     const url = apiClient.getUrl(`Items/${itemId}`, { Fields: 'Chapters', userId })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const item: any = await apiClient.ajax({ type: 'GET', url, dataType: 'json' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chapters: any[] = item.Chapters ?? []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return chapters.map((ch: any, i: number) => ({
       startMs: Math.round((ch.StartPositionTicks ?? 0) / 10000),
       name: ch.Name || `${chapterWord} ${i + 1}`,
@@ -114,6 +118,7 @@ function SegmentScrubber({ startMs, endMs, maxMs, onStartChange, onEndChange }: 
     return Math.max(lo, Math.min(hi, Math.round(v)))
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleThumbDown(which: 'start' | 'end', e: any) {
     e.preventDefault()
     e.stopPropagation()
@@ -150,9 +155,11 @@ function SegmentScrubber({ startMs, endMs, maxMs, onStartChange, onEndChange }: 
         style={{ left: `${startPct}%`, width: `${Math.max(0, endPct - startPct)}%` }} />
       <div className="jfs-segment-scrubber__thumb"
         style={{ left: `${startPct}%` }}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onPointerDown={(e: any) => handleThumbDown('start', e)} />
       <div className="jfs-segment-scrubber__thumb jfs-segment-scrubber__thumb--end"
         style={{ left: `${endPct}%` }}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onPointerDown={(e: any) => handleThumbDown('end', e)} />
       <div className="jfs-segment-scrubber__labels">
         <span>{formatHMS(startMs)}</span>
@@ -217,7 +224,7 @@ export function SkipSegmentsModal({ onClose, onConfirm, itemId, videoDurationMs 
   const { t } = useLocale()
   const [tab, setTab] = useState<'chapters' | 'segments'>('segments')
   const [chapters, setChapters] = useState<ChapterInfo[]>([])
-  const [chaptersLoading, setChaptersLoading] = useState(false)
+  const [chaptersLoading, setChaptersLoading] = useState(itemId != null)
   const [segments, setSegments] = useState<SkipSegment[]>([])
   const [globalSkipsLocal, setGlobalSkipsLocal] = useState<SkipSegment[]>(() => loadGlobalSkipSegments())
   const hasGlobalSkips = globalSkipsLocal.some(s => s.endMs > s.startMs)
@@ -227,7 +234,6 @@ export function SkipSegmentsModal({ onClose, onConfirm, itemId, videoDurationMs 
 
   useEffect(() => {
     if (!itemId) return
-    setChaptersLoading(true)
     fetchChapters(itemId, t.chapterFallback).then(chaps => {
       setChapters(chaps)
       if (chaps.length > 0) setTab('chapters')

@@ -6,6 +6,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get */
         get: operations["playHistory_get"];
         put?: never;
         post?: never;
@@ -22,6 +23,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Frame Info */
         get: operations["jellyfinSuite_getFrameInfo"];
         put?: never;
         post?: never;
@@ -38,6 +40,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Frame Info Stream */
         get: operations["jellyfinSuite_frameInfoStream"];
         put?: never;
         post?: never;
@@ -54,6 +57,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Frame */
         get: operations["seekPreview_getFrame"];
         put?: never;
         post?: never;
@@ -70,6 +74,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Frame Info */
         get: operations["seekPreview_getFrameInfo"];
         put?: never;
         post?: never;
@@ -86,6 +91,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Frame Index */
         get: operations["seekPreview_getFrameIndex"];
         put?: never;
         post?: never;
@@ -102,6 +108,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Ready Stream */
         get: operations["seekPreview_readyStream"];
         put?: never;
         post?: never;
@@ -118,6 +125,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Frame */
         get: operations["frameExport_getFrame"];
         put?: never;
         post?: never;
@@ -136,6 +144,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Prefetch */
         post: operations["frameExport_prefetch"];
         delete?: never;
         options?: never;
@@ -152,6 +161,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Prefetch Ready */
         post: operations["frameExport_prefetchReady"];
         delete?: never;
         options?: never;
@@ -168,6 +178,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Generate */
         post: operations["frameExport_generate"];
         delete?: never;
         options?: never;
@@ -182,6 +193,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Task Progress */
         get: operations["frameExport_taskProgress"];
         put?: never;
         post?: never;
@@ -198,6 +210,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Result */
         get: operations["frameExport_getResult"];
         put?: never;
         post?: never;
@@ -217,6 +230,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /** Delete Result */
         delete: operations["frameExport_deleteResult"];
         options?: never;
         head?: never;
@@ -232,6 +246,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Cancel */
         post: operations["frameExport_cancel"];
         delete?: never;
         options?: never;
@@ -246,6 +261,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Tasks */
         get: operations["frameExport_getTasks"];
         put?: never;
         post?: never;
@@ -262,6 +278,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Health */
         get: operations["frameExport_health"];
         put?: never;
         post?: never;
@@ -278,6 +295,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Debug */
         get: operations["frameExport_debug"];
         put?: never;
         post?: never;
@@ -294,7 +312,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Quality Thresholds */
         get: operations["frameExport_getQualityThresholds"];
+        /** Set Quality Thresholds */
         put: operations["frameExport_setQualityThresholds"];
         post?: never;
         delete?: never;
@@ -303,7 +323,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/JellyfinSuite/PosterSheet/{itemId}": {
+    "/JellyfinSuite/PosterSheet/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -312,8 +332,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Start Job */
         post: operations["posterSheet_startJob"];
-        delete?: never;
+        /** Delete Job */
+        delete: operations["posterSheet_deleteJob"];
         options?: never;
         head?: never;
         patch?: never;
@@ -326,6 +348,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** List Jobs */
         get: operations["posterSheet_listJobs"];
         put?: never;
         post?: never;
@@ -342,6 +365,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Status */
         get: operations["posterSheet_getStatus"];
         put?: never;
         post?: never;
@@ -358,6 +382,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Image */
         get: operations["posterSheet_getImage"];
         put?: never;
         post?: never;
@@ -374,26 +399,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Stream Status */
         get: operations["posterSheet_streamStatus"];
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/JellyfinSuite/PosterSheet/{jobId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete: operations["posterSheet_deleteJob"];
         options?: never;
         head?: never;
         patch?: never;
@@ -408,6 +418,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Preview */
         post: operations["posterSheet_preview"];
         delete?: never;
         options?: never;
@@ -422,6 +433,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Check Cache */
         get: operations["posterSheet_checkCache"];
         put?: never;
         post?: never;
@@ -438,8 +450,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** List Fonts */
         get: operations["posterSheet_listFonts"];
         put?: never;
+        /** Upload Font */
         post: operations["posterSheet_uploadFont"];
         delete?: never;
         options?: never;
@@ -457,6 +471,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /** Delete Font */
         delete: operations["posterSheet_deleteFont"];
         options?: never;
         head?: never;
@@ -551,18 +566,6 @@ export interface components {
             /** Format: int64 */
             fileSize?: number | null;
             error?: string | null;
-        };
-        FrameQualityMeta: {
-            /** Format: int64 */
-            positionMs: number;
-            /** Format: double */
-            brightnessVar: number;
-            /** Format: double */
-            laplacianVar: number;
-            /** Format: double */
-            frameDiff: number;
-            isJunk: boolean;
-            junkReason?: string | null;
         };
         QualityThresholds: {
             /** Format: double */
@@ -753,9 +756,14 @@ export interface components {
             /** Format: int64 */
             frameReady: number;
         };
-        PrefetchFrameEvent: {
+        FrameIndexStreamEvent: components["schemas"]["FrameIndexEntryDto"][] | {
+            fps: components["schemas"]["FpsFracDto"];
+        };
+        PrefetchRangeEvent: {
             /** Format: int64 */
-            posMs?: number;
+            frameReady: number;
+        } | {
+            done: boolean;
         };
     };
     responses: never;
@@ -858,7 +866,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["FrameIndexEntryDto"];
+                    "text/event-stream": components["schemas"]["FrameIndexStreamEvent"];
                 };
             };
             /** @description Not Found */
@@ -1121,8 +1129,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["PrefetchFrameEvent"];
+                    "text/event-stream": components["schemas"]["PrefetchRangeEvent"];
                 };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Service Unavailable */
             503: {
@@ -1405,7 +1420,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                itemId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -1440,6 +1455,33 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    posterSheet_deleteJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1551,33 +1593,6 @@ export interface operations {
                 content: {
                     "text/event-stream": components["schemas"]["PosterSheetStatusDto"];
                 };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    posterSheet_deleteJob: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                jobId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Not Found */
             404: {

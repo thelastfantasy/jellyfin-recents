@@ -21,14 +21,27 @@ class OaDoc
 
     public Dictionary<string, object> Build() => new()
     {
-        ["openapi"] = "3.1.0",
+        ["openapi"] = "3.2.0",
         ["info"] = new Dictionary<string, object>
         {
             ["title"] = "JellyfinSuite Plugin API",
             ["version"] = "1.0.0",
+            ["license"] = new Dictionary<string, object>
+            {
+                ["name"] = "MIT",
+                ["url"] = "https://opensource.org/licenses/MIT",
+            },
         },
+        ["servers"] = new object[]
+        {
+            new Dictionary<string, object> { ["url"] = "http://localhost:8096", ["description"] = "Jellyfin server (default port)" },
+        },
+        ["security"] = new object[] { },
         ["paths"] = _paths,
-        ["components"] = new Dictionary<string, object> { ["schemas"] = _schemas },
+        ["components"] = new Dictionary<string, object>
+        {
+            ["schemas"] = _schemas,
+        },
     };
 }
 
@@ -118,8 +131,30 @@ class OaOp
         => Res(code, desc, contentType, new Dictionary<string, object> { ["type"] = "string", ["format"] = "binary" });
 
     public OaOp Sse(int code, string schemaName)
-        => Res(code, "Server-Sent Events stream", "text/event-stream",
-               new Dictionary<string, object> { ["$ref"] = $"#/components/schemas/{schemaName}" });
+    {
+        var schemaRef = new Dictionary<string, object> { ["$ref"] = $"#/components/schemas/{schemaName}" };
+        // schema: consumed by openapi-typescript (3.1-compat tooling) for type generation.
+        // itemSchema: OAI 3.2 canonical representation for sequential SSE streams.
+        // Both coexist — extra keywords are allowed by the spec.
+        _responses[code.ToString()] = new Dictionary<string, object>
+        {
+            ["description"] = "Server-Sent Events stream",
+            ["content"] = new Dictionary<string, object>
+            {
+                ["text/event-stream"] = new Dictionary<string, object>
+                {
+                    ["schema"] = schemaRef,
+                    ["itemSchema"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["contentMediaType"] = "application/json",
+                        ["contentSchema"] = schemaRef,
+                    },
+                },
+            },
+        };
+        return this;
+    }
 
     public OaOp ResNoContent(int code, string desc)
     {
@@ -140,11 +175,24 @@ class OaOp
         return this;
     }
 
+    static string OpIdToSummary(string opId)
+    {
+        var action = opId.Contains('_') ? opId.Split('_', 2)[1] : opId;
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in action)
+        {
+            if (char.IsUpper(c) && sb.Length > 0) sb.Append(' ');
+            sb.Append(c);
+        }
+        var s = sb.ToString();
+        return s.Length > 0 ? char.ToUpper(s[0]) + s[1..] : s;
+    }
+
     public Dictionary<string, object> Build()
     {
         var op = new Dictionary<string, object>();
         if (_tag != null)   op["tags"] = new[] { _tag };
-        if (_opId != null)  op["operationId"] = _opId;
+        if (_opId != null)  { op["operationId"] = _opId; op["summary"] = OpIdToSummary(_opId); }
         if (_params.Count > 0) op["parameters"] = _params;
         if (_reqSchema != null)
         {

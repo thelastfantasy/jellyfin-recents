@@ -28,7 +28,7 @@ public class CleanPosterSheetsTask : IScheduledTask
     [
         new TaskTriggerInfo
         {
-            Type = TaskTriggerInfo.TriggerDaily,
+            Type = TaskTriggerInfoType.DailyTrigger,
             TimeOfDayTicks = TimeSpan.FromHours(3).Ticks,
         }
     ];

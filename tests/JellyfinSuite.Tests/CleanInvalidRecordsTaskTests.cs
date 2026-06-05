@@ -1,4 +1,4 @@
-using Jellyfin.Data.Entities;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.JellyfinSuite.Data;
 using Jellyfin.Plugin.JellyfinSuite.Tasks;
 using MediaBrowser.Controller.Entities;

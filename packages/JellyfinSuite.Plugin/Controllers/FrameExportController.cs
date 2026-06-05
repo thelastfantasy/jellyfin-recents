@@ -64,6 +64,16 @@ public class FrameExportController : ControllerBase
 
         var fi = frameIdx ?? -1;
         await _frameExport.EnsureStartedAsync(ct);
+
+        // Fast path: serve from disk cache without acquiring the frame-forge socket lock.
+        // Eliminates contention when a prefetch stream is holding the lock concurrently.
+        var cached = FrameExportService.TryGetCachedWebP(itemId, fi, width);
+        if (cached != null)
+        {
+            Response.Headers["X-Frame-Pts-Ms"] = "0";
+            return File(cached, "image/webp");
+        }
+
         var (imageBytes, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, fi, width, itemId, ct);
         if (imageBytes == null || imageBytes.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
@@ -164,8 +174,8 @@ public class FrameExportController : ControllerBase
         Response.Headers["X-Accel-Buffering"] = "no";
 
         await _frameExport.PrefetchRangeStreamAsync(
-            item.Path, itemId, req.CurrentTimeMs,
-            req.BeforeSeconds, req.AfterSeconds, req.IncludeCurrentFrame,
+            item.Path, itemId, req.CurrentTimeMs, req.CurrentFrameIndex ?? -1L,
+            req.BeforeSeconds ?? 0.0, req.AfterSeconds ?? 0.0, req.IncludeCurrentFrame,
             req.Width, Response.Body, ct);
     }
 

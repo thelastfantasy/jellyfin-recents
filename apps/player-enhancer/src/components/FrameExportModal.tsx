@@ -64,13 +64,16 @@ function setBodyModalOpen(open: boolean) {
   else document.body.classList.remove(MODAL_BODY_CLASS);
 }
 
-function findCenterFrameIndex(
-  frames: FrameInfoEntry[],
-  currentMs: number,
-): number {
+// Returns the array index of the frame "containing" ms (last frame with ms <= target).
+// A frame spans [its ms, next frame's ms). Returns 0 if before all frames.
+function frameIdxAt(frames: FrameInfoEntry[], ms: number): number {
   for (let i = frames.length - 1; i >= 0; i--)
-    if (frames[i].ms <= currentMs) return i;
+    if (frames[i].ms <= ms) return i;
   return 0;
+}
+
+function frameAt(frames: FrameInfoEntry[], ms: number): FrameInfoEntry | undefined {
+  return frames[frameIdxAt(frames, ms)];
 }
 
 function findRangeFromCenter(
@@ -189,10 +192,11 @@ function FrameExportModalInner({
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
     const beforeSeconds = (centerMs - _minPosMs) / 1000;
     const afterSeconds = (_maxPosMs - centerMs) / 1000;
+    const centerFiIdx = _fi.index ? frameAt(_fi.index, centerMs)?.frameIndex : undefined
     bench.mark('prefetch_triggered', { centerMs, beforeSeconds, afterSeconds })
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: centerMs, beforeSeconds, afterSeconds, includeCurrentFrame: true, width: 320 },
+      { currentTimeMs: centerMs, currentFrameIndex: centerFiIdx, beforeSeconds, afterSeconds, includeCurrentFrame: true, width: 320 },
       (fiIdx) => {
         const idx = _frames.findIndex((f) => f.fiIdx === fiIdx);
         if (idx >= 0) markFrameReady(idx);
@@ -201,6 +205,17 @@ function FrameExportModalInner({
       () => {},
     );
   }, [itemId, markFrameReady]);
+
+  // Applies the ±1s display range centered at ms, then triggers prefetch.
+  // Returns true if range was applied; false if grid was already showing.
+  const applyRangeAt = useCallback((frames: FrameInfoEntry[], ms: number): boolean => {
+    if (_frames.length > 0) return false;
+    const center = frameIdxAt(frames, ms);
+    const [rangeStart, rangeEnd] = findRangeFromCenter(frames, center);
+    applyFrameRange(frames, ms, rangeStart, rangeEnd);
+    triggerPrefetch();
+    return true;
+  }, [triggerPrefetch]);
 
   function saveState() {
     setSavedState({
@@ -262,7 +277,9 @@ function FrameExportModalInner({
     }
   }, [videoEl, itemId]);
 
-  // frameInfo streaming — incremental: Queue A batch shows grid, Queue B fills index
+  // frameInfo streaming — incremental: Queue A batch shows grid, Queue B fills index.
+  // Pattern: if index is already available → apply range immediately, open SSE for priority
+  //          adjustment only; if not → open SSE, wait for first batch, then apply range.
   useEffect(() => {
     frameAccRef.current = [];
     if (!itemId) return;
@@ -271,37 +288,35 @@ function FrameExportModalInner({
     sPage.value = "grid";
     sLightboxIdx.value = null;
 
-    if (_fi.index !== null && _fi.index.length > 0) {
-      // Repeat visit: show grid immediately, open SSE only for priority adjustment
-      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: _fi.index.length })
-      if (!_frames.length) {
-        const center = findCenterFrameIndex(_fi.index, ms);
-        const [rangeStart, rangeEnd] = findRangeFromCenter(_fi.index, center);
-        applyFrameRange(_fi.index, ms, rangeStart, rangeEnd);
-        triggerPrefetch();
-      }
-      const es = openFrameInfoStream(itemId, ms, () => es.close(), () => {}, () => {});
-      return () => es.close();
+    const currentIndex = (_fi.index !== null && _fi.index.length > 0) ? _fi.index : null;
+    const hadIndex = currentIndex !== null;
+
+    if (hadIndex) {
+      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: currentIndex.length })
+      applyRangeAt(currentIndex, ms);
+    } else {
+      bench.mark('frameinfo_sse_open', { ms, savedStateFrames: _frames.length })
     }
 
-    // First visit: build frame index incrementally from SSE
-    let gridShown = _frames.length > 0; // savedState may have set frames already
-    bench.mark('frameinfo_sse_open', { ms, savedStateFrames: _frames.length })
-
-    const es = openFrameInfoStream(
-      itemId, ms,
+    const es = openFrameInfoStream(itemId, ms,
       (batch) => {
-        bench.once('frameinfo_first_batch', 'frameinfo_first_batch_recv', { count: batch.length })
+        const minMs = batch.reduce((a, f) => Math.min(a, f.ms), Infinity)
+        const maxMs = batch.reduce((a, f) => Math.max(a, f.ms), -Infinity)
+
+        if (hadIndex) {
+          // Priority adjustment: log and close — index was already complete
+          bench.mark('priority_adjust_batch_recv', { targetMs: ms, batchSize: batch.length, minMs, maxMs, offMs: minMs - ms })
+          es.close()
+          return
+        }
+
+        // First visit: accumulate index, show grid on first successful applyRangeAt
+        bench.once('frameinfo_first_batch', 'frameinfo_first_batch_recv', { count: batch.length, targetMs: ms, minMs, maxMs, offMs: minMs - ms })
         frameAccRef.current = [...frameAccRef.current, ...batch];
         const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
         setFrameIndex(sorted);
-        if (!gridShown) {
-          gridShown = true;
+        if (applyRangeAt(sorted, ms)) {
           bench.mark('grid_shown', { framesInRange: sorted.length })
-          const center = findCenterFrameIndex(sorted, ms);
-          const [rangeStart, rangeEnd] = findRangeFromCenter(sorted, center);
-          applyFrameRange(sorted, ms, rangeStart, rangeEnd);
-          triggerPrefetch();
         }
       },
       (fps) => {
@@ -318,7 +333,7 @@ function FrameExportModalInner({
     );
 
     return () => es.close();
-  }, [itemId, triggerPrefetch]);
+  }, [itemId, videoEl, applyRangeAt]);
 
   useEffect(() => {
     return () => { prefetchAbortRef.current?.abort(); };
@@ -331,13 +346,14 @@ function FrameExportModalInner({
     const step = framesPerSecond(), start = _fi.minIdx - step;
     if (start < 0) return;
     const oldMinPosMs = _minPosMs;
+    const oldMinFiIdx = _fi.index[_fi.minIdx]?.frameIndex;
     setFrames([..._fi.index.slice(start, _fi.minIdx).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
     setMinPosMs(_fi.index[start].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMinPosMs, beforeSeconds: (oldMinPosMs - _fi.index[start].ms) / 1000 + 0.1, afterSeconds: 0, includeCurrentFrame: false, width: 320 },
+      { currentTimeMs: oldMinPosMs, currentFrameIndex: oldMinFiIdx, beforeSeconds: (oldMinPosMs - _fi.index[start].ms) / 1000, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
       () => {}, () => {},
     );
@@ -348,13 +364,14 @@ function FrameExportModalInner({
     const step = framesPerSecond(), end = _fi.maxIdx + step;
     if (end >= _fi.index.length) return;
     const oldMaxPosMs = _maxPosMs;
+    const oldMaxFiIdx = _fi.index[_fi.maxIdx]?.frameIndex;
     setFrames([..._frames, ..._fi.index.slice(_fi.maxIdx + 1, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
     setMaxPosMs(_fi.index[end].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMaxPosMs, beforeSeconds: 0, afterSeconds: (_fi.index[end].ms - oldMaxPosMs) / 1000 + 0.1, includeCurrentFrame: false, width: 320 },
+      { currentTimeMs: oldMaxPosMs, currentFrameIndex: oldMaxFiIdx, afterSeconds: (_fi.index[end].ms - oldMaxPosMs) / 1000, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
       () => {}, () => {},
     );

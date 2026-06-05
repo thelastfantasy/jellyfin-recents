@@ -116,6 +116,20 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
+    // Fast path: read directly from frame-forge's disk cache, bypassing _requestLock.
+    // Avoids the lock contention that occurs when prefetch holds the socket lock
+    // while the browser simultaneously requests individual frame images.
+    public static byte[]? TryGetCachedWebP(Guid itemId, long frameIdx, int width)
+    {
+        if (frameIdx < 0) return null;
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "frame-forge", itemId.ToString("N"));
+        if (!System.IO.Directory.Exists(dir)) return null;
+        var files = System.IO.Directory.GetFiles(dir, $"{frameIdx}_*_{width}.webp");
+        if (files.Length == 0) return null;
+        try { return System.IO.File.ReadAllBytes(files[0]); }
+        catch { return null; }
+    }
+
     public async Task<(byte[]? JpegData, ushort QualityFlags, long ActualPtsMs)> GetFrameAsync(
         string filePath,
         long frameIdx,
@@ -736,7 +750,7 @@ public sealed class FrameExportService : IDisposable
     /// Response uses length-prefixed chunks (same as FrameIndexStreamAsync).
     /// </summary>
     public async Task PrefetchRangeStreamAsync(
-        string filePath, Guid itemId, long currentTimeMs,
+        string filePath, Guid itemId, long currentTimeMs, long currentFrameIdx,
         double beforeSeconds, double afterSeconds, bool includeCurrentFrame, int width,
         Stream output, CancellationToken ct = default)
     {
@@ -752,14 +766,15 @@ public sealed class FrameExportService : IDisposable
             var beforeMs = (long)(beforeSeconds * 1000);
             var afterMs  = (long)(afterSeconds  * 1000);
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4];
             var pos = 0;
             buf[pos++] = MsgPrefetchRangeStream;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
             pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), currentTimeMs); pos += 8;
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), currentFrameIdx); pos += 8;
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), beforeMs); pos += 8;
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), afterMs); pos += 8;
             buf[pos++] = (byte)(includeCurrentFrame ? 1 : 0);

@@ -41,7 +41,7 @@ public class CleanInvalidRecordsTask : IScheduledTask
         {
             new TaskTriggerInfo
             {
-                Type = TaskTriggerInfo.TriggerDaily,
+                Type = TaskTriggerInfoType.DailyTrigger,
                 TimeOfDayTicks = 0
             }
         };

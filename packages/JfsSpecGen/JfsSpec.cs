@@ -17,7 +17,6 @@ static class JfsSpec
         typeof(ExportParams),
         typeof(GenerateResponse),
         typeof(TaskProgressDto),
-        typeof(FrameQualityMeta),
         typeof(QualityThresholds),
         typeof(FrameExportTaskListItemDto),
         // FrameInfo / FrameIndex
@@ -46,10 +45,11 @@ static class JfsSpec
         foreach (var t in DtoTypes)
             doc.AddSchema(t.Name, SchemaReflector.ReflectType(t));
 
-        doc.AddSchema("FontMetaRecord",       FontMetaRecordSchema());
-        doc.AddSchema("FrameExportHealth",    FrameExportHealthSchema());
-        doc.AddSchema("SeekReadyEvent",       SeekReadyEventSchema());
-        doc.AddSchema("PrefetchFrameEvent",   PrefetchFrameEventSchema());
+        doc.AddSchema("FontMetaRecord",          FontMetaRecordSchema());
+        doc.AddSchema("FrameExportHealth",       FrameExportHealthSchema());
+        doc.AddSchema("SeekReadyEvent",          SeekReadyEventSchema());
+        doc.AddSchema("FrameIndexStreamEvent",   FrameIndexStreamEventSchema());
+        doc.AddSchema("PrefetchRangeEvent",      PrefetchRangeEventSchema());
 
         AddPlayHistoryPaths(doc);
         AddJellyfinSuitePaths(doc);
@@ -101,12 +101,53 @@ static class JfsSpec
         },
     };
 
-    static Dictionary<string, object> PrefetchFrameEventSchema() => new()
+    // FrameInfoStream: each SSE data field is either a batch of frame entries
+    // (array) or the terminal fps signal {"fps":{num,den}}.
+    static Dictionary<string, object> FrameIndexStreamEventSchema() => new()
     {
-        ["type"] = "object",
-        ["properties"] = new Dictionary<string, object>
+        ["anyOf"] = new object[]
         {
-            ["posMs"] = new Dictionary<string, object> { ["type"] = "integer", ["format"] = "int64" },
+            new Dictionary<string, object>
+            {
+                ["type"] = "array",
+                ["items"] = new Dictionary<string, object> { ["$ref"] = "#/components/schemas/FrameIndexEntryDto" },
+            },
+            new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["required"] = new[] { "fps" },
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["fps"] = new Dictionary<string, object> { ["$ref"] = "#/components/schemas/FpsFracDto" },
+                },
+            },
+        },
+    };
+
+    // PrefetchRangeStream: each SSE data field is either {"frameReady": fi_idx}
+    // (a frame is ready in cache) or {"done": true} (stream complete).
+    static Dictionary<string, object> PrefetchRangeEventSchema() => new()
+    {
+        ["anyOf"] = new object[]
+        {
+            new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["required"] = new[] { "frameReady" },
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["frameReady"] = new Dictionary<string, object> { ["type"] = "integer", ["format"] = "int64" },
+                },
+            },
+            new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["required"] = new[] { "done" },
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["done"] = new Dictionary<string, object> { ["type"] = "boolean" },
+                },
+            },
         },
     };
 
@@ -153,7 +194,7 @@ static class JfsSpec
             .Tag("JellyfinSuite").OpId("jellyfinSuite_frameInfoStream")
             .PathParam("itemId", "string", "uuid")
             .QueryParamInt("currentTimeMs")
-            .Sse(200, "FrameIndexEntryDto")
+            .Sse(200, "FrameIndexStreamEvent")
             .ResNoContent(404, "Not Found").ResNoContent(503, "Service Unavailable"));
     }
 
@@ -214,8 +255,8 @@ static class JfsSpec
             .Tag("FrameExport").OpId("frameExport_prefetchReady")
             .PathParam("itemId", "string", "uuid")
             .Body("PrefetchRangeStreamRequest")
-            .Sse(200, "PrefetchFrameEvent")
-            .ResNoContent(503, "Service Unavailable"));
+            .Sse(200, "PrefetchRangeEvent")
+            .ResNoContent(404, "Not Found").ResNoContent(503, "Service Unavailable"));
 
         doc.AddPath("/JellyfinSuite/FrameExport/Generate", "post", new OaOp()
             .Tag("FrameExport").OpId("frameExport_generate")
@@ -272,9 +313,9 @@ static class JfsSpec
 
     static void AddPosterSheetPaths(OaDoc doc)
     {
-        doc.AddPath("/JellyfinSuite/PosterSheet/{itemId}", "post", new OaOp()
+        doc.AddPath("/JellyfinSuite/PosterSheet/{id}", "post", new OaOp()
             .Tag("PosterSheet").OpId("posterSheet_startJob")
-            .PathParam("itemId")
+            .PathParam("id", "string", "uuid")
             .Body("PosterSheetRequestDto")
             .ResRef(202, "Job started", "StartJobResponseDto")
             .ResNoContent(400, "Bad Request").ResNoContent(404, "Not Found")
@@ -302,9 +343,9 @@ static class JfsSpec
             .Sse(200, "PosterSheetStatusDto")
             .ResNoContent(404, "Not Found"));
 
-        doc.AddPath("/JellyfinSuite/PosterSheet/{jobId}", "delete", new OaOp()
+        doc.AddPath("/JellyfinSuite/PosterSheet/{id}", "delete", new OaOp()
             .Tag("PosterSheet").OpId("posterSheet_deleteJob")
-            .PathParam("jobId")
+            .PathParam("id")
             .ResNoContent(204, "No Content").ResNoContent(404, "Not Found"));
 
         doc.AddPath("/JellyfinSuite/PosterSheet/preview", "post", new OaOp()

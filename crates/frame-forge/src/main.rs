@@ -25,8 +25,8 @@ use tokio::net::UnixListener;
 
 fn main() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(8)
+        .worker_threads(4)
+        .max_blocking_threads(16)
         .enable_all()
         .build()?
         .block_on(run())

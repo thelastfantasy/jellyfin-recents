@@ -28,8 +28,8 @@ const MSG_DEBUG_DUMP:           u8 = 0x1A;
 
 const RAM_CACHE_CAP: usize = 100;
 const FRAME_INDEX_CAP: usize = 20;
-const PREFETCH_WORKERS: usize = 2;
-const PREFETCH_QUEUE_CAP: usize = 64;
+const PREFETCH_WORKERS: usize = 6;
+const PREFETCH_QUEUE_CAP: usize = 128;
 
 // RAM cache key: (path, pos_ms, width)
 type RamKey = (PathBuf, i64, u32);
@@ -921,7 +921,7 @@ async fn queue_a_demux(
             sent += batch.len();
             tx.send(make_batch(&batch)).ok();
         }
-        eprintln!("[bench][queue_a] +{}ms fast_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+        eprintln!("[bench][queue_a] +{}ms fast_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
         return Ok(());
     }
 
@@ -979,7 +979,7 @@ async fn queue_a_demux(
 
         Ok(total)
     }).await??;
-    eprintln!("[bench][queue_a] +{}ms slow_path_done sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+    eprintln!("[bench][queue_a] +{}ms slow_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
 
     Ok(())
 }
@@ -1289,38 +1289,48 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let path = req.path;
     let width = req.width;
     let current_time_ms = req.current_time_ms;
-    let range_start_ms = current_time_ms.saturating_sub(req.before_ms);
-    let range_end_ms = current_time_ms.saturating_add(req.after_ms);
     let include_current = req.include_current;
 
     let t0 = bench_now_ms();
-    eprintln!("[bench][prefetch] recv current_time_ms={current_time_ms} range=[{range_start_ms},{range_end_ms}] include_current={include_current} abs={t0}");
+    eprintln!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} abs={t0}", req.current_frame_idx);
 
     let frame_idx = state.fi.get_or_build(&path).await?;
-    let (frames, _, _) = frame_idx.as_ref();
+    let (frames, fps_num, fps_den) = frame_idx.as_ref();
     eprintln!("[bench][prefetch] +{}ms frame_index_ready frames={}", bench_now_ms() - t0, frames.len());
+
+    // Resolve anchor_ms: use frame-exact PTS when current_frame_idx is provided,
+    // otherwise fall back to current_time_ms (ms-based binary search).
+    let anchor_ms = if req.current_frame_idx >= 0 {
+        let pos = frames.partition_point(|(ms, _)| {
+            compute_frame_idx(*ms, *fps_num, *fps_den) < req.current_frame_idx
+        });
+        frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
+    } else {
+        current_time_ms
+    };
+
+    let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
+    let range_end_ms = anchor_ms.saturating_add(req.after_ms);
+    eprintln!("[bench][prefetch] anchor_ms={anchor_ms} range=[{range_start_ms},{range_end_ms}]");
 
     let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
     let mut to_process: Vec<(i64, i64)> = Vec::new();
     for (i, &(ms, _)) in frames[start..].iter().enumerate() {
         if ms > range_end_ms { break; }
-        if !include_current && ms == current_time_ms { continue; }
+        if !include_current && ms == anchor_ms { continue; }
         to_process.push(((start + i) as i64, ms));
     }
     drop(frame_idx);
     eprintln!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
 
-    let mut first_ready = false;
     let mut cache_hits = 0usize;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, bool)>(to_process.len().max(1));
 
+    // Pass 1: emit cache hits immediately; spawn parallel decodes for misses
     for (fi_idx, pos_ms) in to_process {
         {
             let ram = state.ram.lock().await;
             if ram.peek(&(path.clone(), pos_ms, width)).is_some() {
-                if !first_ready {
-                    first_ready = true;
-                    eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=ram abs={}", bench_now_ms() - t0, bench_now_ms());
-                }
                 cache_hits += 1;
                 let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
                 write_chunk(stream, line.as_bytes()).await?;
@@ -1329,51 +1339,67 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
 
         if state.disk.exists(&item_id, &path, pos_ms, width) {
-            if !first_ready {
-                first_ready = true;
-                eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=disk abs={}", bench_now_ms() - t0, bench_now_ms());
-            }
             cache_hits += 1;
             let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
             write_chunk(stream, line.as_bytes()).await?;
             continue;
         }
 
-        let path_c = path.clone();
+        // Spawn parallel decode — no semaphore; bounded by max_blocking_threads
+        let path_c   = path.clone();
         let item_id_c = item_id.clone();
-        let disk = state.disk.clone();
-        let ram_state = state.clone();
+        let disk     = state.disk.clone();
+        let state_c  = state.clone();
+        let tx       = tx.clone();
 
-        let _permit = state.decode_sem.clone().acquire_owned().await?;
-        eprintln!("[bench][prefetch] +{}ms decode_start fi={fi_idx} pos_ms={pos_ms}", bench_now_ms() - t0);
-        let result = tokio::task::spawn_blocking(move || {
-            jfs_common::decode_and_encode(&path_c, pos_ms, width)
-        }).await;
+        tokio::spawn(async move {
+            let path_decode  = path_c.clone();
+            let path_write   = path_c.clone();
+            let item_id_write = item_id_c.clone();
+            let disk_write   = disk.clone();
 
-        match result {
-            Ok(Ok(r)) => {
+            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, Vec<u8>, Option<Vec<u8>>)> {
+                let r = jfs_common::decode_and_encode(&path_decode, pos_ms, width)?;
                 let fi = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
                 if !r.webp_orig.is_empty() {
-                    disk.write(&item_id_c, &path, fi, pos_ms, 0, &r.webp_orig);
+                    disk_write.write(&item_id_write, &path_write, fi, pos_ms, 0, &r.webp_orig);
                 }
-                disk.write(&item_id_c, &path, fi, pos_ms, width, &r.webp);
-                let mut ram = ram_state.ram.lock().await;
-                if !r.webp_orig.is_empty() {
-                    ram.put((path.clone(), pos_ms, 0), r.webp_orig);
+                disk_write.write(&item_id_write, &path_write, fi, pos_ms, width, &r.webp);
+                let orig = if r.webp_orig.is_empty() { None } else { Some(r.webp_orig) };
+                Ok((fi, r.webp, orig))
+            }).await;
+
+            let ok = match result {
+                Ok(Ok((_fi, webp, webp_orig))) => {
+                    let mut ram = state_c.ram.lock().await;
+                    if let Some(orig) = webp_orig {
+                        ram.put((path_c.clone(), pos_ms, 0), orig);
+                    }
+                    ram.put((path_c, pos_ms, width), webp);
+                    true
                 }
-                ram.put((path.clone(), pos_ms, width), r.webp);
-                if !first_ready {
-                    first_ready = true;
-                    eprintln!("[bench][prefetch] +{}ms FIRST_READY fi={fi_idx} pos_ms={pos_ms} source=decoded abs={}", bench_now_ms() - t0, bench_now_ms());
-                }
-                let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
-                write_chunk(stream, line.as_bytes()).await?;
+                Ok(Err(e)) => { eprintln!("[frame-forge] prefetch decode error: {e}"); false }
+                Err(e)     => { eprintln!("[frame-forge] prefetch spawn error: {e}");  false }
+            };
+            let _ = tx.send((fi_idx, ok)).await;
+        });
+    }
+    drop(tx); // close sender so rx drains when all tasks finish
+
+    // Pass 2: forward decode results as they arrive
+    let mut decoded = 0usize;
+    while let Some((fi_idx, ok)) = rx.recv().await {
+        if ok {
+            decoded += 1;
+            if decoded == 1 {
+                eprintln!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
             }
-            _ => {}
+            let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+            write_chunk(stream, line.as_bytes()).await?;
         }
     }
 
-    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} abs={}", bench_now_ms() - t0, bench_now_ms());
+    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} abs={}", bench_now_ms() - t0, bench_now_ms());
     write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;

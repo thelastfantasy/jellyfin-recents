@@ -328,12 +328,14 @@ pub(crate) async fn write_list_cached(
 }
 
 // ── MSG_PREFETCH_RANGE_STREAM (0x19) ────────────────────────────────
-// Wire: [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
+// Wire: [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
+// current_frame_idx == -1 means not provided; fall back to current_time_ms for anchor lookup.
 
 pub(crate) struct PrefetchRangeStreamReq {
     pub item_id: String,
     pub path: std::path::PathBuf,
     pub current_time_ms: i64,
+    pub current_frame_idx: i64,
     pub before_ms: i64,
     pub after_ms: i64,
     pub include_current: bool,
@@ -360,6 +362,10 @@ pub(crate) async fn read_prefetch_range_stream_req(
     stream.read_exact(&mut ct_buf).await?;
     let current_time_ms = i64::from_le_bytes(ct_buf);
 
+    let mut fi_buf = [0u8; 8];
+    stream.read_exact(&mut fi_buf).await?;
+    let current_frame_idx = i64::from_le_bytes(fi_buf);
+
     let mut bm_buf = [0u8; 8];
     stream.read_exact(&mut bm_buf).await?;
     let before_ms = i64::from_le_bytes(bm_buf);
@@ -376,7 +382,7 @@ pub(crate) async fn read_prefetch_range_stream_req(
     stream.read_exact(&mut w_buf).await?;
     let width = u32::from_le_bytes(w_buf);
 
-    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, before_ms, after_ms, include_current, width })
+    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, current_frame_idx, before_ms, after_ms, include_current, width })
 }
 
 // ── MSG_INDEX_FRAMES_STREAM (0x17) ──────────────────────────────────

@@ -14,7 +14,7 @@
     "@jellyfin/sdk": "^0.10.0",
     "@jfs/api-types": "workspace:*",
     "@jfs/i18n": "workspace:*",
-    "axios": "^1.16.0",
+    "axios": "^1.17.0",
     "jotai": "^2.13.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
