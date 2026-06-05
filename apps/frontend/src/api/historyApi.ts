@@ -1,9 +1,7 @@
-import type { components } from '@jfs/api-types'
+import type { PlayHistoryResponse } from '@jfs/api-types'
 
 import type { GroupByMode, MediaFilter, PlayRecord, SortByMode, SortOrder } from '../types'
 import { getCurrentUserId } from './jellyfinClient'
-
-type PlayHistoryResponse = components['schemas']['PlayHistoryResponse']
 
 export interface HistoryResult {
   records: PlayRecord[]

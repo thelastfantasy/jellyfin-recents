@@ -148,6 +148,7 @@ function FrameExportModalInner({
     const mo = new MutationObserver(onDetach)
     mo.observe(videoEl.parentElement ?? document.body, { childList: true, subtree: true })
     return () => mo.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -441,7 +442,7 @@ function FrameExportModalInner({
     setSuppressNextMousedown(false);
     if (_itemId && _frames.length > 0) saveState();
     closeModal(null);
-  }, []);
+  }, [closeModal]);
 
   const handleMinimize = useCallback(() => {
     setGesturesSuspended(false);
@@ -455,7 +456,7 @@ function FrameExportModalInner({
     e.stopPropagation();
     if (sLightboxIdx.value !== null) sLightboxIdx.value = null;
     else handleClose();
-  }, []);
+  }, [handleClose]);
 
   // ── 9. Render ───────────────────────────────────────────────────────────────
 
