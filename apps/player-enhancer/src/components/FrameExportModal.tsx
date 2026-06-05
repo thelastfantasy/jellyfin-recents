@@ -337,7 +337,7 @@ function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMinPosMs, beforeSeconds: 1, afterSeconds: 0, includeCurrentFrame: false, width: 320 },
+      { currentTimeMs: oldMinPosMs, beforeSeconds: (oldMinPosMs - _fi.index[start].ms) / 1000 + 0.1, afterSeconds: 0, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
       () => {}, () => {},
     );
@@ -354,7 +354,7 @@ function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMaxPosMs, beforeSeconds: 0, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
+      { currentTimeMs: oldMaxPosMs, beforeSeconds: 0, afterSeconds: (_fi.index[end].ms - oldMaxPosMs) / 1000 + 0.1, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
       () => {}, () => {},
     );

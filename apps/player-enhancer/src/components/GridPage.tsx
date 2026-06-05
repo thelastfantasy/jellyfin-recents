@@ -4,7 +4,7 @@ import type { ChangeEvent } from 'react'
 import {
   _fi, _frames, _maxPosMs,
   _minPosMs, _videoEl, exportTypeAtom, frameInterval,
-  framesAtom, modalPhaseAtom, paramsOpenAtom, prefetchDoneAtom,
+  framesAtom, paramsOpenAtom, prefetchDoneAtom,
   prefetchTotalAtom, setFrames, settingsAtom, sExportType, sParamsOpen,
   updateSettings,
 } from '../core/state'
@@ -26,7 +26,6 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
   const paramsOpen  = useAtomValue(paramsOpenAtom)
   const prefTotal   = useAtomValue(prefetchTotalAtom)
   const prefDone    = useAtomValue(prefetchDoneAtom)
-  const phase       = useAtomValue(modalPhaseAtom)
 
   const visible      = frames.filter(f => !f.removed)
   const selectedCount = visible.filter(f => f.selected).length
@@ -114,7 +113,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
         <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={onExpandForward}>
           {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
         </button>
-        <button className="jfs-fe-btn p" disabled={phase === 'skeleton' || !canGenerate} onClick={onGenerate}>
+        <button className="jfs-fe-btn p" disabled={!canGenerate} onClick={onGenerate}>
           {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}
         </button>
         <button className="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>

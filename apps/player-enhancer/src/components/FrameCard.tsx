@@ -1,4 +1,5 @@
 import { useAtomValue } from 'jotai'
+import { useEffect, useRef } from 'react'
 
 import type { FrameEntry } from '../core/state'
 import { _itemId, prefetchDoneAtom,prefetchTotalAtom } from '../core/state'
@@ -33,6 +34,14 @@ export function FrameCard({
 }: FrameCardProps) {
   const prefTotal = useAtomValue(prefetchTotalAtom)
   const prefDone  = useAtomValue(prefetchDoneAtom)
+
+  const srcLoggedRef = useRef(false)
+  useEffect(() => {
+    if (frame.jpegUrl && !srcLoggedRef.current) {
+      srcLoggedRef.current = true
+      bench.mark('img_src_set', { idx, posMs: frame.posMs })
+    }
+  }, [frame.jpegUrl])
   const prefetchPct = prefTotal > 0
     ? prefDone / prefTotal * 100
     : 100
@@ -52,7 +61,7 @@ export function FrameCard({
           src={frame.jpegUrl}
           alt={formatTime(frame.posMs)}
           onError={() => onLoadError(idx)}
-          onLoad={() => bench.once('first_img_load', 'first_img_loaded', { idx, posMs: frame.posMs })}
+          onLoad={() => bench.mark('img_loaded', { idx, posMs: frame.posMs })}
         />
       )
       : <div className="jfs-fe-loading"><div className="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
