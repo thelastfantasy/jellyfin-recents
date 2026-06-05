@@ -65,7 +65,11 @@ description = "运行 C# xUnit 测试"
 run = "make test-csharp"
 
 [tasks.gen-types]
-description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（需要容器已启动且已部署最新 DLL）"
+description = "从 C# DTO 反射生成 OpenAPI 3.1 spec，再生成 TypeScript 类型（无需运行容器）"
+run = "dotnet run --project packages/JfsSpecGen -- --out packages/api-types/openapi.json && node scripts/gen-plugin-types.mjs --file=packages/api-types/openapi.json"
+
+[tasks.gen-types-from-server]
+description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（旧流程，需要容器已启动）"
 run = "node scripts/gen-plugin-types.mjs"
 
 [tasks.workflow-test]
