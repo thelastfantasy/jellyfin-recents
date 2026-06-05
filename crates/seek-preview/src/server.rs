@@ -30,7 +30,7 @@ struct FrameMeta {
 
 #[derive(Clone)]
 struct CacheEntry {
-    jpeg: Arc<Vec<u8>>,
+    webp: Arc<Vec<u8>>,
     meta: FrameMeta,
 }
 
@@ -73,14 +73,14 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                 let width = req.width;
                 let cached = { state.cache.lock().await.get(&key).cloned() };
                 if let Some(entry) = cached {
-                    if is_fetch { let _ = write_response(&mut stream, req.request_id, &entry.jpeg).await; }
+                    if is_fetch { let _ = write_response(&mut stream, req.request_id, &entry.webp).await; }
                     else { let _ = write_ack(&mut stream, req.request_id).await; }
                     continue;
                 }
                 if is_fetch {
-                    if let Some(jpeg) = state.disk.read(&req.item_id, &req.path, pos_ms, width) {
-                        let arc = Arc::new(jpeg);
-                        let entry = CacheEntry { jpeg: arc.clone(), meta: FrameMeta { actual_pts_ms: -1, fps_num: 0, fps_den: 1 } };
+                    if let Some(webp) = state.disk.read(&req.item_id, &req.path, pos_ms, width) {
+                        let arc = Arc::new(webp);
+                        let entry = CacheEntry { webp: arc.clone(), meta: FrameMeta { actual_pts_ms: -1, fps_num: 0, fps_den: 1 } };
                         state.cache.lock().await.put(key, entry);
                         let _ = write_response(&mut stream, req.request_id, &arc).await;
                         continue;
@@ -97,14 +97,14 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                 let _permit = if is_fetch { Some(state.decode_sem.clone().acquire_owned().await.unwrap()) } else { None };
                 match tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<u8>, FrameMeta)> {
                     let _p = _permit;
-                    let (bytes, actual_pts_ms, fps_num, fps_den) = decode_and_encode(&path, pos_ms, width)?;
-                    let frame_idx = compute_frame_idx(actual_pts_ms, fps_num, fps_den);
-                    disk.write(&item_id, &path, frame_idx, pos_ms, width, &bytes);
-                    Ok((bytes, FrameMeta { actual_pts_ms, fps_num, fps_den }))
+                    let r = decode_and_encode(&path, pos_ms, width)?;
+                    let frame_idx = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
+                    disk.write(&item_id, &path, frame_idx, pos_ms, width, &r.webp);
+                    Ok((r.webp, FrameMeta { actual_pts_ms: r.pts_ms, fps_num: r.fps_num, fps_den: r.fps_den }))
                 }).await {
                     Ok(Ok((bytes, meta))) => {
                         let arc = Arc::new(bytes);
-                        s2.cache.lock().await.put(k2, CacheEntry { jpeg: arc.clone(), meta });
+                        s2.cache.lock().await.put(k2, CacheEntry { webp: arc.clone(), meta });
                         if is_fetch { let _ = write_response(&mut stream, req.request_id, &arc).await; }
                         else { let _ = write_ack(&mut stream, req.request_id).await; }
                     }
