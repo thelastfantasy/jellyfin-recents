@@ -2,6 +2,116 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::ptr;
 
+/// Decode a contiguous range of frames in a single sequential pass.
+///
+/// Opens the file once, seeks to the range start, and decodes forward — avoiding the
+/// O(N × GOP) cost of N independent seeks that `decode_and_encode` incurs.
+///
+/// `targets`: `(fi_idx, pos_ms)` pairs **sorted ascending by pos_ms**. Only frames whose
+/// `fi_idx` (computed from their display PTS) appears in this list are emitted.
+///
+/// `on_frame(fi_idx, pos_ms, webp_thumb, webp_orig)` is called for each matched frame
+/// in decode order. Return `Err` to abort early (e.g. on channel send failure).
+pub fn decode_range(
+    path: &Path,
+    targets: &[(i64, i64)],
+    width: u32,
+    mut on_frame: impl FnMut(i64, i64, Vec<u8>, Vec<u8>) -> Result<()>,
+) -> Result<()> {
+    use ffmpeg_next as ff;
+    use ffmpeg_next::threading;
+
+    if targets.is_empty() { return Ok(()); }
+
+    let first_ms = targets[0].1;
+    let last_ms  = targets[targets.len() - 1].1;
+
+    // fi_idx → pos_ms: look up the canonical pos_ms for each matched frame
+    let mut fi_to_pos: std::collections::HashMap<i64, i64> =
+        targets.iter().map(|&(fi, ms)| (fi, ms)).collect();
+
+    let mut ictx = ff::format::input(path)
+        .with_context(|| format!("cannot open {:?}", path))?;
+
+    let (stream_idx, tb, fps_num, fps_den, stream_start_ms, codec_ctx) = {
+        let s = ictx.streams().best(ff::media::Type::Video)
+            .context("no video stream")?;
+        let rate    = s.avg_frame_rate();
+        let fps_num = rate.0 as i64;
+        let fps_den = if rate.1 > 0 { rate.1 as i64 } else { 1 };
+        let tb      = s.time_base();
+        let spts    = s.start_time().max(0);
+        let start_ms = if spts > 0 && tb.0 != 0 && tb.1 != 0 {
+            (spts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+        } else { 0 };
+        let ctx = ff::codec::context::Context::from_parameters(s.parameters())?;
+        (s.index(), tb, fps_num, fps_den, start_ms, ctx)
+    };
+
+    let thread_count = std::thread::available_parallelism()
+        .map(|n| n.get()).unwrap_or(2).min(4);
+
+    let mut decoder = {
+        let mut ctx = codec_ctx;
+        ctx.set_threading(threading::Config {
+            kind: threading::Type::Slice,
+            count: thread_count,
+        });
+        ctx.decoder().video()?
+    };
+
+    // Seek to just before first target so we land on the preceding keyframe
+    let seek_ts = first_ms.saturating_sub(100) * 1000;
+    let _ = ictx.seek(seek_ts, ..seek_ts);
+    decoder.flush();
+
+    'outer: for (s, pkt) in ictx.packets() {
+        if s.index() != stream_idx { continue; }
+
+        // Packet-level early exit: past the range + one extra second
+        let pkt_pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+        if tb.0 != 0 && tb.1 != 0 {
+            let pkt_ms = (pkt_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+                - stream_start_ms;
+            if pkt_ms > last_ms + 1000 { break; }
+        }
+
+        if decoder.send_packet(&pkt).is_err() { continue; }
+
+        loop {
+            let mut frame = ff::frame::Video::empty();
+            match decoder.receive_frame(&mut frame) {
+                Err(_) => break,
+                Ok(_) => {
+                    // Use frame display PTS (set by decoder) for correct B-frame ordering
+                    let fpts = frame.pts().unwrap_or(pkt_pts);
+                    let pts_ms = if tb.0 != 0 && tb.1 != 0 {
+                        let raw = (fpts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+                        (raw - stream_start_ms).max(0)
+                    } else { 0 };
+
+                    if pts_ms < first_ms { continue; }
+                    if pts_ms > last_ms + 500 { break 'outer; }
+
+                    let fi_idx = crate::compute_frame_idx(pts_ms, fps_num, fps_den);
+                    if let Some(pos_ms) = fi_to_pos.remove(&fi_idx) {
+                        let (webp_thumb, webp_orig) = if width == 0 {
+                            (encode_webp_lossless(&frame)?, vec![])
+                        } else {
+                            (encode_webp_lossy(&frame, width, 85.0)?,
+                             encode_webp_lossless(&frame)?)
+                        };
+                        on_frame(fi_idx, pos_ms, webp_thumb, webp_orig)?;
+                        if fi_to_pos.is_empty() { break 'outer; }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Decode one frame and encode to WebP. Returns a `DecodeResult`.
 /// `webp` = WebP at target_width (lossy if width > 0, lossless if width == 0).
 /// `webp_orig` = WebP lossless at native frame size (empty when target_width == 0).

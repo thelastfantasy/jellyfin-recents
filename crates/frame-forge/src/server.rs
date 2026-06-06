@@ -14,24 +14,6 @@ use jfs_common::FrameIndexEntry;
 use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
-// 返回 load_per_core（0.0=空闲，1.0=满载），用于动态调整并发数
-#[cfg(target_os = "linux")]
-fn system_load_factor() -> f64 {
-    let text = match std::fs::read_to_string("/proc/loadavg") {
-        Ok(t) => t,
-        Err(_) => return 0.0,
-    };
-    let load1: f64 = text.split_whitespace().next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0);
-    let ncpu = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1) as f64;
-    (load1 / ncpu).min(2.0)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn system_load_factor() -> f64 { 0.0 }
 
 const MSG_SINGLE_FRAME: u8 = 0x10;
 const MSG_ANIMATE: u8 = 0x11;
@@ -1411,21 +1393,15 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     };
 
     log::debug!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
-
-    // 并发数：fps 给出基准，系统负载动态缩减，保守上限避免占用过多资源
-    let base = ((fps as usize) / 8).clamp(2, 6);
-    let load = system_load_factor();
-    let concurrency = if load < 0.5 { base }
-                      else if load < 1.0 { (base / 2).max(2) }
-                      else { 2 };
-    let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
-    log::debug!("[bench][prefetch] fps={fps} load={load:.2} concurrency={concurrency}");
+    log::debug!("[bench][prefetch] fps={fps} mode=sequential");
 
     let mut cache_hits = 0usize;
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, i64, bool)>(to_process.len().max(1));
+    let mut misses: Vec<(i64, i64)> = Vec::new();
 
-    // Pass 1: emit cache hits immediately; spawn parallel decodes for misses
-    for (fi_idx, pos_ms) in to_process {
+    // Pass 1: emit cache hits immediately, collect misses for sequential decode
+    for (fi_idx, pos_ms) in &to_process {
+        let fi_idx = *fi_idx;
+        let pos_ms = *pos_ms;
         {
             let ram = state.ram.lock().await;
             if ram.peek(&(path.clone(), pos_ms, width)).is_some() {
@@ -1440,7 +1416,6 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                 continue;
             }
         }
-
         if state.disk.exists(&item_id, &path, pos_ms, width) {
             cache_hits += 1;
             let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
@@ -1452,71 +1427,48 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             write_chunk(stream, line.as_bytes()).await?;
             continue;
         }
+        misses.push((fi_idx, pos_ms));
+    }
 
-        // 并发解码，每个 task 内部等待 semaphore permit 后再调 spawn_blocking
-        let path_c    = path.clone();
-        let item_id_c = item_id.clone();
-        let disk      = state.disk.clone();
-        let state_c   = state.clone();
-        let tx        = tx.clone();
-        let sem_c     = Arc::clone(&sem);
+    // Pass 2: sequential decode — one file open, one seek, frames arrive progressively via channel
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
+    let path_c    = path.clone();
+    let item_id_c = item_id.clone();
+    let disk_c    = state.disk.clone();
 
-        tokio::spawn(async move {
-            let _permit = sem_c.acquire_owned().await.unwrap();
-            let path_decode   = path_c.clone();
-            let path_write    = path_c.clone();
-            let item_id_write = item_id_c.clone();
-            let disk_write    = disk.clone();
-
-            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, Vec<u8>, Option<Vec<u8>>)> {
-                let r = jfs_common::decode_and_encode(&path_decode, pos_ms, width)?;
-                if !r.webp_orig.is_empty() {
-                    disk_write.write(&item_id_write, &path_write, fi_idx, pos_ms, 0, &r.webp_orig);
-                }
-                disk_write.write(&item_id_write, &path_write, fi_idx, pos_ms, width, &r.webp);
-                let orig = if r.webp_orig.is_empty() { None } else { Some(r.webp_orig) };
-                Ok((fi_idx, r.webp, orig))
-            }).await;
-
-            let ok = match result {
-                Ok(Ok((_fi, webp, webp_orig))) => {
-                    let mut ram = state_c.ram.lock().await;
-                    if let Some(orig) = webp_orig {
-                        ram.put((path_c.clone(), pos_ms, 0), orig);
-                    }
-                    ram.put((path_c, pos_ms, width), webp);
-                    true
-                }
-                Ok(Err(e)) => { log::warn!("[frame-forge] prefetch decode error fi={fi_idx} pos={pos_ms}: {e}"); false }
-                Err(e)     => { log::warn!("[frame-forge] prefetch spawn error fi={fi_idx}: {e}");  false }
-            };
-            let _ = tx.send((fi_idx, pos_ms, ok)).await;
+    tokio::task::spawn_blocking(move || {
+        let result = jfs_common::decode_range(&path_c, &misses, width, |fi_idx, pos_ms, webp_thumb, webp_orig| {
+            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0,     &webp_orig);
+            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
+            tx.blocking_send((fi_idx, pos_ms, webp_thumb, webp_orig))
+                .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
         });
-    }
-    drop(tx); // close sender so rx drains when all tasks finish
-
-    // Pass 2: forward decode results as they arrive
-    let mut decoded = 0usize;
-    let mut failed  = 0usize;
-    while let Some((fi_idx, pos_ms, ok)) = rx.recv().await {
-        if ok {
-            decoded += 1;
-            if decoded == 1 {
-                log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
-            }
-            let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
-            let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
-            let line = format!(
-                "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
-                thumb.to_string_lossy(), orig.to_string_lossy()
-            );
-            write_chunk(stream, line.as_bytes()).await?;
-        } else {
-            failed += 1;
+        if let Err(e) = result {
+            log::warn!("[frame-forge] sequential prefetch error: {e}");
         }
+    });
+
+    let mut decoded = 0usize;
+    while let Some((fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
+        decoded += 1;
+        if decoded == 1 {
+            log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+        }
+        {
+            let mut ram = state.ram.lock().await;
+            ram.put((path.clone(), pos_ms, 0),     webp_orig);
+            ram.put((path.clone(), pos_ms, width),  webp_thumb);
+        }
+        let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+        let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+        let line = format!(
+            "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+            thumb.to_string_lossy(), orig.to_string_lossy()
+        );
+        write_chunk(stream, line.as_bytes()).await?;
     }
 
-    log::debug!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} failed={failed} abs={}", bench_now_ms() - t0, bench_now_ms());
+    log::debug!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} abs={}", bench_now_ms() - t0, bench_now_ms());
     write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;
