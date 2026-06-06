@@ -52,6 +52,11 @@ impl DiskCache {
         self.cache_dir.join(item_id).join(format!("{frame_idx}_{}_{width}.webp", format_pos_ms(pos_ms)))
     }
 
+    /// Returns the filesystem path for a cached frame without checking existence.
+    pub fn make_path(&self, item_id: &str, frame_idx: i64, pos_ms: i64, width: u32) -> PathBuf {
+        self.frame_path(item_id, frame_idx, pos_ms, width)
+    }
+
     pub fn read(&self, item_id: &str, video_path: &Path, pos_ms: i64, width: u32) -> Option<Vec<u8>> {
         let current_mtime = video_mtime(video_path);
         let path = {

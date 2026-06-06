@@ -70,10 +70,12 @@ public class FrameExportController : ControllerBase
         var cached = FrameExportService.TryGetCachedWebP(itemId, fi, width);
         if (cached != null)
         {
+            _logger.LogDebug("[FrameExport] GET fi={Fi} w={Width} → cache hit ({Bytes}B)", fi, width, cached.Length);
             Response.Headers["X-Frame-Pts-Ms"] = "0";
             return File(cached, "image/webp");
         }
 
+        _logger.LogDebug("[FrameExport] GET fi={Fi} w={Width} → decode", fi, width);
         var (imageBytes, qualityFlags, actualPtsMs) = await _frameExport.GetFrameAsync(item.Path, fi, width, itemId, ct);
         if (imageBytes == null || imageBytes.Length == 0)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "frame decode failed" });
@@ -167,6 +169,17 @@ public class FrameExportController : ControllerBase
             return;
         }
 
+        if (req.CurrentTimeMs.HasValue == req.CurrentFrameIndex.HasValue)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await HttpContext.Response.WriteAsync(
+                req.CurrentTimeMs.HasValue
+                    ? "currentTimeMs and currentFrameIndex are mutually exclusive; provide exactly one."
+                    : "Either currentTimeMs or currentFrameIndex is required.",
+                ct);
+            return;
+        }
+
         await _frameExport.EnsureStartedAsync(ct);
 
         Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
@@ -174,7 +187,7 @@ public class FrameExportController : ControllerBase
         Response.Headers["X-Accel-Buffering"] = "no";
 
         await _frameExport.PrefetchRangeStreamAsync(
-            item.Path, itemId, req.CurrentTimeMs, req.CurrentFrameIndex ?? -1L,
+            item.Path, itemId, req.CurrentTimeMs ?? 0L, req.CurrentFrameIndex ?? -1L,
             req.BeforeSeconds ?? 0.0, req.AfterSeconds ?? 0.0, req.IncludeCurrentFrame,
             req.Width, Response.Body, ct);
     }
@@ -225,13 +238,13 @@ public class FrameExportController : ControllerBase
                 byte[]? output = req.Type switch
                 {
                     "animate" => await _frameExport.SubmitAnimateTaskAsync(
-                        task, filePaths, frameIndices, req.Params.Format,
+                        task, req.ItemId, filePaths, frameIndices, req.Params.Format,
                         resizeMode, targetPx, req.Params.Speed, req.Params.LoopCount,
                         req.Params.CropX ?? 0f, req.Params.CropY ?? 0f,
                         req.Params.CropW ?? 0f, req.Params.CropH ?? 0f,
                         req.Params.Quality, resolutionPreset, task.Cts.Token),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
-                        task, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
+                        task, req.ItemId, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
                         task.Cts.Token),
                     _ => null
                 };

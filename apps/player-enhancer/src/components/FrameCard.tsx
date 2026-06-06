@@ -39,8 +39,9 @@ export function FrameCard({
   useEffect(() => {
     if (frame.jpegUrl && !srcLoggedRef.current) {
       srcLoggedRef.current = true
-      bench.mark('img_src_set', { idx, posMs: frame.posMs })
+      bench.mark('img_src_set', { frameIndex: frame.fiIdx, posMs: frame.posMs })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame.jpegUrl])
   const prefetchPct = prefTotal > 0
     ? prefDone / prefTotal * 100
@@ -61,7 +62,7 @@ export function FrameCard({
           src={frame.jpegUrl}
           alt={formatTime(frame.posMs)}
           onError={() => onLoadError(idx)}
-          onLoad={() => bench.mark('img_loaded', { idx, posMs: frame.posMs })}
+          onLoad={() => bench.mark('img_loaded', { frameIndex: frame.fiIdx, posMs: frame.posMs })}
         />
       )
       : <div className="jfs-fe-loading"><div className="jfs-fe-load-bar" style={{ width: `${prefetchPct}%` }} /></div>
@@ -106,8 +107,8 @@ export function FrameCard({
           onTouchStart={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
           onChange={e => { e.stopPropagation(); onToggle(idx, (e.target as HTMLInputElement).checked) }}
         />
-        {formatTime(displayMs)}
-        {frame.fiIdx >= 0 && <span className="jfs-fe-frnum">#{frame.fiIdx}</span>}
+        {frame.jpegUrl || frame.loadError ? formatTime(displayMs) : '—:—:—.———'}
+        {(frame.jpegUrl || frame.loadError) && frame.fiIdx >= 0 && <span className="jfs-fe-frnum">#{frame.fiIdx}</span>}
       </div>
     </div>
   )

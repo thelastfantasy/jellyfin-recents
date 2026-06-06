@@ -65,9 +65,10 @@ export const deleteResultMutation = () => ({
   },
 })
 
-export interface PrefetchRangeParams {
-  currentTimeMs: number
-  currentFrameIndex?: number
+export type PrefetchRangeParams = (
+  | { currentTimeMs: number; currentFrameIndex?: never }
+  | { currentFrameIndex: number; currentTimeMs?: never }
+) & {
   beforeSeconds?: number
   afterSeconds?: number
   includeCurrentFrame: boolean

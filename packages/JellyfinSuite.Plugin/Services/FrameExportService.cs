@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -35,6 +36,10 @@ public sealed class FrameExportService : IDisposable
 
     private uint _nextRequestId;
     private bool _disposed;
+
+    // Frame path index: populated by PrefetchRangeStreamAsync when Rust reports cached file paths.
+    // Key: (itemId, fi_idx) → (thumbPath, origPath) — avoids glob matching in TryGetCachedWebP.
+    private static readonly ConcurrentDictionary<(Guid, long), (string ThumbPath, string OrigPath)> _framePathIndex = new();
 
     public bool IsAvailable =>
         !RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -116,18 +121,46 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
-    // Fast path: read directly from frame-forge's disk cache, bypassing _requestLock.
-    // Avoids the lock contention that occurs when prefetch holds the socket lock
-    // while the browser simultaneously requests individual frame images.
+    // Fast path: serve from the frame path index populated during PrefetchReady SSE.
+    // Bypasses _requestLock entirely — no glob, no socket, no lock contention.
     public static byte[]? TryGetCachedWebP(Guid itemId, long frameIdx, int width)
     {
         if (frameIdx < 0) return null;
-        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "frame-forge", itemId.ToString("N"));
-        if (!System.IO.Directory.Exists(dir)) return null;
-        var files = System.IO.Directory.GetFiles(dir, $"{frameIdx}_*_{width}.webp");
-        if (files.Length == 0) return null;
-        try { return System.IO.File.ReadAllBytes(files[0]); }
+        if (!_framePathIndex.TryGetValue((itemId, frameIdx), out var paths)) return null;
+        var path = width == 0 ? paths.OrigPath : paths.ThumbPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+        try { return File.ReadAllBytes(path); }
         catch { return null; }
+    }
+
+    // Parses an SSE chunk from PrefetchRangeStream: if it carries thumbPath/origPath,
+    // stores them in _framePathIndex and returns a stripped chunk (paths not forwarded to browser).
+    private static byte[] StripAndStorePaths(byte[] chunk, Guid itemId)
+    {
+        const string prefix = "data: ";
+        var text = Encoding.UTF8.GetString(chunk);
+        if (!text.StartsWith(prefix, StringComparison.Ordinal)) return chunk;
+
+        var jsonStr = text[prefix.Length..].TrimEnd('\n', '\r');
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(jsonStr);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("frameReady", out var frProp)) return chunk;
+            var fiIdx = frProp.GetInt64();
+
+            if (root.TryGetProperty("thumbPath", out var tpProp) &&
+                root.TryGetProperty("origPath",  out var opProp))
+            {
+                var thumbPath = tpProp.GetString() ?? "";
+                var origPath  = opProp.GetString() ?? "";
+                if (!string.IsNullOrEmpty(thumbPath))
+                    _framePathIndex[(itemId, fiIdx)] = (thumbPath, origPath);
+                return Encoding.UTF8.GetBytes($"data: {{\"frameReady\":{fiIdx}}}\n\n");
+            }
+        }
+        catch { /* ignore parse errors, forward as-is */ }
+        return chunk;
     }
 
     public async Task<(byte[]? JpegData, ushort QualityFlags, long ActualPtsMs)> GetFrameAsync(
@@ -461,6 +494,7 @@ public sealed class FrameExportService : IDisposable
 
     public async Task<byte[]?> SubmitAnimateTaskAsync(
         TaskState task,
+        Guid itemId,
         List<string> filePaths,
         List<long> frameIndices,
         string format,   // "gif" or "webp"
@@ -479,6 +513,8 @@ public sealed class FrameExportService : IDisposable
         // Build ANIMATE (0x11) request
         using var ms = new MemoryStream();
         ms.WriteByte(0x11); // msg_type
+        // item_id: fixed 32 ASCII bytes (UUID N format, no hyphens)
+        ms.Write(Encoding.ASCII.GetBytes(itemId.ToString("N")), 0, 32);
         ms.Write(BitConverter.GetBytes((uint)taskIdBytes.Length), 0, 4);
         ms.Write(taskIdBytes, 0, taskIdBytes.Length);
         ms.Write(BitConverter.GetBytes((uint)frameCount), 0, 4);
@@ -578,6 +614,7 @@ public sealed class FrameExportService : IDisposable
 
     public async Task<byte[]?> SubmitStitchTaskAsync(
         TaskState task,
+        Guid itemId,
         List<string> filePaths,
         List<long> positionsMs,
         string format,   // "png" or "webp"
@@ -593,6 +630,8 @@ public sealed class FrameExportService : IDisposable
 
         using var ms = new MemoryStream();
         ms.WriteByte(0x12); // MSG_STITCH
+        // item_id: fixed 32 ASCII bytes (UUID N format, no hyphens)
+        ms.Write(Encoding.ASCII.GetBytes(itemId.ToString("N")), 0, 32);
         ms.Write(BitConverter.GetBytes((uint)taskIdBytes.Length), 0, 4);
         ms.Write(taskIdBytes, 0, taskIdBytes.Length);
         ms.Write(BitConverter.GetBytes((uint)frameCount), 0, 4);
@@ -616,6 +655,7 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_w = 0 (disabled)
         ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_h = 0
         ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
+        ms.Write(BitConverter.GetBytes((uint)0), 0, 4);         // preset_len = 0 (stitch always uses original resolution)
 
         var reqBuf = ms.ToArray();
         try
@@ -763,8 +803,8 @@ public sealed class FrameExportService : IDisposable
             var sock = await GetSocketAsync(ct).ConfigureAwait(false);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
-            var beforeMs = (long)(beforeSeconds * 1000);
-            var afterMs  = (long)(afterSeconds  * 1000);
+            var beforeMs = (long)Math.Round(beforeSeconds * 1000);
+            var afterMs  = (long)Math.Round(afterSeconds  * 1000);
 
             // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
             var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4];
@@ -782,7 +822,7 @@ public sealed class FrameExportService : IDisposable
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
-            // Read length-prefixed chunks and forward directly to output
+            // Read length-prefixed chunks; intercept paths before forwarding to browser
             var lenBuf = new byte[4];
             while (true)
             {
@@ -792,7 +832,8 @@ public sealed class FrameExportService : IDisposable
 
                 var chunk = new byte[chunkLen];
                 await ReceiveExactAsync(sock, chunk, chunkLen, ct).ConfigureAwait(false);
-                await output.WriteAsync(chunk, ct).ConfigureAwait(false);
+                var forwarded = StripAndStorePaths(chunk, itemId);
+                await output.WriteAsync(forwarded, ct).ConfigureAwait(false);
                 await output.FlushAsync(ct).ConfigureAwait(false);
             }
         }

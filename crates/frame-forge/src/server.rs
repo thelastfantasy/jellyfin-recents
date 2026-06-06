@@ -473,18 +473,26 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     let mut actual_pts_vec: Vec<i64> = Vec::with_capacity(total_input);
 
     for (i, (path, frame_idx)) in req.paths.iter().enumerate() {
-        let p = path.clone();
         let pos_ms = if *frame_idx >= 0 && (*frame_idx as usize) < fi_frames.len() {
             fi_frames[*frame_idx as usize].0
         } else {
             0
         };
         eprintln!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
-        let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
 
-        images.push(image::load_from_memory(&r.webp)?);
-        actual_pts_vec.push(r.pts_ms);
-        if i == 0 { eprintln!("[frame-forge] ANIMATE first frame decoded"); }
+        let (img, actual_pts) = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
+            eprintln!("[frame-forge] ANIMATE frame {} → disk cache hit", i);
+            (image::load_from_memory(&cached)?, pos_ms)
+        } else {
+            eprintln!("[frame-forge] ANIMATE frame {} → decode", i);
+            let p = path.clone();
+            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            (image::load_from_memory(&r.webp)?, r.pts_ms)
+        };
+
+        images.push(img);
+        actual_pts_vec.push(actual_pts);
+        if i == 0 { eprintln!("[frame-forge] ANIMATE first frame ready"); }
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, total_input as u32,
@@ -659,14 +667,23 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
     for (i, (path, frame_idx)) in req.paths.iter().enumerate() {
-        let p = path.clone();
         let pos_ms = if *frame_idx >= 0 && (*frame_idx as usize) < fi_frames.len() {
             fi_frames[*frame_idx as usize].0
         } else {
             0
         };
-        let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
-        images.push(image::load_from_memory(&r.webp)?);
+
+        let img = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
+            eprintln!("[frame-forge] STITCH frame {} → disk cache hit", i);
+            image::load_from_memory(&cached)?
+        } else {
+            eprintln!("[frame-forge] STITCH frame {} → decode", i);
+            let p = path.clone();
+            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            image::load_from_memory(&r.webp)?
+        };
+
+        images.push(img);
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, req.paths.len() as u32,
@@ -1255,11 +1272,10 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
 
         match result {
             Ok(Ok(r)) => {
-                let fi = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
                 if !r.webp_orig.is_empty() {
-                    disk.write(&item_id_c, &path, fi, pos_ms, 0, &r.webp_orig);
+                    disk.write(&item_id_c, &path, fi_idx, pos_ms, 0, &r.webp_orig);
                 }
-                disk.write(&item_id_c, &path, fi, pos_ms, width, &r.webp);
+                disk.write(&item_id_c, &path, fi_idx, pos_ms, width, &r.webp);
                 let mut ram = ram_state.ram.lock().await;
                 if !r.webp_orig.is_empty() {
                     ram.put((path.clone(), pos_ms, 0), r.webp_orig);
@@ -1324,7 +1340,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     eprintln!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
 
     let mut cache_hits = 0usize;
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, bool)>(to_process.len().max(1));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, i64, bool)>(to_process.len().max(1));
 
     // Pass 1: emit cache hits immediately; spawn parallel decodes for misses
     for (fi_idx, pos_ms) in to_process {
@@ -1332,7 +1348,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             let ram = state.ram.lock().await;
             if ram.peek(&(path.clone(), pos_ms, width)).is_some() {
                 cache_hits += 1;
-                let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+                let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+                let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+                let line = format!(
+                    "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                    thumb.to_string_lossy(), orig.to_string_lossy()
+                );
                 write_chunk(stream, line.as_bytes()).await?;
                 continue;
             }
@@ -1340,7 +1361,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
 
         if state.disk.exists(&item_id, &path, pos_ms, width) {
             cache_hits += 1;
-            let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+            let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+            let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+            let line = format!(
+                "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                thumb.to_string_lossy(), orig.to_string_lossy()
+            );
             write_chunk(stream, line.as_bytes()).await?;
             continue;
         }
@@ -1360,13 +1386,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
 
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, Vec<u8>, Option<Vec<u8>>)> {
                 let r = jfs_common::decode_and_encode(&path_decode, pos_ms, width)?;
-                let fi = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
                 if !r.webp_orig.is_empty() {
-                    disk_write.write(&item_id_write, &path_write, fi, pos_ms, 0, &r.webp_orig);
+                    disk_write.write(&item_id_write, &path_write, fi_idx, pos_ms, 0, &r.webp_orig);
                 }
-                disk_write.write(&item_id_write, &path_write, fi, pos_ms, width, &r.webp);
+                disk_write.write(&item_id_write, &path_write, fi_idx, pos_ms, width, &r.webp);
                 let orig = if r.webp_orig.is_empty() { None } else { Some(r.webp_orig) };
-                Ok((fi, r.webp, orig))
+                Ok((fi_idx, r.webp, orig))
             }).await;
 
             let ok = match result {
@@ -1378,28 +1403,36 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                     ram.put((path_c, pos_ms, width), webp);
                     true
                 }
-                Ok(Err(e)) => { eprintln!("[frame-forge] prefetch decode error: {e}"); false }
-                Err(e)     => { eprintln!("[frame-forge] prefetch spawn error: {e}");  false }
+                Ok(Err(e)) => { eprintln!("[frame-forge] prefetch decode error fi={fi_idx} pos={pos_ms}: {e}"); false }
+                Err(e)     => { eprintln!("[frame-forge] prefetch spawn error fi={fi_idx}: {e}");  false }
             };
-            let _ = tx.send((fi_idx, ok)).await;
+            let _ = tx.send((fi_idx, pos_ms, ok)).await;
         });
     }
     drop(tx); // close sender so rx drains when all tasks finish
 
     // Pass 2: forward decode results as they arrive
     let mut decoded = 0usize;
-    while let Some((fi_idx, ok)) = rx.recv().await {
+    let mut failed  = 0usize;
+    while let Some((fi_idx, pos_ms, ok)) = rx.recv().await {
         if ok {
             decoded += 1;
             if decoded == 1 {
                 eprintln!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
             }
-            let line = format!("data: {{\"frameReady\":{fi_idx}}}\n\n");
+            let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+            let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+            let line = format!(
+                "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                thumb.to_string_lossy(), orig.to_string_lossy()
+            );
             write_chunk(stream, line.as_bytes()).await?;
+        } else {
+            failed += 1;
         }
     }
 
-    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} abs={}", bench_now_ms() - t0, bench_now_ms());
+    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} failed={failed} abs={}", bench_now_ms() - t0, bench_now_ms());
     write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;

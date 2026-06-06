@@ -72,8 +72,27 @@ function frameIdxAt(frames: FrameInfoEntry[], ms: number): number {
   return 0;
 }
 
-function frameAt(frames: FrameInfoEntry[], ms: number): FrameInfoEntry | undefined {
-  return frames[frameIdxAt(frames, ms)];
+// Binary search: first index where frames[i].ms >= ms
+function bsFirst(frames: FrameInfoEntry[], ms: number): number {
+  let lo = 0, hi = frames.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (frames[mid].ms < ms) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+// Binary search: last index where frames[i].ms <= ms (-1 if none)
+function bsLast(frames: FrameInfoEntry[], ms: number): number {
+  let lo = 0, hi = frames.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (frames[mid].ms <= ms) lo = mid + 1; else hi = mid; }
+  return lo - 1;
+}
+
+// Re-sync _fi.minIdx / _fi.maxIdx after _fi.index expands (Queue B batches shift positions).
+function resyncFiRange(index: FrameInfoEntry[]) {
+  if (_minPosMs > _maxPosMs || index.length === 0) return;
+  const newMin = bsFirst(index, _minPosMs);
+  const newMax = bsLast(index, _maxPosMs);
+  if (newMin < index.length) setFiMinIdx(newMin);
+  if (newMax >= 0)           setFiMaxIdx(newMax);
 }
 
 function findRangeFromCenter(
@@ -191,16 +210,14 @@ function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     if (_minPosMs > _maxPosMs) return;
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
-    const beforeSeconds = (centerMs - _minPosMs) / 1000;
-    const afterSeconds = (_maxPosMs - centerMs) / 1000;
-    const centerFiIdx = _fi.index ? frameAt(_fi.index, centerMs)?.frameIndex : undefined
-    bench.mark('prefetch_triggered', { centerMs, beforeSeconds, afterSeconds })
+    bench.mark('prefetch_triggered', { centerMs })
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: centerMs, currentFrameIndex: centerFiIdx, beforeSeconds, afterSeconds, includeCurrentFrame: true, width: 320 },
+      { currentTimeMs: centerMs, beforeSeconds: 1, afterSeconds: 1, includeCurrentFrame: true, width: 320 },
       (fiIdx) => {
         const idx = _frames.findIndex((f) => f.fiIdx === fiIdx);
         if (idx >= 0) markFrameReady(idx);
+        else bench.mark('prefetch_no_match', { fiIdx, framesLen: _frames.length });
       },
       () => {},
       () => {},
@@ -318,17 +335,22 @@ function FrameExportModalInner({
         setFrameIndex(sorted);
         if (applyRangeAt(sorted, ms)) {
           bench.mark('grid_shown', { framesInRange: sorted.length })
+        } else {
+          // Queue B batch: index expanded, resync minIdx/maxIdx to _minPosMs/_maxPosMs
+          resyncFiRange(sorted);
         }
       },
       (fps) => {
         setFpsFrac(fps);
         const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
         const seen = new Set<number>();
-        setFrameIndex(sorted.filter(f => {
+        const deduped = sorted.filter(f => {
           if (seen.has(f.frameIndex)) return false;
           seen.add(f.frameIndex);
           return true;
-        }));
+        });
+        setFrameIndex(deduped);
+        resyncFiRange(deduped);
       },
       () => {},
     );
@@ -346,7 +368,6 @@ function FrameExportModalInner({
     if (!_fi.index) return;
     const step = framesPerSecond(), start = _fi.minIdx - step;
     if (start < 0) return;
-    const oldMinPosMs = _minPosMs;
     const oldMinFiIdx = _fi.index[_fi.minIdx]?.frameIndex;
     setFrames([..._fi.index.slice(start, _fi.minIdx).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
@@ -354,8 +375,8 @@ function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMinPosMs, currentFrameIndex: oldMinFiIdx, beforeSeconds: (oldMinPosMs - _fi.index[start].ms) / 1000, includeCurrentFrame: false, width: 320 },
-      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
+      { currentFrameIndex: oldMinFiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320 },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_back', { fiIdx }); },
       () => {}, () => {},
     );
   }, [itemId, markFrameReady]);
@@ -364,7 +385,6 @@ function FrameExportModalInner({
     if (!_fi.index) return;
     const step = framesPerSecond(), end = _fi.maxIdx + step;
     if (end >= _fi.index.length) return;
-    const oldMaxPosMs = _maxPosMs;
     const oldMaxFiIdx = _fi.index[_fi.maxIdx]?.frameIndex;
     setFrames([..._frames, ..._fi.index.slice(_fi.maxIdx + 1, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
@@ -372,8 +392,8 @@ function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: oldMaxPosMs, currentFrameIndex: oldMaxFiIdx, afterSeconds: (_fi.index[end].ms - oldMaxPosMs) / 1000, includeCurrentFrame: false, width: 320 },
-      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); },
+      { currentFrameIndex: oldMaxFiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_fwd', { fiIdx }); },
       () => {}, () => {},
     );
   }, [itemId, markFrameReady]);
@@ -493,7 +513,7 @@ function FrameExportModalInner({
               onExpandBack={expandBack}
               onExpandForward={expandForward}
               onGenerate={submitGenerate}
-              loading={!hasFrames}
+              loading={!hasFrames || _itemId !== itemId}
             />
           )}
           {page === "progress" && (

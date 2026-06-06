@@ -37,9 +37,9 @@ pub(crate) async fn read_single_frame_req(
     stream.read_exact(&mut id_buf).await?;
     let request_id = u32::from_le_bytes(id_buf);
 
-    let mut pos_buf = [0u8; 8];
-    stream.read_exact(&mut pos_buf).await?;
-    let frame_idx = i64::from_le_bytes(pos_buf);
+    let mut fi_buf = [0u8; 8];
+    stream.read_exact(&mut fi_buf).await?;
+    let frame_idx = i64::from_le_bytes(fi_buf);
 
     let mut w_buf = [0u8; 4];
     stream.read_exact(&mut w_buf).await?;
@@ -155,6 +155,7 @@ impl ResolutionPreset {
 }
 
 pub(crate) struct AnimateReq {
+    pub item_id: String,
     pub task_id: String,
     pub paths: Vec<(std::path::PathBuf, i64)>, // (path, frame_idx)
     pub format: AnimFormat,
@@ -172,6 +173,11 @@ pub(crate) async fn read_animate_req(
 ) -> anyhow::Result<AnimateReq> {
     use tokio::io::AsyncReadExt;
 
+    // item_id: fixed 32 ASCII bytes (Jellyfin UUID in N format)
+    let mut id_buf = [0u8; 32];
+    stream.read_exact(&mut id_buf).await?;
+    let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
+
     // task_id_len + task_id
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
@@ -187,9 +193,9 @@ pub(crate) async fn read_animate_req(
 
     let mut paths = Vec::with_capacity(frame_count);
     for _ in 0..frame_count {
-        let mut pos_buf = [0u8; 8];
-        stream.read_exact(&mut pos_buf).await?;
-        let pos_ms = i64::from_le_bytes(pos_buf);
+        let mut fi_buf = [0u8; 8];
+        stream.read_exact(&mut fi_buf).await?;
+        let frame_idx = i64::from_le_bytes(fi_buf);
 
         let mut pl_buf = [0u8; 4];
         stream.read_exact(&mut pl_buf).await?;
@@ -199,7 +205,7 @@ pub(crate) async fn read_animate_req(
         stream.read_exact(&mut pbytes).await?;
         let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
 
-        paths.push((path, pos_ms));
+        paths.push((path, frame_idx));
     }
 
     let mut fmt_buf = [0u8; 2];
@@ -238,7 +244,7 @@ pub(crate) async fn read_animate_req(
     stream.read_exact(&mut preset_bytes).await?;
     let resolution_preset = ResolutionPreset::from_str(&String::from_utf8(preset_bytes).unwrap_or_default());
 
-    Ok(AnimateReq { task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
+    Ok(AnimateReq { item_id, task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
 }
 
 // ── MSG_PREFETCH_RANGE (0x16) ───────────────────────────────────────
