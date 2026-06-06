@@ -57,12 +57,14 @@ export function useFrameInfoPreload(videoEl: HTMLVideoElement | null, getItemId:
       },
       fps => {
         if (preloadState.aborted || done) return
-        done = true
         setFpsFrac(fps)
+      },
+      () => {
+        if (preloadState.aborted || done) return
+        done = true
         accumulated.sort((a, b) => a.ms - b.ms)
         setFrameIndex(accumulated)
         preloadState.evSrc = null
-        evSrc.close()
       },
       () => {
         if (preloadState.aborted || done) return

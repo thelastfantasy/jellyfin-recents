@@ -11,15 +11,21 @@ export type FrameBatchCallback = (frames: FrameInfoEntry[]) => void
 
 export type FpsCallback = (fps: { num: number; den: number }) => void
 
-export function openFrameInfoStream(itemId: string, currentTimeMs: number,
-  onBatch: FrameBatchCallback, onDone: FpsCallback, onError: () => void,
+export function openFrameInfoStream(
+  itemId: string,
+  currentTimeMs: number,
+  onBatch: FrameBatchCallback,
+  onFps: FpsCallback,
+  onDone: () => void,
+  onError: () => void,
 ): EventSource {
   const evSrc = new EventSource(suite.frameInfoStream(itemId, currentTimeMs))
   evSrc.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data)
       if (Array.isArray(data)) onBatch(data)
-      else if (data?.fps) { onDone(data.fps); evSrc.close() }
+      else if (data?.fps) onFps(data.fps)
+      else if (data?.done === true) { onDone(); evSrc.close() }
     } catch { /* ignore */ }
   }
   evSrc.onerror = () => { evSrc.close(); onError() }

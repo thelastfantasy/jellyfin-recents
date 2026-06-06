@@ -265,15 +265,18 @@ export function setDragSelectValue(v: boolean)                { _dragSelectValue
 export function setSuppressNextMousedown(v: boolean)          { _suppressNextMousedown = v }
 
 export interface FrameInfoState {
-  index:   FrameInfoEntry[] | null
-  minIdx:  number
-  maxIdx:  number
-  fpsFrac: FpsFrac
+  index:         FrameInfoEntry[] | null
+  indexComplete: boolean
+  minIdx:        number
+  maxIdx:        number
+  fpsFrac:       FpsFrac
 }
 
-export const _fi: FrameInfoState = { index: null, minIdx: 1, maxIdx: -1, fpsFrac: { num: 24, den: 1 } }
+export const _fi: FrameInfoState = { index: null, indexComplete: false, minIdx: 1, maxIdx: -1, fpsFrac: { num: 24, den: 1 } }
 
-export function setFrameIndex(v: FrameInfoEntry[] | null) { _fi.index   = v }
+export function setFrameIndex(v: FrameInfoEntry[] | null) { _fi.index         = v }
+
+export function setFiIndexComplete(v: boolean)            { _fi.indexComplete = v }
 
 export function setFiMinIdx(v: number)                    { _fi.minIdx  = v }
 

@@ -30,12 +30,16 @@ export function FrameGrid() {
   const lastTouchXY    = useRef({ x: 0, y: 0 })
 
   const [pressingIdx, setPressingIdx] = useState<number | null>(null)
+  const dragRafRef = useRef(false)
 
   function dragSelectAt(x: number, y: number): void {
     const idx = cardIdxAt(x, y)
     if (idx < 0 || _frames[idx].selected === _dragSelectValue) return
     _frames[idx].selected = _dragSelectValue
-    setFrames([..._frames])
+    if (!dragRafRef.current) {
+      dragRafRef.current = true
+      requestAnimationFrame(() => { dragRafRef.current = false; setFrames([..._frames]) })
+    }
   }
 
   // ── 1. Effects ──────────────────────────────────────────────────────────────

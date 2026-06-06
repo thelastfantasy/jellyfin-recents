@@ -33,6 +33,10 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("frame_forge=warn"),
+    ).init();
+
     let args: Vec<String> = std::env::args().collect();
     let sock_path = args.get(1).context("Usage: frame-forge <socket-path>")?;
 
@@ -40,9 +44,7 @@ async fn run() -> Result<()> {
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;
-    eprintln!(
-        "[frame-forge] listening on {sock_path} | OpenCL: unavailable (CPU fallback)"
-    );
+    log::info!("[frame-forge] listening on {sock_path}");
 
     let state = server::State::new();
 
@@ -51,7 +53,7 @@ async fn run() -> Result<()> {
             Ok((stream, _)) => {
                 tokio::spawn(server::handle_conn(stream, state.clone()));
             }
-            Err(e) => eprintln!("[frame-forge] accept error: {e}"),
+            Err(e) => log::error!("[frame-forge] accept error: {e}"),
         }
     }
 }

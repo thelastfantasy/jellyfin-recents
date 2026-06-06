@@ -84,7 +84,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
         <select id="jfs-fe-format" className="jfs-fe-sel" value={displayFormat} onChange={handleFormatChange}>
           {formatOpts.map(option => <option key={option} value={option}>{option.toUpperCase()}</option>)}
         </select>
-        <select className="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
+        <select id="jfs-fe-sparse" className="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
           <option value="0">{t('grid.sparse')}</option>
           <option value="1">全</option>
           <option value="2">½</option>
@@ -113,10 +113,10 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
         <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={onExpandForward}>
           {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
         </button>
-        <button className="jfs-fe-btn p" disabled={!canGenerate} onClick={onGenerate}>
+        <button id="jfs-fe-generate" className="jfs-fe-btn p" disabled={!canGenerate} onClick={onGenerate}>
           {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}
         </button>
-        <button className="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
+        <button id="jfs-fe-close" className="jfs-fe-btn g" style={{ padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>
     </div>
   )

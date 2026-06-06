@@ -80,6 +80,9 @@ public sealed class FrameExportService : IDisposable
                 CreateNoWindow = true,
             };
             psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
+            // RUST_LOG controls frame-forge log verbosity (log crate).
+            // Inherit from host if set; fall back to debug so bench logs appear by default.
+            psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug";
 
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.Start();

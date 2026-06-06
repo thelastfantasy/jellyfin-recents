@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { atom, getDefaultStore, useAtomValue, useSetAtom } from "jotai";
-import { Suspense, useCallback, useEffect, useMemo, useRef } from "react";
+import { Suspense, memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { frameUrl, generateExportMutation, openFrameInfoStream, openPrefetchRangeStream } from "../api/frameExportApi";
@@ -19,6 +19,7 @@ import {
   pageAtom,
   setActiveTaskId,
   setDragMode,
+  setFiIndexComplete,
   setFiMaxIdx,
   setFiMinIdx,
   setFpsFrac,
@@ -143,14 +144,16 @@ function applyFrameRange(
 
 // ── Inner modal ───────────────────────────────────────────────────────────────
 
-function FrameExportModalInner({
+const FrameExportModalInner = memo(function FrameExportModalInner({
   videoEl,
   itemId,
   minimized,
+  posMs,
 }: {
   videoEl: HTMLVideoElement;
   itemId: string;
   minimized: boolean;
+  posMs: number;
 }) {
   // ── 1. Refs + atoms + local ──────────────────────────────────────────────────
 
@@ -191,10 +194,6 @@ function FrameExportModalInner({
 
   // ── 5. Helpers ──────────────────────────────────────────────────────────────
 
-  function framesPerSecond(): number {
-    return Math.round(_fi.fpsFrac.num / _fi.fpsFrac.den);
-  }
-
   const markFrameReady = useCallback((idx: number) => {
     bench.once('first_thumb_ready', 'first_thumb_url_set', { idx })
     setFrames(
@@ -208,7 +207,8 @@ function FrameExportModalInner({
 
   const triggerPrefetch = useCallback(() => {
     prefetchAbortRef.current?.abort();
-    if (_minPosMs > _maxPosMs) return;
+    if (_frames.length === 0) return;
+    // 用展示范围中心（不用 posMs），确保返回的 fiIdx 与 _frames 一致
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
     bench.mark('prefetch_triggered', { centerMs })
     prefetchAbortRef.current = openPrefetchRangeStream(
@@ -225,10 +225,12 @@ function FrameExportModalInner({
   }, [itemId, markFrameReady]);
 
   // Applies the ±1s display range centered at ms, then triggers prefetch.
-  // Returns true if range was applied; false if grid was already showing.
+  // Returns true if range was applied; false if grid was already showing or index not there yet.
   const applyRangeAt = useCallback((frames: FrameInfoEntry[], ms: number): boolean => {
     if (_frames.length > 0) return false;
     const center = frameIdxAt(frames, ms);
+    // index 还没推送到目标位置，继续等 SSE 后续批次
+    if (Math.abs(frames[center].ms - ms) > 1500) return false;
     const [rangeStart, rangeEnd] = findRangeFromCenter(frames, center);
     applyFrameRange(frames, ms, rangeStart, rangeEnd);
     triggerPrefetch();
@@ -253,19 +255,28 @@ function FrameExportModalInner({
 
   useEffect(() => {
     bench.reset()
-    bench.mark('modal_open', { itemId, posMs: Math.round(videoEl.currentTime * 1000) })
+    bench.mark('modal_open', {
+      itemId,
+      posMs,
+      sameItem: itemId === _itemId,
+      hasSavedState: !!_savedState && _savedState.itemId === itemId,
+      existingFrames: _frames.length,
+      hasFrameIndex: _fi.index !== null,
+    })
     setVideoEl(videoEl);
     setActiveTaskId("");
     if (itemId !== _itemId) {
       setFrameIndex(null);
       setFpsFrac({ num: 24, den: 1 });
       setFrames([]);
+    } else if (_frames.length > 0 && (posMs < _minPosMs || posMs > _maxPosMs)) {
+      setFrames([]);
     }
     setItemId(itemId);
     videoEl.pause();
     setBodyModalOpen(true);
     setGesturesSuspended(true);
-  }, [videoEl, itemId]);
+  }, [videoEl, itemId, posMs]);
 
   useEffect(() => {
     if (fetchedName) setItemTitle(fetchedName);
@@ -273,12 +284,11 @@ function FrameExportModalInner({
 
   // savedState restore — runs before the streaming effect (definition order)
   useEffect(() => {
-    const ms = Math.round(videoEl.currentTime * 1000);
     if (
       _savedState &&
       _savedState.itemId === itemId &&
-      ms >= _savedState.minPosMs &&
-      ms <= _savedState.maxPosMs
+      posMs >= _savedState.minPosMs &&
+      posMs <= _savedState.maxPosMs
     ) {
       setFrames(_savedState.frames.map((f) => ({ ...f })));
       sExportType.value = _savedState.exportType;
@@ -293,7 +303,7 @@ function FrameExportModalInner({
       sPage.value = "grid";
       sLightboxIdx.value = null;
     }
-  }, [videoEl, itemId]);
+  }, [videoEl, itemId, posMs]);
 
   // frameInfo streaming — incremental: Queue A batch shows grid, Queue B fills index.
   // Pattern: if index is already available → apply range immediately, open SSE for priority
@@ -302,7 +312,7 @@ function FrameExportModalInner({
     frameAccRef.current = [];
     if (!itemId) return;
 
-    const ms = Math.round(videoEl.currentTime * 1000);
+    const ms = posMs;
     sPage.value = "grid";
     sLightboxIdx.value = null;
 
@@ -310,9 +320,13 @@ function FrameExportModalInner({
     const hadIndex = currentIndex !== null;
 
     if (hadIndex) {
-      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: currentIndex.length })
+      const wasComplete = _fi.indexComplete;
+      bench.mark('frameinfo_sse_priority_adjust', { ms, frameIndexSize: currentIndex.length, wasComplete })
       applyRangeAt(currentIndex, ms);
+      setFiIndexComplete(true);
+      if (wasComplete) return; // index was already complete — skip SSE
     } else {
+      setFiIndexComplete(false);
       bench.mark('frameinfo_sse_open', { ms, savedStateFrames: _frames.length })
     }
 
@@ -342,6 +356,8 @@ function FrameExportModalInner({
       },
       (fps) => {
         setFpsFrac(fps);
+      },
+      () => {
         const sorted = [...frameAccRef.current].sort((a, b) => a.ms - b.ms);
         const seen = new Set<number>();
         const deduped = sorted.filter(f => {
@@ -351,12 +367,13 @@ function FrameExportModalInner({
         });
         setFrameIndex(deduped);
         resyncFiRange(deduped);
+        setFiIndexComplete(true);
       },
       () => {},
     );
 
     return () => es.close();
-  }, [itemId, videoEl, applyRangeAt]);
+  }, [itemId, videoEl, posMs, applyRangeAt]);
 
   useEffect(() => {
     return () => { prefetchAbortRef.current?.abort(); };
@@ -365,36 +382,52 @@ function FrameExportModalInner({
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
   const expandBack = useCallback(() => {
-    if (!_fi.index) return;
-    const step = framesPerSecond(), start = _fi.minIdx - step;
-    if (start < 0) return;
-    const oldMinFiIdx = _fi.index[_fi.minIdx]?.frameIndex;
-    setFrames([..._fi.index.slice(start, _fi.minIdx).map(makeEntry), ..._frames]);
+    if (!_fi.index || _frames.length === 0) return;
+    const firstFrame = _frames[0];
+    const boundaryMs = firstFrame.posMs;
+    const sliceEnd = bsLast(_fi.index, boundaryMs - 1); // last frame with ms < boundaryMs
+    const start = bsFirst(_fi.index, boundaryMs - 1000);
+    if (sliceEnd < 0 || start > sliceEnd) return;
+    bench.mark('expand_back', {
+      addingFiIdxRange: [start, sliceEnd],
+      anchorFiIdx: _fi.index[start].frameIndex,
+      framesBefore: _frames.length,
+    });
+    setFrames([..._fi.index.slice(start, sliceEnd + 1).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
     setMinPosMs(_fi.index[start].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: oldMinFiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320 },
+      { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_back', { fiIdx }); },
-      () => {}, () => {},
+      () => bench.mark('expand_back_prefetch_done'),
+      () => bench.mark('expand_back_prefetch_error'),
     );
   }, [itemId, markFrameReady]);
 
   const expandForward = useCallback(() => {
-    if (!_fi.index) return;
-    const step = framesPerSecond(), end = _fi.maxIdx + step;
-    if (end >= _fi.index.length) return;
-    const oldMaxFiIdx = _fi.index[_fi.maxIdx]?.frameIndex;
-    setFrames([..._frames, ..._fi.index.slice(_fi.maxIdx + 1, end + 1).map(makeEntry)]);
+    if (!_fi.index || _frames.length === 0) return;
+    const lastFrame = _frames[_frames.length - 1];
+    const boundaryMs = lastFrame.posMs;
+    const sliceStart = bsFirst(_fi.index, boundaryMs + 1); // first frame with ms > boundaryMs
+    const end = bsLast(_fi.index, boundaryMs + 1000);
+    if (sliceStart >= _fi.index.length || end < sliceStart) return;
+    bench.mark('expand_forward', {
+      addingFiIdxRange: [sliceStart, end],
+      anchorFiIdx: _fi.index[sliceStart].frameIndex,
+      framesBefore: _frames.length,
+    });
+    setFrames([..._frames, ..._fi.index.slice(sliceStart, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
     setMaxPosMs(_fi.index[end].ms);
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: oldMaxFiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
+      { currentFrameIndex: lastFrame.fiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_fwd', { fiIdx }); },
-      () => {}, () => {},
+      () => bench.mark('expand_forward_prefetch_done'),
+      () => bench.mark('expand_forward_prefetch_error'),
     );
   }, [itemId, markFrameReady]);
 
@@ -542,17 +575,19 @@ function FrameExportModalInner({
     </ErrorBoundary>,
     document.body,
   );
-}
+});
 
 function FrameExportModalApp() {
   const modalInfo = useAtomValue(_feOpen);
   const minimized = useAtomValue(modalMinimizedAtom);
   if (!modalInfo) return null;
+  const posMs = Math.round(modalInfo.videoEl.currentTime * 1000);
   return (
     <FrameExportModalInner
       videoEl={modalInfo.videoEl}
       itemId={modalInfo.itemId}
       minimized={minimized}
+      posMs={posMs}
     />
   );
 }

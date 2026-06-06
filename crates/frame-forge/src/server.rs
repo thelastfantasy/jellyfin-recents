@@ -14,6 +14,25 @@ use jfs_common::FrameIndexEntry;
 use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
+// 返回 load_per_core（0.0=空闲，1.0=满载），用于动态调整并发数
+#[cfg(target_os = "linux")]
+fn system_load_factor() -> f64 {
+    let text = match std::fs::read_to_string("/proc/loadavg") {
+        Ok(t) => t,
+        Err(_) => return 0.0,
+    };
+    let load1: f64 = text.split_whitespace().next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let ncpu = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1) as f64;
+    (load1 / ncpu).min(2.0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn system_load_factor() -> f64 { 0.0 }
+
 const MSG_SINGLE_FRAME: u8 = 0x10;
 const MSG_ANIMATE: u8 = 0x11;
 const MSG_STITCH: u8 = 0x12;
@@ -230,10 +249,10 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
                     ram.put((job.path.clone(), pos_ms, 0), r.webp_orig);
                 }
                 ram.put((job.path, pos_ms, width), r.webp);
-                eprintln!("[frame-forge] PREFETCH done: {item_id} f{frame_idx}@{pos_ms}ms w={width}");
+                log::warn!("[frame-forge] PREFETCH done: {item_id} f{frame_idx}@{pos_ms}ms w={width}");
             }
-            Ok(Err(e)) => eprintln!("[frame-forge] prefetch decode error: {e}"),
-            Err(e) => eprintln!("[frame-forge] prefetch spawn error: {e}"),
+            Ok(Err(e)) => log::warn!("[frame-forge] prefetch decode error: {e}"),
+            Err(e) => log::warn!("[frame-forge] prefetch spawn error: {e}"),
         }
 
         state.in_progress.lock().await.remove(&(item_id, pos_ms, width));
@@ -252,68 +271,68 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
         match msg_type {
             MSG_SINGLE_FRAME => {
                 if let Err(e) = handle_single_frame(&mut stream, &state).await {
-                    eprintln!("[frame-forge] single_frame error: {e}");
+                    log::warn!("[frame-forge] single_frame error: {e}");
                 }
             }
             MSG_PREFETCH_FRAME => {
                 if let Err(e) = handle_prefetch_frame(&mut stream, &state).await {
-                    eprintln!("[frame-forge] prefetch error: {e}");
+                    log::warn!("[frame-forge] prefetch error: {e}");
                 }
             }
             MSG_ANIMATE => {
                 if let Err(e) = handle_animate(&mut stream, &state).await {
-                    eprintln!("[frame-forge] animate error: {e}");
+                    log::warn!("[frame-forge] animate error: {e}");
                 }
             }
             MSG_STITCH => {
                 if let Err(e) = handle_stitch(&mut stream, &state).await {
-                    eprintln!("[frame-forge] stitch error: {e}");
+                    log::warn!("[frame-forge] stitch error: {e}");
                 }
             }
             MSG_LIST_CACHED => {
                 if let Err(e) = handle_list_cached(&mut stream, &state).await {
-                    eprintln!("[frame-forge] list_cached error: {e}");
+                    log::warn!("[frame-forge] list_cached error: {e}");
                     break;
                 }
             }
             MSG_INDEX_FRAMES => {
                 if let Err(e) = handle_index_frames(&mut stream, &state).await {
-                    eprintln!("[frame-forge] index_frames error: {e}");
+                    log::warn!("[frame-forge] index_frames error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_RANGE => {
                 if let Err(e) = handle_prefetch_range(&mut stream, &state).await {
-                    eprintln!("[frame-forge] prefetch_range error: {e}");
+                    log::warn!("[frame-forge] prefetch_range error: {e}");
                     break;
                 }
             }
             MSG_INDEX_FRAMES_STREAM => {
                 if let Err(e) = handle_index_frames_stream(&mut stream, state.clone()).await {
-                    eprintln!("[frame-forge] index_frames_stream error: {e}");
+                    log::warn!("[frame-forge] index_frames_stream error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_STREAM => {
                 if let Err(e) = handle_prefetch_stream(&mut stream, &state).await {
-                    eprintln!("[frame-forge] prefetch_stream error: {e}");
+                    log::warn!("[frame-forge] prefetch_stream error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_RANGE_STREAM => {
                 if let Err(e) = handle_prefetch_range_stream(&mut stream, &state).await {
-                    eprintln!("[frame-forge] prefetch_range_stream error: {e}");
+                    log::warn!("[frame-forge] prefetch_range_stream error: {e}");
                     break;
                 }
             }
             MSG_DEBUG_DUMP => {
                 if let Err(e) = handle_debug_dump(&mut stream, &state).await {
-                    eprintln!("[frame-forge] debug_dump error: {e}");
+                    log::warn!("[frame-forge] debug_dump error: {e}");
                     break;
                 }
             }
             _ => {
-                eprintln!("[frame-forge] unknown msg_type: 0x{msg_type:02x}");
+                log::warn!("[frame-forge] unknown msg_type: 0x{msg_type:02x}");
                 break;
             }
         }
@@ -368,7 +387,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
             let img = match image::load_from_memory(&r.webp) {
                 Ok(i) => i,
                 Err(e) => {
-                    eprintln!("[frame-forge] image decode error: {e}");
+                    log::warn!("[frame-forge] image decode error: {e}");
                     write_ack(stream, req.request_id).await?;
                     return Ok(());
                 }
@@ -377,11 +396,11 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
             write_jpeg_response(stream, req.request_id, &r.webp, flags, r.pts_ms).await?;
         }
         Ok(Err(e)) => {
-            eprintln!("[frame-forge] decode error: {e}");
+            log::warn!("[frame-forge] decode error: {e}");
             write_ack(stream, req.request_id).await?;
         }
         Err(e) => {
-            eprintln!("[frame-forge] spawn error: {e}");
+            log::warn!("[frame-forge] spawn error: {e}");
             write_ack(stream, req.request_id).await?;
         }
     }
@@ -452,14 +471,14 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     use tokio::sync::mpsc;
 
     let req = crate::protocol::read_animate_req(stream).await?;
-    eprintln!(
+    log::warn!(
         "[frame-forge] ANIMATE task={} frames={} fmt={:?} speed={}",
         req.task_id, req.paths.len(), req.format, req.speed
     );
 
     let total_input = req.paths.len();
     send_progress(stream, "running", "decoding", 0, total_input as u32, 0.0).await?;
-    eprintln!("[frame-forge] ANIMATE progress sent, loading frame index...");
+    log::warn!("[frame-forge] ANIMATE progress sent, loading frame index...");
 
     // Load frame index for the first path (all frames share the same video)
     let fi = {
@@ -467,7 +486,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         state.fi.get_or_build(&p).await?
     };
     let (fi_frames, _, _) = fi.as_ref();
-    eprintln!("[frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
+    log::warn!("[frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
 
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(total_input);
     let mut actual_pts_vec: Vec<i64> = Vec::with_capacity(total_input);
@@ -478,13 +497,13 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         } else {
             0
         };
-        eprintln!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
+        log::warn!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
 
         let (img, actual_pts) = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
-            eprintln!("[frame-forge] ANIMATE frame {} → disk cache hit", i);
+            log::warn!("[frame-forge] ANIMATE frame {} → disk cache hit", i);
             (image::load_from_memory(&cached)?, pos_ms)
         } else {
-            eprintln!("[frame-forge] ANIMATE frame {} → decode", i);
+            log::warn!("[frame-forge] ANIMATE frame {} → decode", i);
             let p = path.clone();
             let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
             (image::load_from_memory(&r.webp)?, r.pts_ms)
@@ -492,14 +511,14 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
         images.push(img);
         actual_pts_vec.push(actual_pts);
-        if i == 0 { eprintln!("[frame-forge] ANIMATE first frame ready"); }
+        if i == 0 { log::warn!("[frame-forge] ANIMATE first frame ready"); }
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, total_input as u32,
             (i + 1) as f64 / total_input as f64 * 50.0,
         ).await?;
     }
-    eprintln!("[frame-forge] ANIMATE decode done, {} images", images.len());
+    log::warn!("[frame-forge] ANIMATE decode done, {} images", images.len());
 
     if images.is_empty() {
         anyhow::bail!("no unique frames after deduplication");
@@ -569,7 +588,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
             } else {
                 encoder.set_quality((quality.clamp(0.01, 1.0) * 100.0) as f32);
             }
-            eprintln!("[frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
+            log::warn!("[frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
 
             // Workaround: libwebp's minimize_size (default true) merges too-similar frames.
             // Flip the last byte of each frame's RGBA data to guarantee uniqueness,
@@ -589,16 +608,16 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                     let last = rgba.len() - 1;
                     rgba[last] ^= 1;
                 }
-                eprintln!("[frame-forge] ANIMATE add_frame {} cursor_ms={} rgba_bytes={}", i, cursor_ms, rgba.len());
+                log::warn!("[frame-forge] ANIMATE add_frame {} cursor_ms={} rgba_bytes={}", i, cursor_ms, rgba.len());
                 encoder.add_frame_rgba(&rgba, cursor_ms)
                     .map_err(|e| anyhow::anyhow!("add_frame: {e}"))?;
                 cursor_ms += delays_ms.get(i).map(|&ms| ms as i32).unwrap_or(200);
                 let _ = prog_tx.send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
             }
 
-            eprintln!("[frame-forge] ANIMATE webp finish start, {} frames added, {} input images", n, n);
+            log::warn!("[frame-forge] ANIMATE webp finish start, {} frames added, {} input images", n, n);
             let output = encoder.finish(cursor_ms).map_err(|e| anyhow::anyhow!("finish: {e}"))?;
-            eprintln!("[frame-forge] ANIMATE webp finish done, {} bytes", output.len());
+            log::warn!("[frame-forge] ANIMATE webp finish done, {} bytes", output.len());
             Ok(output)
         } else {
             use gif::{Encoder as GifEnc, Frame as GifFrame, Repeat};
@@ -638,7 +657,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         }
     };
 
-    eprintln!("[frame-forge] ANIMATE encoding done, output {} bytes", output.len());
+    log::warn!("[frame-forge] ANIMATE encoding done, output {} bytes", output.len());
 
     // Skip "done" progress — it can block the final output write on Unix socket.
     // C# detects completion via statusCode=2 in the final output.
@@ -655,7 +674,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     use tokio::io::AsyncWriteExt;
 
     let req = crate::protocol::read_animate_req(stream).await?;
-    eprintln!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
+    log::warn!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
 
     // Load frame index (same pattern as animate)
     let fi = {
@@ -674,10 +693,10 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         };
 
         let img = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
-            eprintln!("[frame-forge] STITCH frame {} → disk cache hit", i);
+            log::warn!("[frame-forge] STITCH frame {} → disk cache hit", i);
             image::load_from_memory(&cached)?
         } else {
-            eprintln!("[frame-forge] STITCH frame {} → decode", i);
+            log::warn!("[frame-forge] STITCH frame {} → decode", i);
             let p = path.clone();
             let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
             image::load_from_memory(&r.webp)?
@@ -698,14 +717,14 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     let images: Vec<image::DynamicImage> = images.iter()
         .map(|img| crate::quality::crop_image(img, crop_rect))
         .collect();
-    eprintln!(
+    log::debug!(
         "[frame-forge] auto-crop: ({},{})→({},{}) → {}x{}",
         crop_rect.0, crop_rect.1, crop_rect.2, crop_rect.3,
         images[0].width(), images[0].height()
     );
 
     let class = crate::scene_classifier::classify(&images);
-    eprintln!(
+    log::debug!(
         "[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1}",
         class.category, class.motion, class.edge_density, class.color_entropy
     );
@@ -756,7 +775,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         }
     }).await??;
 
-    eprintln!("[frame-forge] STITCH encoding done, output {} bytes", output.len());
+    log::warn!("[frame-forge] STITCH encoding done, output {} bytes", output.len());
 
     // Skip "done" progress — C# detects completion via statusCode=2
     let mut header = Vec::with_capacity(8 + output.len());
@@ -938,12 +957,12 @@ async fn queue_a_demux(
             sent += batch.len();
             tx.send(make_batch(&batch)).ok();
         }
-        eprintln!("[bench][queue_a] +{}ms fast_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+        log::debug!("[bench][queue_a] +{}ms fast_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
         return Ok(());
     }
 
     // Slow path: open file, seek, demux ±1s window
-    eprintln!("[bench][queue_a] +{}ms slow_path_open_file abs={}", bench_now_ms() - t0, bench_now_ms());
+    log::debug!("[bench][queue_a] +{}ms slow_path_open_file abs={}", bench_now_ms() - t0, bench_now_ms());
     let tx_inner = tx.clone();
     let sent = tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
         use ffmpeg_next as ff;
@@ -996,7 +1015,7 @@ async fn queue_a_demux(
 
         Ok(total)
     }).await??;
-    eprintln!("[bench][queue_a] +{}ms slow_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+    log::debug!("[bench][queue_a] +{}ms slow_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
 
     Ok(())
 }
@@ -1028,6 +1047,10 @@ async fn queue_b_demux(
             } else { 0 };
             (s.index(), fps_num, fps_den, sms)
         };
+
+        // fps 已知，立即发出，无需等全量 demux 完成
+        let fps_first = format!("data: {}\n\n", serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
+        progress_inner.push(fps_first.into_bytes(), -1);
 
         let mut all_frames: Vec<(i64, bool)> = Vec::new();
         let mut batch: Vec<(usize, i64, bool)> = Vec::new();
@@ -1067,9 +1090,8 @@ async fn queue_b_demux(
     let new_idx = Arc::new((all_frames, fps_num, fps_den));
     state.fi.put_if_absent(path.clone(), new_idx).await;
 
-    // fps 结束信号（max_ms = i64::MAX 为终止标记）
-    let end_data = format!("data: {}\n\n", serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
-    progress.push(end_data.into_bytes(), i64::MAX);
+    // done 结束信号（max_ms = i64::MAX 为终止标记；fps 已在 demux 开始时发出）
+    progress.push(b"data: {\"done\":true}\n\n".to_vec(), i64::MAX);
     progress.finish();
 
     // 从 in_progress 移除，后续请求走缓存快路径
@@ -1089,39 +1111,41 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
     stream.write_u32_le(req.request_id).await?;
 
     let t0 = bench_now_ms();
-    eprintln!("[bench][frameinfo] recv current_time_ms={} abs={t0}", req.current_time_ms);
+    log::debug!("[bench][frameinfo] recv current_time_ms={} abs={t0}", req.current_time_ms);
 
     // ── 分支 1/2/3：根据缓存状态分发 ─────────────────────────────────────────
     let progress = match state.fi.get_or_subscribe(&req.path).await {
         FrameInfoSubscription::Cached(idx) => {
             let (frames, fps_num, fps_den) = idx.as_ref();
-            eprintln!("[bench][frameinfo] +{}ms branch=cache_hit frames={}", bench_now_ms() - t0, frames.len());
+            log::debug!("[bench][frameinfo] +{}ms branch=cache_hit frames={}", bench_now_ms() - t0, frames.len());
             let entries: Vec<(usize, i64, bool)> = frames.iter().enumerate()
                 .map(|(i, &(ms, is_key))| (i, ms, is_key))
                 .collect();
+            // fps 先发，帧批次随后，done 最后
+            let fps_msg = format!("data: {}\n\n",
+                serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
+            write_chunk(stream, fps_msg.as_bytes()).await?;
             for chunk in entries.chunks(BATCH_SIZE) {
                 write_chunk(stream, &make_batch(chunk)).await?;
             }
-            let end = format!("data: {}\n\n",
-                serde_json::json!({ "fps": { "num": fps_num, "den": fps_den } }));
-            write_chunk(stream, end.as_bytes()).await?;
+            write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
             stream.write_u32_le(0).await?;
             stream.flush().await?;
-            eprintln!("[bench][frameinfo] +{}ms cache_hit_done", bench_now_ms() - t0);
+            log::debug!("[bench][frameinfo] +{}ms cache_hit_done", bench_now_ms() - t0);
             return Ok(());
         }
         FrameInfoSubscription::Existing(p) => {
-            eprintln!("[bench][frameinfo] +{}ms branch=subscribe_existing_queue_b", bench_now_ms() - t0);
+            log::debug!("[bench][frameinfo] +{}ms branch=subscribe_existing_queue_b", bench_now_ms() - t0);
             p
         }
         FrameInfoSubscription::New(p) => {
-            eprintln!("[bench][frameinfo] +{}ms branch=new_queue_b_spawn", bench_now_ms() - t0);
+            log::debug!("[bench][frameinfo] +{}ms branch=new_queue_b_spawn", bench_now_ms() - t0);
             let state_b = state.clone();
             let path_b = req.path.clone();
             let p_b = p.clone();
             tokio::spawn(async move {
                 if let Err(e) = queue_b_demux(path_b, p_b, state_b).await {
-                    eprintln!("[frame-forge] queue_b_demux error: {e}");
+                    log::warn!("[frame-forge] queue_b_demux error: {e}");
                 }
             });
             p
@@ -1137,7 +1161,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
         let t = req.current_time_ms;
         tokio::spawn(async move {
             if let Err(e) = queue_a_demux(path_a, t, tx_a, state_a).await {
-                eprintln!("[frame-forge] queue_a_demux error: {e}");
+                log::warn!("[frame-forge] queue_a_demux error: {e}");
             }
         });
     }
@@ -1184,7 +1208,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
             Some(bytes) = high_rx.recv() => {
                 if !first_a_written {
                     first_a_written = true;
-                    eprintln!("[bench][frameinfo] +{}ms FIRST_QUEUE_A_CHUNK bytes={}", bench_now_ms() - t0, bytes.len());
+                    log::debug!("[bench][frameinfo] +{}ms FIRST_QUEUE_A_CHUNK bytes={}", bench_now_ms() - t0, bytes.len());
                 }
                 write_chunk(stream, &bytes).await?;
             }
@@ -1202,7 +1226,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
 
     stream.write_u32_le(0).await?;
     stream.flush().await?;
-    eprintln!("[bench][frameinfo] +{}ms stream_done", bench_now_ms() - t0);
+    log::debug!("[bench][frameinfo] +{}ms stream_done", bench_now_ms() - t0);
     Ok(())
 }
 
@@ -1297,6 +1321,9 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
 /// Rust resolves frames from in-memory frameinfo (building it if not cached),
 /// decodes/caches each, SSEs {"frameReady":fi_idx} per frame + {"done":true}.
 /// Response uses length-prefixed chunks for clean socket termination.
+///
+/// 若帧索引尚未就绪（Queue B 仍在运行），改为对锚点区域做快速 seek+demux，
+/// 无需等待全量索引即可立即开始解码，避免长视频阻塞数分钟。
 async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
@@ -1308,36 +1335,91 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let include_current = req.include_current;
 
     let t0 = bench_now_ms();
-    eprintln!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} abs={t0}", req.current_frame_idx);
+    log::debug!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} abs={t0}", req.current_frame_idx);
 
-    let frame_idx = state.fi.get_or_build(&path).await?;
-    let (frames, fps_num, fps_den) = frame_idx.as_ref();
-    eprintln!("[bench][prefetch] +{}ms frame_index_ready frames={}", bench_now_ms() - t0, frames.len());
+    // 优先用缓存的完整索引；若 Queue B 还在运行则快速 demux 锚点区域
+    let (to_process, fps) = if let Some(frame_idx) = state.fi.get(&path).await {
+        let (frames, fps_num, fps_den) = frame_idx.as_ref();
+        let fps_num_c = *fps_num;
+        let fps_den_c = *fps_den;
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] skipped — index cached frames={}", bench_now_ms() - t0, frames.len());
 
-    // Resolve anchor_ms: use frame-exact PTS when current_frame_idx is provided,
-    // otherwise fall back to current_time_ms (ms-based binary search).
-    let anchor_ms = if req.current_frame_idx >= 0 {
-        let pos = frames.partition_point(|(ms, _)| {
-            compute_frame_idx(*ms, *fps_num, *fps_den) < req.current_frame_idx
-        });
-        frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
+        let anchor_ms = if req.current_frame_idx >= 0 {
+            let pos = frames.partition_point(|(ms, _)| {
+                compute_frame_idx(*ms, fps_num_c, fps_den_c) < req.current_frame_idx
+            });
+            frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
+        } else {
+            current_time_ms
+        };
+
+        let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
+        let range_end_ms   = anchor_ms.saturating_add(req.after_ms);
+        log::debug!("[bench][prefetch] anchor_ms={anchor_ms} range=[{range_start_ms},{range_end_ms}]");
+
+        let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
+        let mut tp: Vec<(i64, i64)> = Vec::new();
+        for (i, &(ms, _)) in frames[start..].iter().enumerate() {
+            if ms > range_end_ms { break; }
+            if !include_current && ms == anchor_ms { continue; }
+            tp.push(((start + i) as i64, ms));
+        }
+        let fps = if fps_num_c > 0 && fps_den_c > 0 { fps_num_c / fps_den_c } else { 24 };
+        (tp, fps)
     } else {
-        current_time_ms
+        // 帧索引尚未就绪：对锚点区域做快速 seek+demux，立即开始解码
+        let anchor_ms      = current_time_ms; // frame_idx 无法解析，退回时间戳
+        let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
+        let range_end_ms   = anchor_ms.saturating_add(req.after_ms);
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → quick_demux anchor={anchor_ms} range=[{range_start_ms},{range_end_ms}]", bench_now_ms() - t0);
+
+        let path_c = path.clone();
+        let tp = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<(i64, i64)>, i64)> {
+            use ffmpeg_next as ff;
+            let mut ictx = ff::format::input(&path_c)
+                .map_err(|e| anyhow::anyhow!("open {:?}: {}", path_c, e))?;
+            let (stream_idx, fps_num, fps_den, stream_start_ms) = {
+                let s = ictx.streams().best(ff::media::Type::Video)
+                    .ok_or_else(|| anyhow::anyhow!("no video stream"))?;
+                let rate = s.avg_frame_rate();
+                let fnum = rate.0 as i64;
+                let fden = if rate.1 > 0 { rate.1 as i64 } else { 1 };
+                let tb   = s.time_base();
+                let spts = s.start_time().max(0);
+                let sms  = if spts > 0 && tb.0 != 0 && tb.1 != 0 {
+                    (spts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+                } else { 0 };
+                (s.index(), fnum, fden, sms)
+            };
+            let fps = if fps_num > 0 && fps_den > 0 { fps_num / fps_den } else { 24 };
+            ictx.seek(range_start_ms * 1000, ..range_start_ms * 1000).unwrap_or(());
+            let mut result: Vec<(i64, i64)> = Vec::new();
+            for (s, pkt) in ictx.packets() {
+                if s.index() != stream_idx { continue; }
+                let pts    = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+                let tb     = s.time_base();
+                let raw_ms = (pts as f64 * tb.numerator() as f64 * 1000.0 / tb.denominator() as f64) as i64;
+                let ms     = (raw_ms - stream_start_ms).max(0);
+                if ms < range_start_ms { continue; }
+                if ms > range_end_ms   { break; }
+                result.push((compute_frame_idx(ms, fps_num, fps_den), ms));
+            }
+            Ok((result, fps))
+        }).await??;
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] quick_demux_done frames={}", bench_now_ms() - t0, tp.0.len());
+        (tp.0, tp.1)
     };
 
-    let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
-    let range_end_ms = anchor_ms.saturating_add(req.after_ms);
-    eprintln!("[bench][prefetch] anchor_ms={anchor_ms} range=[{range_start_ms},{range_end_ms}]");
+    log::debug!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
 
-    let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
-    let mut to_process: Vec<(i64, i64)> = Vec::new();
-    for (i, &(ms, _)) in frames[start..].iter().enumerate() {
-        if ms > range_end_ms { break; }
-        if !include_current && ms == anchor_ms { continue; }
-        to_process.push(((start + i) as i64, ms));
-    }
-    drop(frame_idx);
-    eprintln!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
+    // 并发数：fps 给出基准，系统负载动态缩减，保守上限避免占用过多资源
+    let base = ((fps as usize) / 8).clamp(2, 6);
+    let load = system_load_factor();
+    let concurrency = if load < 0.5 { base }
+                      else if load < 1.0 { (base / 2).max(2) }
+                      else { 2 };
+    let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    log::debug!("[bench][prefetch] fps={fps} load={load:.2} concurrency={concurrency}");
 
     let mut cache_hits = 0usize;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, i64, bool)>(to_process.len().max(1));
@@ -1371,18 +1453,20 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             continue;
         }
 
-        // Spawn parallel decode — no semaphore; bounded by max_blocking_threads
-        let path_c   = path.clone();
+        // 并发解码，每个 task 内部等待 semaphore permit 后再调 spawn_blocking
+        let path_c    = path.clone();
         let item_id_c = item_id.clone();
-        let disk     = state.disk.clone();
-        let state_c  = state.clone();
-        let tx       = tx.clone();
+        let disk      = state.disk.clone();
+        let state_c   = state.clone();
+        let tx        = tx.clone();
+        let sem_c     = Arc::clone(&sem);
 
         tokio::spawn(async move {
-            let path_decode  = path_c.clone();
-            let path_write   = path_c.clone();
+            let _permit = sem_c.acquire_owned().await.unwrap();
+            let path_decode   = path_c.clone();
+            let path_write    = path_c.clone();
             let item_id_write = item_id_c.clone();
-            let disk_write   = disk.clone();
+            let disk_write    = disk.clone();
 
             let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, Vec<u8>, Option<Vec<u8>>)> {
                 let r = jfs_common::decode_and_encode(&path_decode, pos_ms, width)?;
@@ -1403,8 +1487,8 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                     ram.put((path_c, pos_ms, width), webp);
                     true
                 }
-                Ok(Err(e)) => { eprintln!("[frame-forge] prefetch decode error fi={fi_idx} pos={pos_ms}: {e}"); false }
-                Err(e)     => { eprintln!("[frame-forge] prefetch spawn error fi={fi_idx}: {e}");  false }
+                Ok(Err(e)) => { log::warn!("[frame-forge] prefetch decode error fi={fi_idx} pos={pos_ms}: {e}"); false }
+                Err(e)     => { log::warn!("[frame-forge] prefetch spawn error fi={fi_idx}: {e}");  false }
             };
             let _ = tx.send((fi_idx, pos_ms, ok)).await;
         });
@@ -1418,7 +1502,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         if ok {
             decoded += 1;
             if decoded == 1 {
-                eprintln!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+                log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
             }
             let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
             let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
@@ -1432,7 +1516,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
     }
 
-    eprintln!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} failed={failed} abs={}", bench_now_ms() - t0, bench_now_ms());
+    log::debug!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} failed={failed} abs={}", bench_now_ms() - t0, bench_now_ms());
     write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;
