@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { atom, getDefaultStore, useAtomValue, useSetAtom } from "jotai";
-import { Suspense, memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { frameUrl, generateExportMutation, openFrameInfoStream, openPrefetchRangeStream } from "../api/frameExportApi";
@@ -505,10 +505,15 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
   }, []);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
-    if (sLightboxIdx.value !== null) sLightboxIdx.value = null;
-    else handleClose();
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      if (sLightboxIdx.value !== null) sLightboxIdx.value = null;
+      else handleClose();
+      return;
+    }
+    if (e.key === "Home" || e.key === "End" || /^[0-9]$/.test(e.key)) {
+      e.stopPropagation();
+    }
   }, [handleClose]);
 
   // ── 9. Render ───────────────────────────────────────────────────────────────
@@ -526,6 +531,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
           ref={rootRef}
           tabIndex={-1}
           onKeyDown={onKeyDown}
+          onWheel={e => e.stopPropagation()}
           style={{
             position: "fixed",
             bottom: 12,

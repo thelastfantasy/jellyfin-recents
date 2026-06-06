@@ -1,5 +1,5 @@
 import { useAtomValue } from 'jotai'
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 
 import type { FrameEntry } from '../core/state'
 import { _itemId, prefetchDoneAtom,prefetchTotalAtom } from '../core/state'
@@ -28,7 +28,7 @@ export interface FrameCardProps {
   onLoadError: (idx: number) => void
 }
 
-export function FrameCard({
+export const FrameCard = memo(function FrameCard({
   frame, idx, pressing,
   onMouseDown, onView, onDownload, onRemove, onRetry, onToggle, onLoadError,
 }: FrameCardProps) {
@@ -112,4 +112,4 @@ export function FrameCard({
       </div>
     </div>
   )
-}
+})

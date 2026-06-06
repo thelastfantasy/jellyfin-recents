@@ -48,6 +48,10 @@ run = "pwsh -NoProfile -File scripts/deploy.ps1"
 description = "快速部署：仅重建前端+增强器+C#，跳过 Rust 构建"
 run = "make update-quick"
 
+[tasks.deploy-enhancer]
+description = "极速部署：仅重建 player-enhancer JS 并 cp 到容器，无需重启"
+run = "make deploy-enhancer"
+
 [tasks.test]
 description = "运行所有测试（Rust + TypeScript + C#）"
 run = "make test"

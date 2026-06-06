@@ -35,7 +35,7 @@ export function FrameGrid() {
   function dragSelectAt(x: number, y: number): void {
     const idx = cardIdxAt(x, y)
     if (idx < 0 || _frames[idx].selected === _dragSelectValue) return
-    _frames[idx].selected = _dragSelectValue
+    _frames[idx] = { ..._frames[idx], selected: _dragSelectValue }
     if (!dragRafRef.current) {
       dragRafRef.current = true
       requestAnimationFrame(() => { dragRafRef.current = false; setFrames([..._frames]) })
@@ -83,7 +83,7 @@ export function FrameGrid() {
       setPressingIdx(idx)
       pressingTimer.current = setTimeout(() => {
         pressingTimer.current = null; setPressingIdx(null); setDragMode(true)
-        _frames[idx].selected = !_frames[idx].selected
+        _frames[idx] = { ..._frames[idx], selected: !_frames[idx].selected }
         setDragSelectValue(_frames[idx].selected)
         setLastClickedIdx(idx)
         setFrames([..._frames])
@@ -151,11 +151,11 @@ export function FrameGrid() {
     if (e.shiftKey && _lastClickedIdx >= 0 && _lastClickedIdx !== idx) {
       const lo = Math.min(_lastClickedIdx, idx); const hi = Math.max(_lastClickedIdx, idx)
       const target = !_frames[idx].selected
-      for (let i = lo; i <= hi; i++) _frames[i].selected = target
+      for (let i = lo; i <= hi; i++) _frames[i] = { ..._frames[i], selected: target }
       setLastClickedIdx(idx); setFrames([..._frames])
       e.preventDefault(); return
     }
-    _frames[idx].selected = !_frames[idx].selected
+    _frames[idx] = { ..._frames[idx], selected: !_frames[idx].selected }
     setDragSelectValue(_frames[idx].selected); setDragMode(true); setLastClickedIdx(idx)
     setFrames([..._frames])
     e.preventDefault()
@@ -168,10 +168,10 @@ export function FrameGrid() {
     const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
     triggerDownload(frameUrl(_itemId, f.fiIdx, f.posMs, 0), `jellyfin-frame-${title}-${stamp}.jpg`)
   }, [])
-  const handleRemove    = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].removed = true; _frames[idx].selected = false; setFrames([..._frames]) } }, [])
-  const handleRetry     = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].loadError = false; setFrames([..._frames]) } }, [])
-  const handleToggle    = useCallback((idx: number, v: boolean) => { if (_frames[idx]) { _frames[idx].selected = v; setFrames([..._frames]) } }, [])
-  const handleLoadError = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx].loadError = true; setFrames([..._frames]) } }, [])
+  const handleRemove    = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], removed: true, selected: false }; setFrames([..._frames]) } }, [])
+  const handleRetry     = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], loadError: false }; setFrames([..._frames]) } }, [])
+  const handleToggle    = useCallback((idx: number, v: boolean) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], selected: v }; setFrames([..._frames]) } }, [])
+  const handleLoadError = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], loadError: true }; setFrames([..._frames]) } }, [])
 
   // ── 3. Render ───────────────────────────────────────────────────────────────
 
