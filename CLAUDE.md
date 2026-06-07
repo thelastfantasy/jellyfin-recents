@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/010-monorepo-restructure/plan.md
+at specs/011-prefetch-first-frame-perf/plan.md
 <!-- SPECKIT END -->
 
 ## 部署工作流程（必须遵守）
