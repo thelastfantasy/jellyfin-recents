@@ -12,8 +12,9 @@ public class PrefetchRangeStreamRequest
     [JsonPropertyName("currentFrameIndex")]   public long?  CurrentFrameIndex   { get; set; }
     [JsonPropertyName("beforeSeconds")]       public double? BeforeSeconds       { get; set; }
     [JsonPropertyName("afterSeconds")]        public double? AfterSeconds        { get; set; }
-    [JsonPropertyName("includeCurrentFrame")] public bool   IncludeCurrentFrame  { get; set; } = true;
-    [JsonPropertyName("width")]               public int    Width                { get; set; } = 320;
+    [JsonPropertyName("includeCurrentFrame")]  public bool   IncludeCurrentFrame   { get; set; } = true;
+    [JsonPropertyName("width")]                public int    Width                 { get; set; } = 320;
+    [JsonPropertyName("prefetchSessionId")]    public string PrefetchSessionId     { get; set; } = "";
 }
 
 // ── POST /FrameExport/Prefetch/{itemId} ─────────────────────────────

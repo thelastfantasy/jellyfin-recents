@@ -346,6 +346,7 @@ pub(crate) struct PrefetchRangeStreamReq {
     pub after_ms: i64,
     pub include_current: bool,
     pub width: u32,
+    pub session_id: String,
 }
 
 pub(crate) async fn read_prefetch_range_stream_req(
@@ -388,7 +389,18 @@ pub(crate) async fn read_prefetch_range_stream_req(
     stream.read_exact(&mut w_buf).await?;
     let width = u32::from_le_bytes(w_buf);
 
-    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, current_frame_idx, before_ms, after_ms, include_current, width })
+    let mut sl_buf = [0u8; 4];
+    stream.read_exact(&mut sl_buf).await?;
+    let session_id_len = u32::from_le_bytes(sl_buf) as usize;
+    let session_id = if session_id_len > 0 {
+        let mut sb = vec![0u8; session_id_len];
+        stream.read_exact(&mut sb).await?;
+        String::from_utf8(sb).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, current_frame_idx, before_ms, after_ms, include_current, width, session_id })
 }
 
 // ── MSG_INDEX_FRAMES_STREAM (0x17) ──────────────────────────────────

@@ -16,6 +16,7 @@ pub fn decode_range(
     path: &Path,
     targets: &[(i64, i64)],
     width: u32,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mut on_frame: impl FnMut(i64, i64, Vec<u8>, Vec<u8>) -> Result<()>,
 ) -> Result<()> {
     use ffmpeg_next as ff;
@@ -26,9 +27,11 @@ pub fn decode_range(
     let first_ms = targets[0].1;
     let last_ms  = targets[targets.len() - 1].1;
 
-    // fi_idx → pos_ms: look up the canonical pos_ms for each matched frame
-    let mut fi_to_pos: std::collections::HashMap<i64, i64> =
-        targets.iter().map(|&(fi, ms)| (fi, ms)).collect();
+    // pos_ms → fi_idx: match decoded frames to targets by PTS proximity (±half-frame).
+    // Using BTreeMap + range query avoids relying on compute_frame_idx consistency and
+    // handles B-frame DTS/PTS reordering transparently via ffmpeg's own frame.pts().
+    let mut pos_to_fi: std::collections::BTreeMap<i64, i64> =
+        targets.iter().map(|&(fi, ms)| (ms, fi)).collect();
 
     let mut ictx = ff::format::input(path)
         .with_context(|| format!("cannot open {:?}", path))?;
@@ -47,6 +50,13 @@ pub fn decode_range(
         let ctx = ff::codec::context::Context::from_parameters(s.parameters())?;
         (s.index(), tb, fps_num, fps_den, start_ms, ctx)
     };
+
+    // Match tolerance: ±2 frames. best_effort_timestamp can deviate from demux PTS
+    // by up to one B-frame period, so half_frame is too tight for AV1/H.264 B-frames.
+    let frame_dur_ms = if fps_num > 0 && fps_den > 0 {
+        fps_den * 1000 / fps_num + 1
+    } else { 33i64 };
+    let two_frame_ms = frame_dur_ms * 2;
 
     let thread_count = std::thread::available_parallelism()
         .map(|n| n.get()).unwrap_or(2).min(4);
@@ -83,8 +93,13 @@ pub fn decode_range(
             match decoder.receive_frame(&mut frame) {
                 Err(_) => break,
                 Ok(_) => {
-                    // Use frame display PTS (set by decoder) for correct B-frame ordering
-                    let fpts = frame.pts().unwrap_or(pkt_pts);
+                    // best_effort_timestamp is ffmpeg's corrected display PTS estimate,
+                    // more reliable than frame.pts() when pkt.pts was missing in the
+                    // container (common for B-frames in AV1/H.264 MP4).
+                    let fpts = {
+                        let best = unsafe { (*frame.as_ptr()).best_effort_timestamp };
+                        if best != i64::MIN { best } else { frame.pts().unwrap_or(pkt_pts) }
+                    };
                     let pts_ms = if tb.0 != 0 && tb.1 != 0 {
                         let raw = (fpts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
                         (raw - stream_start_ms).max(0)
@@ -93,18 +108,64 @@ pub fn decode_range(
                     if pts_ms < first_ms { continue; }
                     if pts_ms > last_ms + 500 { break 'outer; }
 
-                    let fi_idx = crate::compute_frame_idx(pts_ms, fps_num, fps_den);
-                    if let Some(pos_ms) = fi_to_pos.remove(&fi_idx) {
+                    // ±2-frame tolerance: B-frame DTS/PTS offsets can span up to one frame
+                    // period; ±2 frames (≈33ms at 60fps) catches these without false-matching.
+                    let lo = pts_ms.saturating_sub(two_frame_ms);
+                    let hi = pts_ms + two_frame_ms;
+                    let matched = pos_to_fi
+                        .range(lo..=hi)
+                        .min_by_key(|(&target_ms, _)| (target_ms - pts_ms).abs())
+                        .map(|(&target_ms, &fi)| (target_ms, fi));
+
+                    if let Some((target_ms, fi_idx)) = matched {
+                        pos_to_fi.remove(&target_ms);
                         let (webp_thumb, webp_orig) = if width == 0 {
                             (encode_webp_lossless(&frame)?, vec![])
                         } else {
                             (encode_webp_lossy(&frame, width, 85.0)?,
                              encode_webp_lossless(&frame)?)
                         };
-                        on_frame(fi_idx, pos_ms, webp_thumb, webp_orig)?;
-                        if fi_to_pos.is_empty() { break 'outer; }
+                        on_frame(fi_idx, target_ms, webp_thumb, webp_orig)?;
+                        if cancel.load(std::sync::atomic::Ordering::Relaxed) { break 'outer; }
+                        if pos_to_fi.is_empty() { break 'outer; }
                     }
                 }
+            }
+        }
+    }
+
+    // Flush frames remaining in decoder buffer. AV1/H.264 with complex B-frame
+    // hierarchies may hold frames that need future packets as references; flushing
+    // recovers them after the outer loop exits early.
+    if !pos_to_fi.is_empty() {
+        let _ = decoder.send_eof();
+        loop {
+            let mut frame = ff::frame::Video::empty();
+            if decoder.receive_frame(&mut frame).is_err() { break; }
+            let fpts = {
+                let best = unsafe { (*frame.as_ptr()).best_effort_timestamp };
+                if best != i64::MIN { best } else { frame.pts().unwrap_or(0) }
+            };
+            let pts_ms = if tb.0 != 0 && tb.1 != 0 {
+                let raw = (fpts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+                (raw - stream_start_ms).max(0)
+            } else { 0 };
+            if pts_ms < first_ms || pts_ms > last_ms + 500 { continue; }
+            let lo = pts_ms.saturating_sub(two_frame_ms);
+            let hi = pts_ms + two_frame_ms;
+            let matched = pos_to_fi.range(lo..=hi)
+                .min_by_key(|(&target_ms, _)| (target_ms - pts_ms).abs())
+                .map(|(&target_ms, &fi)| (target_ms, fi));
+            if let Some((target_ms, fi_idx)) = matched {
+                pos_to_fi.remove(&target_ms);
+                let (webp_thumb, webp_orig) = if width == 0 {
+                    (encode_webp_lossless(&frame)?, vec![])
+                } else {
+                    (encode_webp_lossy(&frame, width, 85.0)?, encode_webp_lossless(&frame)?)
+                };
+                on_frame(fi_idx, target_ms, webp_thumb, webp_orig)?;
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) { break; }
+                if pos_to_fi.is_empty() { break; }
             }
         }
     }
@@ -247,11 +308,17 @@ pub struct DecodeResult {
 /// Calls `on_frame(frame_index, pts_ms, is_keyframe)` for each frame as it is read.
 /// Returns (total_frame_count, fps_num, fps_den).
 /// Fast: reads container index without decoding pixel data.
+///
+/// 方案三: Uses `av_parser_parse2` to obtain display-order PTS directly from
+/// the codec bitstream parser, eliminating DTS/PTS cross-phase mismatch.
+/// If the parser is unsupported for a codec, falls back to packet-level
+/// PTS/DTS with a warn log (FR-002 exception).
 pub fn demux_frames(
     path: &Path,
     mut on_frame: impl FnMut(usize, i64, bool),
 ) -> Result<(usize, i64, i64)> {
     use ffmpeg_next as ff;
+    use ffmpeg_next::ffi::*;
 
     let mut ictx = ff::format::input(path)
         .with_context(|| format!("cannot open {:?}", path))?;
@@ -261,6 +328,8 @@ pub fn demux_frames(
     let fps_num: i64;
     let fps_den: i64;
     let stream_start_ms: i64;
+    let mut parser_ctx: *mut AVCodecParserContext;
+    let mut avctx_ptr: *mut AVCodecContext;
 
     {
         let stream = ictx
@@ -279,6 +348,27 @@ pub fn demux_frames(
         } else {
             0
         };
+
+        // Initialize codec parser for display-order PTS (方案三).
+        // avcodec_parameters_to_context is called here while the stream borrow is live.
+        unsafe {
+            let codec_id = (*stream.parameters().as_ptr()).codec_id;
+            let avcodec  = avcodec_find_decoder(codec_id);
+            parser_ctx = av_parser_init(codec_id as i32);
+            if parser_ctx.is_null() {
+                log::warn!("[demux] av_parser_init returned NULL for codec_id={codec_id:?}; \
+                            falling back to DTS (FR-002 exception)");
+            }
+            avctx_ptr = if !avcodec.is_null() {
+                let ctx = avcodec_alloc_context3(avcodec);
+                if !ctx.is_null() {
+                    avcodec_parameters_to_context(ctx, stream.parameters().as_ptr());
+                }
+                ctx
+            } else {
+                std::ptr::null_mut()
+            };
+        }
     }
 
     let mut frame_count = 0usize;
@@ -287,20 +377,64 @@ pub fn demux_frames(
         if stream.index() != stream_idx {
             continue;
         }
-        let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
         let is_key = pkt.is_key();
 
-        let pts_ms = if tb.0 != 0 && tb.1 != 0 {
-            let raw = (pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+        let pts_ms = if !parser_ctx.is_null() && !avctx_ptr.is_null() {
+            // Parser path: call av_parser_parse2 to get display-order PTS.
+            let pkt_data = pkt.data().map_or(std::ptr::null(), |d| d.as_ptr());
+            let pkt_size = pkt.size() as i32;
+            let mut out_data: *mut u8 = std::ptr::null_mut();
+            let mut out_size: i32 = 0;
+            unsafe {
+                av_parser_parse2(
+                    parser_ctx, avctx_ptr,
+                    &mut out_data, &mut out_size,
+                    pkt_data, pkt_size,
+                    pkt.pts().unwrap_or(i64::MIN),
+                    pkt.dts().unwrap_or(i64::MIN),
+                    -1, // byte position unknown; parser uses pts/dts for ordering
+                );
+            }
+            // out_size == 0: parser is buffering or this is a non-show frame
+            // (e.g. AV1 invisible reference frames). Skip — not a displayed frame.
+            if out_size == 0 {
+                continue;
+            }
+            let corrected_pts = unsafe { (*parser_ctx).pts };
+            let raw_pts = if corrected_pts != i64::MIN {
+                corrected_pts
+            } else {
+                pkt.pts().or_else(|| pkt.dts()).unwrap_or(0)
+            };
+            let raw = if tb.0 != 0 && tb.1 != 0 {
+                (raw_pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64
+            } else if fps_num > 0 {
+                (frame_count as i64 * fps_den * 1000) / fps_num
+            } else {
+                frame_count as i64 * 42
+            };
             (raw - stream_start_ms).max(0)
-        } else if fps_num > 0 {
-            (frame_count as i64 * fps_den * 1000) / fps_num
         } else {
-            frame_count as i64 * 42
+            // Fallback path: packet-level PTS/DTS (original logic).
+            let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+            if tb.0 != 0 && tb.1 != 0 {
+                let raw = (pts as f64 * tb.0 as f64 * 1000.0 / tb.1 as f64) as i64;
+                (raw - stream_start_ms).max(0)
+            } else if fps_num > 0 {
+                (frame_count as i64 * fps_den * 1000) / fps_num
+            } else {
+                frame_count as i64 * 42
+            }
         };
 
         on_frame(frame_count, pts_ms, is_key);
         frame_count += 1;
+    }
+
+    // Release parser and codec context.
+    unsafe {
+        if !parser_ctx.is_null() { av_parser_close(parser_ctx); }
+        if !avctx_ptr.is_null()  { avcodec_free_context(&mut avctx_ptr); }
     }
 
     anyhow::ensure!(frame_count > 0, "no video frames found in {:?}", path);

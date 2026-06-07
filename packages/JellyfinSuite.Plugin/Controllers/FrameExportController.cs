@@ -189,7 +189,7 @@ public class FrameExportController : ControllerBase
         await _frameExport.PrefetchRangeStreamAsync(
             item.Path, itemId, req.CurrentTimeMs ?? 0L, req.CurrentFrameIndex ?? -1L,
             req.BeforeSeconds ?? 0.0, req.AfterSeconds ?? 0.0, req.IncludeCurrentFrame,
-            req.Width, Response.Body, ct);
+            req.Width, req.PrefetchSessionId, Response.Body, ct);
     }
 
     /// <summary>

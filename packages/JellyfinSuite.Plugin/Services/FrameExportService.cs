@@ -795,7 +795,7 @@ public sealed class FrameExportService : IDisposable
     public async Task PrefetchRangeStreamAsync(
         string filePath, Guid itemId, long currentTimeMs, long currentFrameIdx,
         double beforeSeconds, double afterSeconds, bool includeCurrentFrame, int width,
-        Stream output, CancellationToken ct = default)
+        string prefetchSessionId, Stream output, CancellationToken ct = default)
     {
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
@@ -808,9 +808,10 @@ public sealed class FrameExportService : IDisposable
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
             var beforeMs = (long)Math.Round(beforeSeconds * 1000);
             var afterMs  = (long)Math.Round(afterSeconds  * 1000);
+            var sessionIdBytes = Encoding.UTF8.GetBytes(prefetchSessionId ?? "");
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)] [session_id_len(4)][session_id(N)]
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4 + 4 + sessionIdBytes.Length];
             var pos = 0;
             buf[pos++] = MsgPrefetchRangeStream;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
@@ -821,7 +822,9 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), beforeMs); pos += 8;
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), afterMs); pos += 8;
             buf[pos++] = (byte)(includeCurrentFrame ? 1 : 0);
-            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)sessionIdBytes.Length); pos += 4;
+            sessionIdBytes.CopyTo(buf.AsSpan(pos));
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 

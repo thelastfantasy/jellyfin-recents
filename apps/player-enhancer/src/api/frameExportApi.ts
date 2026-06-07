@@ -79,6 +79,7 @@ export type PrefetchRangeParams = (
   afterSeconds?: number
   includeCurrentFrame: boolean
   width: number
+  prefetchSessionId: string
 }
 
 export function openPrefetchRangeStream(

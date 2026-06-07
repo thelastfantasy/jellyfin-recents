@@ -154,6 +154,8 @@ pub struct State {
     pub ram: Mutex<LruCache<RamKey, Vec<u8>>>,
     pub disk: Arc<DiskCache>,
     decode_sem: Arc<Semaphore>,
+    cancel_flag: Arc<AtomicBool>,
+    current_session_id: std::sync::Mutex<Option<String>>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
     pub fi: Arc<FrameIndexManager>,
@@ -167,6 +169,8 @@ impl State {
             ram: Mutex::new(LruCache::new(NonZeroUsize::new(RAM_CACHE_CAP).unwrap())),
             disk,
             decode_sem: Arc::new(Semaphore::new(1)),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            current_session_id: std::sync::Mutex::new(None),
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
             fi: FrameIndexManager::new(),
@@ -1300,12 +1304,10 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
 }
 
 // ── MSG_PREFETCH_RANGE_STREAM (0x19): time-range prefetch with done signal ───
-/// Rust resolves frames from in-memory frameinfo (building it if not cached),
-/// decodes/caches each, SSEs {"frameReady":fi_idx} per frame + {"done":true}.
-/// Response uses length-prefixed chunks for clean socket termination.
-///
-/// 若帧索引尚未就绪（Queue B 仍在运行），改为对锚点区域做快速 seek+demux，
-/// 无需等待全量索引即可立即开始解码，避免长视频阻塞数分钟。
+/// Decodes frames in a time range with three key behaviors:
+/// - T009: Cooperative cancel — signals any running decode to stop, waits via semaphore
+/// - T005: Anchor-first — decodes the user's current frame before all others
+/// - T012: Accurate failed counter — only counts frames that land on disk
 async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
@@ -1315,12 +1317,31 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let width = req.width;
     let current_time_ms = req.current_time_ms;
     let include_current = req.include_current;
+    let session_id = req.session_id;
 
     let t0 = bench_now_ms();
-    log::debug!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} abs={t0}", req.current_frame_idx);
+    log::debug!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} session={session_id} abs={t0}", req.current_frame_idx);
 
+    // FR-006/FR-010: Session-aware cooperative cancel.
+    // Same prefetchSessionId (same modal context, e.g. "next 1s") → skip cancel, just queue.
+    // Different session (new position or new video) → signal running task to exit at frame boundary,
+    // then wait for semaphore. Either way no fixed sleep: encode can take 2.5s (4K AV1).
+    let session_changed = {
+        let cur = state.current_session_id.lock().unwrap();
+        cur.as_deref() != Some(session_id.as_str())
+    };
+    if session_changed {
+        state.cancel_flag.store(true, Ordering::SeqCst);
+    }
+    let _permit = state.decode_sem.clone().acquire_owned().await?;
+    if session_changed {
+        *state.current_session_id.lock().unwrap() = Some(session_id.clone());
+    }
+    state.cancel_flag.store(false, Ordering::SeqCst);
+
+    // Build to_process list and determine anchor_ms (frame closest to current position).
     // 优先用缓存的完整索引；若 Queue B 还在运行则快速 demux 锚点区域
-    let (to_process, fps) = if let Some(frame_idx) = state.fi.get(&path).await {
+    let (to_process, fps, anchor_ms) = if let Some(frame_idx) = state.fi.get(&path).await {
         let (frames, fps_num, fps_den) = frame_idx.as_ref();
         let fps_num_c = *fps_num;
         let fps_den_c = *fps_den;
@@ -1347,10 +1368,10 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             tp.push(((start + i) as i64, ms));
         }
         let fps = if fps_num_c > 0 && fps_den_c > 0 { fps_num_c / fps_den_c } else { 24 };
-        (tp, fps)
+        (tp, fps, anchor_ms)
     } else {
         // 帧索引尚未就绪：对锚点区域做快速 seek+demux，立即开始解码
-        let anchor_ms      = current_time_ms; // frame_idx 无法解析，退回时间戳
+        let anchor_ms      = current_time_ms;
         let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
         let range_end_ms   = anchor_ms.saturating_add(req.after_ms);
         log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → quick_demux anchor={anchor_ms} range=[{range_start_ms},{range_end_ms}]", bench_now_ms() - t0);
@@ -1389,13 +1410,16 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             Ok((result, fps))
         }).await??;
         log::debug!("[bench][prefetch] +{}ms [priority_adjust] quick_demux_done frames={}", bench_now_ms() - t0, tp.0.len());
-        (tp.0, tp.1)
+        (tp.0, tp.1, anchor_ms)
     };
 
     log::debug!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
     log::debug!("[bench][prefetch] fps={fps} mode=sequential");
 
     let mut cache_hits = 0usize;
+    let mut decoded = 0usize;
+    let mut failed = 0usize;
+    let mut first_decode_logged = false;
     let mut misses: Vec<(i64, i64)> = Vec::new();
 
     // Pass 1: emit cache hits immediately, collect misses for sequential decode
@@ -1430,46 +1454,100 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         misses.push((fi_idx, pos_ms));
     }
 
-    // Pass 2: sequential decode — one file open, one seek, frames arrive progressively via channel
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<(i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
-    let path_c    = path.clone();
-    let item_id_c = item_id.clone();
-    let disk_c    = state.disk.clone();
-
-    tokio::task::spawn_blocking(move || {
-        let result = jfs_common::decode_range(&path_c, &misses, width, |fi_idx, pos_ms, webp_thumb, webp_orig| {
-            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0,     &webp_orig);
-            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
-            tx.blocking_send((fi_idx, pos_ms, webp_thumb, webp_orig))
-                .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
-        });
-        if let Err(e) = result {
-            log::warn!("[frame-forge] sequential prefetch error: {e}");
+    // T005: Anchor-first — if the anchor frame is in misses, decode it now with
+    // decode_and_encode (single seek, fastest path) so it is the first SSE frameReady
+    // event. After writing to DiskCache, decode_range will hit it as a cache entry.
+    let anchor_miss_pos = misses.iter()
+        .enumerate()
+        .min_by_key(|(_, (_, ms))| (ms - anchor_ms).abs())
+        .map(|(i, _)| i);
+    if let Some(anchor_pos) = anchor_miss_pos {
+        let (anchor_fi_idx, anchor_pos_ms) = misses.remove(anchor_pos);
+        let path_c = path.clone();
+        let anchor_result = tokio::task::spawn_blocking(move || {
+            jfs_common::decode_and_encode(&path_c, anchor_pos_ms, width)
+        }).await;
+        match anchor_result {
+            Ok(Ok(r)) => {
+                let wrote_thumb = state.disk.write(&item_id, &path, anchor_fi_idx, anchor_pos_ms, width, &r.webp);
+                if !r.webp_orig.is_empty() {
+                    state.disk.write(&item_id, &path, anchor_fi_idx, anchor_pos_ms, 0, &r.webp_orig);
+                }
+                if wrote_thumb {
+                    decoded += 1;
+                    first_decode_logged = true;
+                    log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={anchor_fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+                    {
+                        let mut ram = state.ram.lock().await;
+                        if !r.webp_orig.is_empty() { ram.put((path.clone(), anchor_pos_ms, 0), r.webp_orig); }
+                        ram.put((path.clone(), anchor_pos_ms, width), r.webp);
+                    }
+                    let thumb = state.disk.make_path(&item_id, anchor_fi_idx, anchor_pos_ms, width);
+                    let orig  = state.disk.make_path(&item_id, anchor_fi_idx, anchor_pos_ms, 0);
+                    let line = format!(
+                        "data: {{\"frameReady\":{anchor_fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                        thumb.to_string_lossy(), orig.to_string_lossy()
+                    );
+                    write_chunk(stream, line.as_bytes()).await?;
+                } else {
+                    failed += 1;
+                }
+            }
+            _ => { failed += 1; }
         }
-    });
-
-    let mut decoded = 0usize;
-    while let Some((fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
-        decoded += 1;
-        if decoded == 1 {
-            log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
-        }
-        {
-            let mut ram = state.ram.lock().await;
-            ram.put((path.clone(), pos_ms, 0),     webp_orig);
-            ram.put((path.clone(), pos_ms, width),  webp_thumb);
-        }
-        let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
-        let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
-        let line = format!(
-            "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
-            thumb.to_string_lossy(), orig.to_string_lossy()
-        );
-        write_chunk(stream, line.as_bytes()).await?;
     }
 
-    log::debug!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} abs={}", bench_now_ms() - t0, bench_now_ms());
-    write_chunk(stream, b"data: {\"done\":true}\n\n").await?;
+    // Pass 2: sequential decode for remaining misses — one file open, progressive via channel.
+    // T012: channel carries write-success bool so receiver can accurately count failed frames.
+    if !misses.is_empty() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
+        let path_c    = path.clone();
+        let item_id_c = item_id.clone();
+        let disk_c    = state.disk.clone();
+        let cancel_c  = Arc::clone(&state.cancel_flag);
+
+        tokio::task::spawn_blocking(move || {
+            let result = jfs_common::decode_range(&path_c, &misses, width, cancel_c, |fi_idx, pos_ms, webp_thumb, webp_orig| {
+                if !webp_orig.is_empty() {
+                    disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0, &webp_orig);
+                }
+                let wrote_thumb = disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
+                tx.blocking_send((wrote_thumb, fi_idx, pos_ms, webp_thumb, webp_orig))
+                    .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
+            });
+            if let Err(e) = result {
+                log::warn!("[frame-forge] sequential prefetch error: {e}");
+            }
+        });
+
+        while let Some((wrote, fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
+            if wrote {
+                decoded += 1;
+                if !first_decode_logged {
+                    first_decode_logged = true;
+                    log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+                }
+                {
+                    let mut ram = state.ram.lock().await;
+                    ram.put((path.clone(), pos_ms, 0), webp_orig);
+                    ram.put((path.clone(), pos_ms, width), webp_thumb);
+                }
+                let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+                let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+                let line = format!(
+                    "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                    thumb.to_string_lossy(), orig.to_string_lossy()
+                );
+                write_chunk(stream, line.as_bytes()).await?;
+            } else {
+                failed += 1;
+            }
+        }
+    }
+
+    log::debug!("[bench][prefetch] +{}ms DONE cache_hits={cache_hits} decoded={decoded} failed={failed} abs={}", bench_now_ms() - t0, bench_now_ms());
+    let done_msg = format!("data: {{\"done\":true,\"cacheHits\":{cache_hits},\"decoded\":{decoded},\"failed\":{failed}}}\n\n");
+    write_chunk(stream, done_msg.as_bytes()).await?;
     stream.write_u32_le(0).await?;
     stream.flush().await?;
     Ok(())

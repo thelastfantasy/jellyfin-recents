@@ -103,7 +103,10 @@ impl DiskCache {
         maybe_path.map(|p| p.exists()).unwrap_or(false)
     }
 
-    pub fn write(&self, item_id: &str, video_path: &Path, frame_idx: i64, pos_ms: i64, width: u32, data: &[u8]) {
+    /// Write frame data to disk cache. Returns `true` if the frame is now in
+    /// cache (either already present or successfully written), `false` on
+    /// write failure (caller should count this as `failed`).
+    pub fn write(&self, item_id: &str, video_path: &Path, frame_idx: i64, pos_ms: i64, width: u32, data: &[u8]) -> bool {
         let p = self.frame_path(item_id, frame_idx, pos_ms, width);
         let current_mtime = video_mtime(video_path);
         {
@@ -111,7 +114,7 @@ impl DiskCache {
             let key = (item_id.to_owned(), pos_ms, width);
             if let Some(e) = idx.entries.get(&key) {
                 // File already cached with current video mtime — nothing to do
-                if e.video_mtime == current_mtime && p.exists() { return; }
+                if e.video_mtime == current_mtime && p.exists() { return true; }
                 // Stale mtime or missing file — remove old entry so we rewrite
                 idx.total_bytes = idx.total_bytes.saturating_sub(e.size);
                 idx.entries.remove(&key);
@@ -120,7 +123,7 @@ impl DiskCache {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if std::fs::write(&p, data).is_err() { return; }
+        if std::fs::write(&p, data).is_err() { return false; }
 
         let size = data.len() as u64;
         let ts = now_secs();
@@ -136,6 +139,7 @@ impl DiskCache {
         };
         self.flush();
         if over_cap { self.cleanup(); }
+        true
     }
 
     /// Returns cached (pos_ms, frame_idx) pairs for the given item and width.

@@ -175,6 +175,11 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
 
   const rootRef = useRef<HTMLDivElement>(null)
   const prefetchAbortRef = useRef<AbortController | null>(null)
+  // Tracks the session ID of the last-started prefetch for FR-006 conditional UI reset
+  const lastSessionIdRef = useRef<string>('')
+  // Mirror posMs prop in a ref so callbacks can read the latest value without dep churn
+  const posMsRef = useRef(posMs)
+  useEffect(() => { posMsRef.current = posMs }, [posMs])
   const page = useAtomValue(pageAtom)
 
   // ── 2. State ────────────────────────────────────────────────────────────────
@@ -208,12 +213,20 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
   const triggerPrefetch = useCallback(() => {
     prefetchAbortRef.current?.abort();
     if (_frames.length === 0) return;
+    // FR-011: deterministic session ID — 5s granularity so close/reopen at same position restores same session
+    const sessionId = `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}`;
+    // FR-006: only reset thumbnails when switching to a new session (new position or new video);
+    // same-session requests (e.g. "next 1s") keep already-rendered frames visible
+    if (sessionId !== lastSessionIdRef.current) {
+      setFrames(_frames.map(f => ({ ...f, jpegUrl: '', loadError: false })));
+      lastSessionIdRef.current = sessionId;
+    }
     // 用展示范围中心（不用 posMs），确保返回的 fiIdx 与 _frames 一致
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
     bench.mark('prefetch_triggered', { centerMs })
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentTimeMs: centerMs, beforeSeconds: 1, afterSeconds: 1, includeCurrentFrame: true, width: 320 },
+      { currentTimeMs: centerMs, beforeSeconds: 1, afterSeconds: 1, includeCurrentFrame: true, width: 320, prefetchSessionId: sessionId },
       (fiIdx) => {
         const idx = _frames.findIndex((f) => f.fiIdx === fiIdx);
         if (idx >= 0) markFrameReady(idx);
@@ -399,7 +412,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320 },
+      { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_back', { fiIdx }); },
       () => bench.mark('expand_back_prefetch_done'),
       () => bench.mark('expand_back_prefetch_error'),
@@ -424,7 +437,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     prefetchAbortRef.current?.abort();
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: lastFrame.fiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320 },
+      { currentFrameIndex: lastFrame.fiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_fwd', { fiIdx }); },
       () => bench.mark('expand_forward_prefetch_done'),
       () => bench.mark('expand_forward_prefetch_error'),
