@@ -14,8 +14,7 @@ export function PosterQueueWidget() {
   const { t } = useLocale()
   const [jobs, setJobs] = useState<JobEntry[]>(getJobs)
   const [open, setOpen] = useState(false)
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [lightboxJobId, setLightboxJobId] = useState<string | null>(null)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
 
   useEffect(() => {
     // Restore jobs from backend on mount (iframe re-enter after navigation)
@@ -47,6 +46,9 @@ export function PosterQueueWidget() {
 
   // Badge: running + error jobs
   const badgeCount = jobs.filter(j => j.status === 'running' || j.status === 'error').length
+
+  // Sorted list of done jobs (same order as displayed), used for lightbox navigation
+  const doneJobs = [...jobs].sort((a, b) => b.addedAt - a.addedAt).filter(j => j.status === 'done')
 
   if (jobs.length === 0) return null
 
@@ -112,7 +114,7 @@ export function PosterQueueWidget() {
                     src={getImageUrl(job.jobId)}
                     alt={job.itemTitle}
                     className="jfs-queue-popover__thumb"
-                    onClick={() => { setLightboxSrc(getImageUrl(job.jobId)); setLightboxJobId(job.jobId) }}
+                    onClick={() => setLightboxIdx(doneJobs.findIndex(j => j.jobId === job.jobId))}
                   />
                 )}
               </div>
@@ -121,20 +123,24 @@ export function PosterQueueWidget() {
         </div>
       </Popover>
 
-      {lightboxSrc && (
-        <Lightbox
-          src={lightboxSrc}
-          alt="Poster sheet"
-          onClose={() => { setLightboxSrc(null); setLightboxJobId(null) }}
-          onDownload={() => lightboxSrc && downloadBlob(lightboxSrc, `poster-sheet-${lightboxJobId}.jpg`)}
-          onDelete={lightboxJobId ? () => {
-            const job = jobs.find(j => j.jobId === lightboxJobId)
-            if (job) handleDelete(job)
-            setLightboxSrc(null)
-            setLightboxJobId(null)
-          } : undefined}
-        />
-      )}
+      {lightboxIdx !== null && doneJobs[lightboxIdx] && (() => {
+        const job = doneJobs[lightboxIdx]
+        const src = getImageUrl(job.jobId)
+        return (
+          <Lightbox
+            src={src}
+            alt="Poster sheet"
+            onClose={() => setLightboxIdx(null)}
+            onDownload={() => downloadBlob(src, `poster-sheet-${job.jobId}.jpg`)}
+            onDelete={() => {
+              handleDelete(job)
+              setLightboxIdx(null)
+            }}
+            onPrev={lightboxIdx > 0 ? () => setLightboxIdx(lightboxIdx - 1) : undefined}
+            onNext={lightboxIdx < doneJobs.length - 1 ? () => setLightboxIdx(lightboxIdx + 1) : undefined}
+          />
+        )
+      })()}
     </>
   )
 }

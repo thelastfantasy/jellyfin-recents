@@ -53,6 +53,14 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete, onPrev,
   const dragRef     = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
   const pinchRef    = useRef<{ dist: number; mx: number; my: number } | null>(null)
 
+  // Stable refs so history/keydown effects don't re-run when callbacks change
+  const onCloseRef = useRef(onClose)
+  const onPrevRef  = useRef(onPrev)
+  const onNextRef  = useRef(onNext)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+  useEffect(() => { onPrevRef.current  = onPrev  }, [onPrev])
+  useEffect(() => { onNextRef.current  = onNext  }, [onNext])
+
   const [dragging, setDragging] = useState(false)
 
   const applyTransform = useCallback(() => {
@@ -81,9 +89,9 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete, onPrev,
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return }
-      if (e.key === 'ArrowLeft'  && onPrev) { onPrev(); return }
-      if (e.key === 'ArrowRight' && onNext) { onNext(); return }
+      if (e.key === 'Escape') { onCloseRef.current(); return }
+      if (e.key === 'ArrowLeft'  && onPrevRef.current) { onPrevRef.current(); return }
+      if (e.key === 'ArrowRight' && onNextRef.current) { onNextRef.current(); return }
     }
     document.addEventListener('keydown', onKey, { capture: true })
     document.body.style.overflow = 'hidden'
@@ -91,7 +99,7 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete, onPrev,
     const win = (() => { try { return (window.top && window.top !== window) ? window.top : window } catch { return window } })()
     win.history.pushState({ jfsLightbox: true }, '')
     let closedByBack = false
-    const onPop = () => { closedByBack = true; onClose() }
+    const onPop = () => { closedByBack = true; onCloseRef.current() }
     win.addEventListener('popstate', onPop)
 
     return () => {
@@ -100,7 +108,7 @@ export function Lightbox({ src, alt = '', onClose, onDownload, onDelete, onPrev,
       win.removeEventListener('popstate', onPop)
       if (!closedByBack && win.history.state?.jfsLightbox) win.history.back()
     }
-  }, [onClose, onPrev, onNext])
+  }, [])
 
   useEffect(() => {
     const view = viewRef.current

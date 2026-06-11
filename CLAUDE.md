@@ -9,15 +9,22 @@ at specs/011-prefetch-first-frame-perf/plan.md
 **先测试，再部署，部署前必须征得用户同意。**
 
 ```
-1. mise run test      ← 运行全套测试（Rust + TypeScript + C#）
-2. mise run update    ← 部署到 jellyfin-dev 容器（会重启容器）
+1. mise run test            ← 运行全套测试（Rust + TypeScript + C#）
+2. mise run update          ← 完整部署（含 Rust 构建，会重启容器）
+   mise run update-quick    ← 快速部署（跳过 Rust，仅前端 + C#，会重启容器）
+   mise run deploy-enhancer ← 极速部署（仅 player-enhancer JS，无需重启）
 ```
+
+**根据改动范围选择部署命令：**
+- 改动含 Rust 代码（`crates/`）→ `mise run update`
+- 改动仅限前端（`apps/frontend/`、`packages/`）或 C#（`packages/JellyfinSuite.Plugin/`）→ `mise run update-quick`
+- 改动仅限 player-enhancer（`apps/player-enhancer/`）→ `mise run deploy-enhancer`
 
 - 运行测试时**必须**用 `mise run test`，不得直接调用 cargo/vitest/dotnet 替代
 - 所有 make 目标均可通过 `mise run <task>` 调用；`.mise.toml` 中的任务可**自由添加**（特别是 make 目标的封装），无需征得用户同意
-- 绝不在用户未运行测试(C#),或check（rust）或eslint（TypeScript）的情况下执行 `mise run update`
+- 绝不在用户未运行测试(C#),或check（rust）或eslint（TypeScript）的情况下执行部署命令
 - 绝不在用户未确认的情况下直接部署到 jellyfin-dev 容器
-- `mise run update` 会重启容器，是破坏性操作
+- `mise run update` 和 `mise run update-quick` 都会重启容器，是破坏性操作
 - 各命令详情见 agents.md 中的测试命令章节
 
 ## PR 合并前检查清单（必须遵守）
