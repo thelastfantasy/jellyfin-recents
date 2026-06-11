@@ -1,3 +1,4 @@
+import { Lightbox } from '@jfs/common-ui'
 import { useCallback, useEffect, useRef,useState } from 'react'
 import { MdAdd, MdRemove } from 'react-icons/md'
 
@@ -6,7 +7,6 @@ import { deleteUserFont, fetchPreview, listUserFonts, loadGlobalSkipSegments, sa
 import { useLocale } from '../i18n/context'
 import { downloadBlob } from '../utils/download'
 import { isGridValid, maxFrames as calcMaxFrames } from '../utils/gridValidation'
-import { Lightbox } from '@jfs/common-ui'
 import { TimeInput } from './SkipSegmentsModal'
 
 const THEMES = ['classic', 'dark', 'light', 'cinematic', 'minimal', 'transparent'] as const
