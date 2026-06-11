@@ -1,2 +1,1 @@
-export { Lightbox } from './Lightbox'
-export type { LightboxProps, LightboxI18n } from './Lightbox'
+export { Lightbox, type LightboxI18n, type LightboxProps } from './Lightbox'

@@ -11,3 +11,8 @@ pre-commit:
       root: "apps/frontend"
       run: npx tsc --noEmit && npx eslint {staged_files}
       stage_fixed: true
+    common-ui-lint:
+      glob: "packages/common-ui/src/**/*.{ts,tsx}"
+      root: "packages/common-ui"
+      run: npx eslint {staged_files}
+      stage_fixed: true
