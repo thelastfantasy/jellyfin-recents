@@ -53,7 +53,12 @@ export function ParamsPanel() {
       width:  { value: 0, mode: 'autoAdjust' },
       height: { value: 0, mode: 'autoAdjust' },
     })
-    else updateSettings({ useCustomResolution: true, resolutionPreset: 'original' })
+    else updateSettings({
+      useCustomResolution: true,
+      resolutionPreset: 'original',
+      width:  { value: _videoEl?.videoWidth || 0, mode: 'userInput' },
+      height: { value: 0, mode: 'autoAdjust' },
+    })
   }
 
   function handlePresetChange(e: ChangeEvent<HTMLSelectElement>) {

@@ -26,6 +26,9 @@ importers:
       '@jfs/api-types':
         specifier: workspace:*
         version: link:../../packages/api-types
+      '@jfs/common-ui':
+        specifier: workspace:*
+        version: link:../../packages/common-ui
       '@jfs/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -108,6 +111,9 @@ importers:
       '@jfs/api-types':
         specifier: workspace:*
         version: link:../../packages/api-types
+      '@jfs/common-ui':
+        specifier: workspace:*
+        version: link:../../packages/common-ui
       '@jfs/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -172,6 +178,22 @@ importers:
       orval:
         specifier: ^8.15.0
         version: 8.15.0(typescript@5.9.3)
+
+  packages/common-ui:
+    dependencies:
+      react:
+        specifier: ^19
+        version: 19.2.6
+      react-dom:
+        specifier: ^19
+        version: 19.2.6(react@19.2.6)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.15
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.15)
 
   packages/i18n: {}
 

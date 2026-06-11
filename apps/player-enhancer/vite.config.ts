@@ -7,8 +7,9 @@ export default defineConfig({
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   resolve: {
     alias: {
-      '@jfs/api-types': resolve(__dirname, '../../packages/api-types/src/jellyfin-api.ts'),
-      '@jfs/i18n': resolve(__dirname, '../../packages/i18n/src/index.ts'),
+      '@jfs/api-types':  resolve(__dirname, '../../packages/api-types/src/jellyfin-api.ts'),
+      '@jfs/i18n':       resolve(__dirname, '../../packages/i18n/src/index.ts'),
+      '@jfs/common-ui':  resolve(__dirname, '../../packages/common-ui/src/index.ts'),
     },
   },
   plugins: [

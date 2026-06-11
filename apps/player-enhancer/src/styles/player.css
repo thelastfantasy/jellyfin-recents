@@ -563,80 +563,113 @@ body.jfs-fe-open .upNextContainer {
 .jfs-fe-retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
 /* Lightbox overlay */
-.jfs-fe-lb {
+.jfs-lightbox {
   position: fixed;
   inset: 0;
   z-index: 999999;
-  background: rgba(0,0,0,0.88);
+  background: rgba(0, 0, 0, 0.88);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  cursor: zoom-out;
-  pointer-events: auto;
+  animation: jfs-lightbox-in 0.18s ease;
 }
-.jfs-fe-lb img {
-  max-width: 92vw;
-  max-height: 92vh;
-  object-fit: contain;
-  border-radius: 4px;
-  box-shadow: 0 8px 48px rgba(0,0,0,0.8);
-  cursor: default;
+@keyframes jfs-lightbox-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-.jfs-fe-lb-close {
+.jfs-lightbox__view {
+  flex: 1;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.jfs-lightbox__canvas {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.15);
-  border: none;
-  color: #fff;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
-.jfs-fe-lb-close:hover { background: rgba(255,255,255,0.28); }
-.jfs-fe-lb-nav {
+.jfs-lightbox__img {
+  display: block;
+  max-width: none;
+  user-select: none;
+}
+.jfs-lightbox__zoombar {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.15);
-  border: none;
-  color: #fff;
-  font-size: 36px;
-  line-height: 1;
-  cursor: pointer;
+  top: 1rem;
+  left: 1rem;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s;
+  gap: 0.4rem;
   z-index: 1;
+}
+.jfs-lightbox__zoom-btn {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 6px;
+  width: 2.2rem;
+  height: 2.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
   padding: 0;
 }
-.jfs-fe-lb-nav:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
-.jfs-fe-lb-nav:disabled { opacity: 0.2; cursor: default; }
-.jfs-fe-lb-prev { left: 16px; }
-.jfs-fe-lb-next { right: 16px; }
-.jfs-fe-lb-info {
+.jfs-lightbox__zoom-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.jfs-lightbox__close {
   position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0,0,0,0.55);
-  color: rgba(255,255,255,0.85);
-  font-size: 13px;
-  padding: 4px 14px;
-  border-radius: 4px;
-  pointer-events: none;
-  white-space: nowrap;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 6px;
+  width: 2.2rem;
+  height: 2.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  z-index: 1;
 }
+.jfs-lightbox__close:hover { background: rgba(255, 255, 255, 0.15); }
+.jfs-lightbox__nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 44px; height: 60px; border: none; border-radius: 8px;
+  background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+}
+.jfs-lightbox__nav:hover { background: rgba(255,255,255,0.22); }
+.jfs-lightbox__nav--prev { left: 12px; }
+.jfs-lightbox__nav--next { right: 12px; }
+.jfs-lightbox__footer {
+  position: absolute;
+  bottom: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  z-index: 1;
+}
+.jfs-lightbox__footer-btn {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 6px;
+  width: 2.5rem;
+  height: 2.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.jfs-lightbox__footer-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.jfs-lightbox__footer-btn--delete { color: #e74c3c; border-color: rgba(231, 76, 60, 0.4); }
+.jfs-lightbox__footer-btn--delete:hover { background: rgba(231, 76, 60, 0.35); }
 
 /* ── Crop popover ───────────────────────────────────────────────────────── */
 .jfs-fe-crop-overlay {

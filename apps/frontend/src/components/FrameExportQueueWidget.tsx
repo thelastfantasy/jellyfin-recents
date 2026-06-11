@@ -7,7 +7,7 @@ import type { ExportTaskEntry} from '../state/frameExportJobStore';
 import { addTask,getTasks, removeTask, updateTask } from '../state/frameExportJobStore'
 import { downloadBlob } from '../utils/download'
 import { FrameExportJobRunner } from './FrameExportJobRunner'
-import { Lightbox } from './Lightbox'
+import { Lightbox } from '@jfs/common-ui'
 import { Popover } from './Popover'
 
 function formatSize(bytes: number): string {

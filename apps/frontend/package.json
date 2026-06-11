@@ -13,6 +13,7 @@
   "dependencies": {
     "@jellyfin/sdk": "^0.10.0",
     "@jfs/api-types": "workspace:*",
+    "@jfs/common-ui": "workspace:*",
     "@jfs/i18n": "workspace:*",
     "axios": "^1.17.0",
     "jotai": "^2.13.0",

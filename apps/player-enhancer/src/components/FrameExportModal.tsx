@@ -1,3 +1,4 @@
+import { Lightbox } from "@jfs/common-ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { atom, getDefaultStore, useAtomValue, useSetAtom } from "jotai";
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
@@ -15,6 +16,7 @@ import {
   _minPosMs,
   _savedState,
   framesAtom,
+  lightboxIdxAtom,
   modalMinimizedAtom,
   pageAtom,
   setActiveTaskId,
@@ -51,7 +53,6 @@ import { CropPopover } from "./CropPopover";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FrameGridSkeleton } from "./FrameGridSkeleton";
 import { GridPage } from "./GridPage";
-import { Lightbox } from "./Lightbox";
 import { ProgressPage } from "./ProgressPage";
 import { ResultPage } from "./ResultPage";
 
@@ -587,7 +588,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
               }}
             />
           )}
-          <Lightbox />
+          <FrameLightbox />
           <CropPopover />
         </div>
       </Suspense>
@@ -595,6 +596,22 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     document.body,
   );
 });
+
+function FrameLightbox() {
+  const idx = useAtomValue(lightboxIdxAtom)
+  if (idx === null) return null
+  const frame = _frames[idx]
+  if (!frame?.jpegUrl) return null
+  const total = _frames.length
+  return (
+    <Lightbox
+      src={frameUrl(_itemId, frame.fiIdx, frame.posMs, 0)}
+      onClose={() => { sLightboxIdx.value = null }}
+      onPrev={idx > 0 ? () => { sLightboxIdx.value = idx - 1 } : undefined}
+      onNext={idx < total - 1 ? () => { sLightboxIdx.value = idx + 1 } : undefined}
+    />
+  )
+}
 
 function FrameExportModalApp() {
   const modalInfo = useAtomValue(_feOpen);

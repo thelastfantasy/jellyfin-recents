@@ -6,7 +6,7 @@ import { useLocale } from '../i18n/context'
 import type { JobEntry} from '../state/posterJobStore';
 import { addJob, getJobs,removeJob, updateJob } from '../state/posterJobStore'
 import { downloadBlob } from '../utils/download'
-import { Lightbox } from './Lightbox'
+import { Lightbox } from '@jfs/common-ui'
 import { Popover } from './Popover'
 import { PosterJobRunner } from './PosterJobRunner'
 
