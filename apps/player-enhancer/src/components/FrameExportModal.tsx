@@ -394,17 +394,6 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     return () => { prefetchAbortRef.current?.abort(); };
   }, []);
 
-  // 轮询视频当前位置，自然播放超出显示范围时清空帧格
-  useEffect(() => {
-    const id = setInterval(() => {
-      const curMs = Math.round(videoEl.currentTime * 1000)
-      if (_frames.length > 0 && (curMs < _minPosMs || curMs > _maxPosMs)) {
-        setFrames([])
-      }
-    }, 500)
-    return () => clearInterval(id)
-  }, [videoEl])
-
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
   const expandBack = useCallback(() => {
@@ -628,6 +617,29 @@ function FrameLightbox() {
 function FrameExportModalApp() {
   const modalInfo = useAtomValue(_feOpen);
   const minimized = useAtomValue(modalMinimizedAtom);
+
+  // Keep last-known videoEl so the monitor runs even while modal is closed
+  const lastVideoElRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (modalInfo) lastVideoElRef.current = modalInfo.videoEl;
+  }, [modalInfo]);
+
+  // Persistent monitor: invalidates stale savedState and live frames when video moves outside range
+  useEffect(() => {
+    const id = setInterval(() => {
+      const el = lastVideoElRef.current;
+      if (!el) return;
+      const curMs = Math.round(el.currentTime * 1000);
+      if (_savedState !== null && (curMs < _savedState.minPosMs || curMs > _savedState.maxPosMs)) {
+        setSavedState(null);
+      }
+      if (_frames.length > 0 && (curMs < _minPosMs || curMs > _maxPosMs)) {
+        setFrames([]);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
+
   if (!modalInfo) return null;
   const posMs = Math.round(modalInfo.videoEl.currentTime * 1000);
   return (

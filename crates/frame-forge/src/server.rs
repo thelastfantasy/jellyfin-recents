@@ -1400,13 +1400,16 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         (tp, fps, anchor_ms)
     } else {
         // 帧索引尚未就绪：对锚点区域做快速 seek+demux，立即开始解码
-        let anchor_ms      = current_time_ms;
-        let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
-        let range_end_ms   = anchor_ms.saturating_add(req.after_ms);
-        log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → quick_demux anchor={anchor_ms} range=[{range_start_ms},{range_end_ms}]", bench_now_ms() - t0);
+        // anchor 计算移入 spawn_blocking，因为需要 fps 才能从 current_frame_idx 反推 ms
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → quick_demux", bench_now_ms() - t0);
 
-        let path_c = path.clone();
-        let tp = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<(i64, i64)>, i64)> {
+        let path_c            = path.clone();
+        let cf_idx_c          = req.current_frame_idx;
+        let current_time_ms_c = current_time_ms;
+        let before_ms_c       = req.before_ms;
+        let after_ms_c        = req.after_ms;
+        let include_current_c = include_current;
+        let tp = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<(i64, i64)>, i64, i64)> {
             use ffmpeg_next as ff;
             let mut ictx = ff::format::input(&path_c)
                 .map_err(|e| anyhow::anyhow!("open {:?}: {}", path_c, e))?;
@@ -1424,6 +1427,34 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                 (s.index(), fnum, fden, sms)
             };
             let fps = if fps_num > 0 && fps_den > 0 { fps_num / fps_den } else { 24 };
+
+            // 读取首帧 PTS，用于与 queue_b 的顺序帧号对齐。
+            // queue_b 用 all_frames.len()（从 0 开始计数），而 compute_frame_idx 在首包
+            // PTS 非零时会有常量偏移（如 PTS≈4742ms、29fps → 偏移 138 帧）。
+            // 用首帧 PTS 作基准可消除该偏移：fi ≈ round((ms - first_pkt_ms) * fps / 1000)
+            let first_pkt_ms = {
+                ictx.seek(0, ..i64::MAX).unwrap_or(());
+                let mut fms = 0i64;
+                for (s, pkt) in ictx.packets() {
+                    if s.index() != stream_idx { continue; }
+                    let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+                    let tb  = s.time_base();
+                    let raw = (pts as f64 * tb.numerator() as f64 * 1000.0 / tb.denominator() as f64) as i64;
+                    fms = (raw - stream_start_ms).max(0);
+                    break;
+                }
+                fms
+            };
+
+            // 从 current_frame_idx 反推锚点 ms（仅当 currentFrameIndex 提供时）
+            let anchor_ms = if cf_idx_c >= 0 && fps_num > 0 && fps_den > 0 {
+                first_pkt_ms + cf_idx_c * fps_den * 1000 / fps_num
+            } else {
+                current_time_ms_c
+            };
+            let range_start_ms = anchor_ms.saturating_sub(before_ms_c);
+            let range_end_ms   = anchor_ms.saturating_add(after_ms_c);
+
             ictx.seek(range_start_ms * 1000, ..range_start_ms * 1000).unwrap_or(());
             let mut result: Vec<(i64, i64)> = Vec::new();
             for (s, pkt) in ictx.packets() {
@@ -1434,12 +1465,18 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                 let ms     = (raw_ms - stream_start_ms).max(0);
                 if ms < range_start_ms { continue; }
                 if ms > range_end_ms   { break; }
-                result.push((compute_frame_idx(ms, fps_num, fps_den), ms));
+                if !include_current_c && ms == anchor_ms { continue; }
+                let fi = if fps_num > 0 && fps_den > 0 {
+                    ((ms - first_pkt_ms) * fps_num + fps_den * 500) / (fps_den * 1000)
+                } else {
+                    result.len() as i64
+                };
+                result.push((fi, ms));
             }
-            Ok((result, fps))
+            Ok((result, fps, anchor_ms))
         }).await??;
-        log::debug!("[bench][prefetch] +{}ms [priority_adjust] quick_demux_done frames={}", bench_now_ms() - t0, tp.0.len());
-        (tp.0, tp.1, anchor_ms)
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] quick_demux_done anchor_ms={} frames={}", bench_now_ms() - t0, tp.2, tp.0.len());
+        (tp.0, tp.1, tp.2)
     };
 
     log::debug!("[bench][prefetch] +{}ms to_process={}", bench_now_ms() - t0, to_process.len());
