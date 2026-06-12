@@ -736,16 +736,6 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         anyhow::bail!("pHash dedup left < 2 unique frames; cannot stitch");
     }
 
-    let crop_rect = crate::quality::detect_border_crop(&images[0], 5.0);
-    let images: Vec<image::DynamicImage> = images.iter()
-        .map(|img| crate::quality::crop_image(img, crop_rect))
-        .collect();
-    log::debug!(
-        "[frame-forge] auto-crop: ({},{})→({},{}) → {}x{}",
-        crop_rect.0, crop_rect.1, crop_rect.2, crop_rect.3,
-        images[0].width(), images[0].height()
-    );
-
     let class = crate::scene_classifier::classify(&images);
     log::debug!(
         "[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1}",
