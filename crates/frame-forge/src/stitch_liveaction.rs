@@ -148,14 +148,16 @@ fn stitch_pair_motion_filtered(
     let mut ransac_mask = core::Mat::default();
     let homo = calib3d::find_homography(&pts_a, &pts_b, &mut ransac_mask, calib3d::RANSAC, 3.0)?;
 
-    if homo.empty().unwrap_or(true) || homo.rows() != 3 {
+    if homo.empty() || homo.rows() != 3 {
         anyhow::bail!("RANSAC homography estimation failed");
     }
 
-    // Warp frame B into frame A's coordinate space, then Laplacian-pyramid blend
-    let warped = crate::stitch_landscape::warp_image(&mat_b, &homo, w, h);
+    // Warp frame B into expanded canvas, then Laplacian-pyramid blend
     let base_rgba = a.to_rgba8();
-    let blended = crate::stitch_landscape::blend_pair(&base_rgba, &warped);
+    let blended = crate::stitch_landscape::warp_expand_blend(
+        &base_rgba, &mat_b, &homo,
+        w, h, mat_b.cols(), mat_b.rows(),
+    );
     Ok(DynamicImage::ImageRgba8(blended))
 }
 

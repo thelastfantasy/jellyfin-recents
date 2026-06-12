@@ -99,3 +99,7 @@ run = "make workflow-test-release"
 [tasks.check-gpu]
 description = "验证 Arc A380 OpenCL 在 jellyfin-dev 容器内可见"
 run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"
+
+[tasks.demo-stitch]
+description = "拼接质量演示：构建 forge(cli+opencv)，生成 fixtures，拼接，score.py 评分"
+run = "make demo-stitch"

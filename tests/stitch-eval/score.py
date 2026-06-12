@@ -97,20 +97,30 @@ def compute_rmse(img_a, img_b):
     return float(math.sqrt(((a - b) ** 2).mean()))
 
 
-def evaluate_pair(subdir: Path, thresholds: dict) -> dict:
+def evaluate_pair(subdir: Path, thresholds: dict, output_dir: Path | None = None) -> dict:
     try:
         from PIL import Image
     except ImportError:
         print("ERROR: Pillow not installed. Run: pip install Pillow", file=sys.stderr)
         sys.exit(1)
 
-    img_a = Image.open(subdir / "input_a.png")
-    img_b = Image.open(subdir / "input_b.png")
-    ref   = Image.open(subdir / "reference.png")
+    ref = Image.open(subdir / "reference.png")
 
-    ssim   = compute_ssim(ref, img_a)   # compare stitched result proxy with reference
-    de     = compute_color_de(ref, img_a)
-    rmse   = compute_rmse(ref, img_a)
+    stitched_path = None
+    if output_dir is not None:
+        candidate = output_dir / f"{subdir.name}_stitched.png"
+        if candidate.exists():
+            stitched_path = candidate
+
+    if stitched_path is not None:
+        stitched = Image.open(stitched_path)
+    else:
+        # fall back to input_a as a baseline proxy (no stitched output found)
+        stitched = Image.open(subdir / "input_a.png")
+
+    ssim   = compute_ssim(ref, stitched)
+    de     = compute_color_de(ref, stitched)
+    rmse   = compute_rmse(ref, stitched)
 
     metrics: dict = {"pair": subdir.name}
     failures = []
@@ -137,13 +147,15 @@ def evaluate_pair(subdir: Path, thresholds: dict) -> dict:
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <fixtures_dir>", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <fixtures_dir> [output_dir]", file=sys.stderr)
         sys.exit(2)
 
     fixtures_dir = Path(sys.argv[1])
     if not fixtures_dir.exists():
         print(f"ERROR: fixtures directory not found: {fixtures_dir}", file=sys.stderr)
         sys.exit(2)
+
+    output_dir = Path(sys.argv[2]) if len(sys.argv) >= 3 else None
 
     thresholds = load_thresholds()
     pairs = sorted(
@@ -156,7 +168,7 @@ def main():
         print("Each subdirectory must contain: input_a.png, input_b.png, reference.png", file=sys.stderr)
         sys.exit(2)
 
-    results = [evaluate_pair(p, thresholds) for p in pairs]
+    results = [evaluate_pair(p, thresholds, output_dir) for p in pairs]
 
     # Summary
     ssim_vals = [r["ssim"] for r in results if "ssim" in r]

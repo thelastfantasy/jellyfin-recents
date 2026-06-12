@@ -45,7 +45,7 @@ async fn run() -> Result<()> {
 
     jfs_common::init();
 
-    #[cfg(feature = "opencv")]
+    #[cfg(feature = "opencl")]
     {
         let has_ocl = opencv::core::ocl::have_open_cl().unwrap_or(false);
         let n_platforms = opencv::core::ocl::Platform::list()
@@ -320,7 +320,7 @@ mod tests {
     #[ignore = "requires FRAME_FORGE_TEST_GPU=1 and Arc GPU passthrough + intel-opencl-icd"]
     fn test_opencl_detected() {
         if std::env::var_os("FRAME_FORGE_TEST_GPU").is_none() { return; }
-        #[cfg(feature = "opencv")]
+        #[cfg(feature = "opencl")]
         assert!(
             opencv::core::ocl::have_open_cl().unwrap_or(false),
             "Arc A380 OpenCL not detected — check /dev/dri passthrough and intel-opencl-icd"

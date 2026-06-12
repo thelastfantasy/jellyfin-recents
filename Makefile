@@ -11,7 +11,7 @@ else
 endif
 
 .PHONY: build-frontend build-plugin build-poster-gen build-poster-gen-win build-seek-preview build-frame-forge \
-        check-seek-preview check-frame-forge \
+        check-seek-preview check-frame-forge demo-stitch \
         build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release
 
 build-frontend:
@@ -169,6 +169,17 @@ check-frame-forge:
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
 		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check -p frame-forge --all-targets --features cli"
+
+# Run stitch quality demo: build forge (cli+opencv), create fixtures, stitch, score.
+# Requires OpenPano example data in tests/stitch-eval/downloads/example-data/.
+demo-stitch:
+	docker volume create forge-cargo-home > /dev/null 2>&1 || true
+	MSYS_NO_PATHCONV=1 docker run --rm \
+		-v "$$(cygpath -m $(CURDIR)):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		bash tests/stitch-eval/run_demo.sh
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 

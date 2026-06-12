@@ -36,17 +36,17 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
     }).collect();
 
     let mut result = images[0].to_rgba8();
-    let (w, h) = (result.width() as i32, result.height() as i32);
 
     for i in 1..images.len() {
         let prev = image_to_mat(&DynamicImage::ImageRgba8(result.clone()));
         let curr = image_to_mat(&images[i]);
+        let pw = result.width() as i32;
+        let ph = result.height() as i32;
+        let cw = images[i].width() as i32;
+        let ch = images[i].height() as i32;
 
-        // Try AKAZE feature matching
         if let Ok(homo) = estimate_homography_akaze(&prev, &curr) {
-            // Warp current frame into prev coordinate system
-            let warped = warp_image(&curr, &homo, w, h);
-            result = blend_pair(&result, &warped);
+            result = warp_expand_blend(&result, &curr, &homo, pw, ph, cw, ch);
         } else {
             // Fallback to Phase Correlation
             let prev_img = DynamicImage::ImageRgba8(result.clone());
@@ -54,8 +54,8 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
             let dst_x = dx.max(0) as u32;
             let dst_y = dy.max(0) as u32;
             let mut new_canvas = RgbaImage::new(
-                w as u32 + dx.unsigned_abs(),
-                h as u32 + dy.unsigned_abs(),
+                pw as u32 + dx.unsigned_abs(),
+                ph as u32 + dy.unsigned_abs(),
             );
             image::imageops::overlay(&mut new_canvas, &result, 0, 0);
             let rgba = images[i].to_rgba8();
@@ -176,6 +176,104 @@ pub fn warp_image(img: &core::Mat, h: &core::Mat, width: i32, height: i32) -> Rg
     rgba
 }
 
+/// Warp frame B into an expanded canvas that covers both frames, then blend.
+///
+/// `homo` maps frame A (base) coordinates → frame B (curr) coordinates.
+/// Projects B's corners through H⁻¹ to find where they land in A's space,
+/// computes the bounding box, and creates a canvas that fits both.
+pub fn warp_expand_blend(
+    base: &RgbaImage,
+    curr: &core::Mat,
+    homo: &core::Mat,
+    bw: i32, bh: i32,
+    cw: i32, ch: i32,
+) -> RgbaImage {
+    let mut h_inv = core::Mat::default();
+    if core::invert(homo, &mut h_inv, core::DECOMP_SVD).is_err() {
+        return blend_pair(base, &warp_image(curr, homo, bw, bh));
+    }
+
+    let proj = |m: &core::Mat, px: f64, py: f64| -> (f64, f64) {
+        let h00 = m.at_2d::<f64>(0, 0).copied().unwrap_or(1.0);
+        let h01 = m.at_2d::<f64>(0, 1).copied().unwrap_or(0.0);
+        let h02 = m.at_2d::<f64>(0, 2).copied().unwrap_or(0.0);
+        let h10 = m.at_2d::<f64>(1, 0).copied().unwrap_or(0.0);
+        let h11 = m.at_2d::<f64>(1, 1).copied().unwrap_or(1.0);
+        let h12 = m.at_2d::<f64>(1, 2).copied().unwrap_or(0.0);
+        let h20 = m.at_2d::<f64>(2, 0).copied().unwrap_or(0.0);
+        let h21 = m.at_2d::<f64>(2, 1).copied().unwrap_or(0.0);
+        let h22 = m.at_2d::<f64>(2, 2).copied().unwrap_or(1.0);
+        let denom = (h20 * px + h21 * py + h22).max(1e-8);
+        ((h00 * px + h01 * py + h02) / denom,
+         (h10 * px + h11 * py + h12) / denom)
+    };
+
+    // Project B's four corners through H⁻¹ into A's coordinate space.
+    // Clamp to ±4× frame dimensions so degenerate homographies don't overflow i32.
+    let max_coord = (bw.max(cw) * 4) as f64;
+    let b_pts: Vec<(f64, f64)> = [
+        (0.0, 0.0), (cw as f64 - 1.0, 0.0),
+        (0.0, ch as f64 - 1.0), (cw as f64 - 1.0, ch as f64 - 1.0),
+    ].iter().map(|(x, y)| {
+        let (px, py) = proj(&h_inv, *x, *y);
+        (px.clamp(-max_coord, max_coord), py.clamp(-max_coord, max_coord))
+    }).collect();
+
+    let all_x: Vec<f64> = b_pts.iter().map(|(x,_)| *x)
+        .chain([0.0, bw as f64 - 1.0]).collect();
+    let all_y: Vec<f64> = b_pts.iter().map(|(_,y)| *y)
+        .chain([0.0, bh as f64 - 1.0]).collect();
+
+    let min_x = all_x.iter().cloned().fold(f64::INFINITY, f64::min).floor() as i32;
+    let min_y = all_y.iter().cloned().fold(f64::INFINITY, f64::min).floor() as i32;
+    let max_x = all_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max).ceil() as i32;
+    let max_y = all_y.iter().cloned().fold(f64::NEG_INFINITY, f64::max).ceil() as i32;
+
+    // Reject degenerate homographies: if any projected corner lands more than
+    // 2× the frame dimensions away, the homography is unusable — fall back to clip.
+    let reject_dist = (bw.max(cw) * 2) as f64;
+    if b_pts.iter().any(|(x, y)| x.abs() > reject_dist || y.abs() > reject_dist) {
+        return blend_pair(base, &warp_image(curr, homo, bw, bh));
+    }
+
+    let off_x = (-min_x).max(0);
+    let off_y = (-min_y).max(0);
+    let canvas_w = ((max_x - min_x + 1).max(1) as u32).min(bw as u32 * 3);
+    let canvas_h = ((max_y - min_y + 1).max(1) as u32).min(bh as u32 * 3);
+
+    // Place frame A on the extended canvas at the computed offset
+    let mut canvas_base = RgbaImage::new(canvas_w, canvas_h);
+    image::imageops::overlay(&mut canvas_base, base, off_x as i64, off_y as i64);
+
+    // Build H_new = H * T⁻¹  where T shifts canvas coords by (off_x, off_y)
+    // For canvas pixel (cx,cy): H_new maps to frame B = H * (cx-off_x, cy-off_y)
+    // H_new[:,2] = H[:,0]*(-ox) + H[:,1]*(-oy) + H[:,2]
+    let get = |r: i32, c: i32| homo.at_2d::<f64>(r, c).copied()
+        .unwrap_or(if r == c { 1.0 } else { 0.0 });
+    let ox = off_x as f64;
+    let oy = off_y as f64;
+    let h_vals = [
+        [get(0,0), get(0,1), get(0,0)*(-ox) + get(0,1)*(-oy) + get(0,2)],
+        [get(1,0), get(1,1), get(1,0)*(-ox) + get(1,1)*(-oy) + get(1,2)],
+        [get(2,0), get(2,1), get(2,0)*(-ox) + get(2,1)*(-oy) + get(2,2)],
+    ];
+    if let Ok(mut h_new) = core::Mat::new_rows_cols_with_default(
+        3, 3, core::CV_64F, core::Scalar::default(),
+    ) {
+        for r in 0..3i32 {
+            for c in 0..3i32 {
+                if let Ok(v) = h_new.at_2d_mut::<f64>(r, c) {
+                    *v = h_vals[r as usize][c as usize];
+                }
+            }
+        }
+        let warped = warp_image(curr, &h_new, canvas_w as i32, canvas_h as i32);
+        blend_pair(&canvas_base, &warped)
+    } else {
+        blend_pair(base, &warp_image(curr, homo, bw, bh))
+    }
+}
+
 pub fn blend_pair(base: &RgbaImage, overlay: &RgbaImage) -> RgbaImage {
     // Laplacian pyramid multi-band blending (T075-T076)
     pyramid_blend(base, overlay)
@@ -240,54 +338,33 @@ fn filter_keypoints_by_gradient(
     filtered
 }
 
-/// Laplacian pyramid multi-band blending (Burt & Adelson 1983).
-/// Builds 4-level pyramids, blends each level with distance-weighted average,
-/// then reconstructs.
+/// Alpha-aware blending with feathered seam in the overlap region.
+///
+/// Uses each image's alpha channel as the content mask — warp_perspective fills
+/// out-of-bounds pixels with alpha=0, so this correctly identifies content vs
+/// empty canvas without relying on canvas dimensions which would halve brightness.
 fn pyramid_blend(base: &RgbaImage, overlay: &RgbaImage) -> RgbaImage {
     let w = base.width().max(overlay.width());
     let h = base.height().max(overlay.height());
-    let levels = 4;
 
-    // Build Gaussian pyramids
-    let mut base_pyr = build_gaussian_pyramid(base, levels, w, h);
-    let mut overlay_pyr = build_gaussian_pyramid(overlay, levels, w, h);
+    let base_mask   = alpha_mask(base,    w, h);
+    let overlay_mask = alpha_mask(overlay, w, h);
 
-    // Compute weight masks (distance from image border)
-    let base_mask = distance_mask(base.width(), base.height(), w, h);
-    let overlay_mask = distance_mask(overlay.width(), overlay.height(), w, h);
-
-    // Build Laplacian pyramids and blend
-    let mut blended_levels: Vec<RgbaImage> = Vec::new();
-    for lvl in 0..levels {
-        let base_laplacian = if lvl < levels - 1 {
-            let upsampled = upsample(&base_pyr[lvl + 1], base_pyr[lvl].width(), base_pyr[lvl].height());
-            subtract(&base_pyr[lvl], &upsampled)
-        } else {
-            base_pyr[lvl].clone()
-        };
-        let overlay_laplacian = if lvl < levels - 1 {
-            let upsampled = upsample(&overlay_pyr[lvl + 1], overlay_pyr[lvl].width(), overlay_pyr[lvl].height());
-            subtract(&overlay_pyr[lvl], &upsampled)
-        } else {
-            overlay_pyr[lvl].clone()
-        };
-
-        // Downsample masks to this level
-        let bm = resize_mask(&base_mask, base_pyr[lvl].width(), base_pyr[lvl].height());
-        let om = resize_mask(&overlay_mask, overlay_pyr[lvl].width(), overlay_pyr[lvl].height());
-
-        let blended = blend_two(&base_laplacian, &overlay_laplacian, &bm, &om);
-        blended_levels.push(blended);
-    }
-
-    // Reconstruct from Laplacian pyramid (reverse order)
-    let mut result = blended_levels.last().unwrap().clone();
-    for lvl in (0..levels - 1).rev() {
-        result = upsample(&result, blended_levels[lvl].width(), blended_levels[lvl].height());
-        result = add(&result, &blended_levels[lvl]);
-    }
-    result
+    blend_two(base, overlay, &base_mask, &overlay_mask)
 }
+
+/// Build a GrayMask from the image's alpha channel, padded to canvas size.
+/// Pixels with alpha=0 (out-of-bounds from warp_perspective) get weight 0.
+fn alpha_mask(img: &RgbaImage, canvas_w: u32, canvas_h: u32) -> GrayMask {
+    let mut mask = GrayMask::new(canvas_w, canvas_h);
+    for y in 0..img.height().min(canvas_h) {
+        for x in 0..img.width().min(canvas_w) {
+            mask.put_pixel(x, y, image::Luma([img.get_pixel(x, y)[3]]));
+        }
+    }
+    mask
+}
+
 
 fn build_gaussian_pyramid(img: &RgbaImage, levels: usize, canvas_w: u32, canvas_h: u32) -> Vec<RgbaImage> {
     let mut pyr = Vec::new();
@@ -464,9 +541,11 @@ mod quality_tests {
         let a = image::open(dir.join("input_a.png")).expect("input_a.png");
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
 
+        #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(false).ok();
         let cpu = stitch_landscape(&[a.clone(), b.clone()]).expect("CPU stitch failed");
 
+        #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(true).ok();
         let gpu = stitch_landscape(&[a, b]).expect("GPU stitch failed");
 

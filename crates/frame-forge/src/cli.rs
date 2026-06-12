@@ -1,11 +1,17 @@
 // frame-forge CLI — stitch & animate without ffmpeg/opencv deps.
 // Usage:
 //   forge stitch --input img1.webp img2.webp ... --output result.png
+//   forge stitch-landscape --input a.png b.png --output result.png   (requires opencv feature)
+//   forge stitch-liveaction --input a.png b.png --output result.png  (requires opencv feature)
 //   forge animate --input img1.webp img2.webp ... --output result.webp --height 200 --fps 5
 
 mod animate;
 mod scene_classifier;
 mod stitch_anime;
+#[cfg(feature = "opencv")]
+mod stitch_landscape;
+#[cfg(feature = "opencv")]
+mod stitch_liveaction;
 #[cfg(test)]
 mod test_metrics;
 
@@ -17,20 +23,16 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("stitch") => cmd_stitch(&args[2..]),
+        Some("stitch-landscape") => cmd_stitch_opencv(&args[2..], "landscape"),
+        Some("stitch-liveaction") => cmd_stitch_opencv(&args[2..], "liveaction"),
         Some("animate") => cmd_animate(&args[2..]),
         _ => {
             eprintln!("Usage:");
-            eprintln!("  forge stitch --input file1.webp file2.webp ... --output out.png");
+            eprintln!("  forge stitch --input file1.png file2.png ... --output out.png");
+            eprintln!("  forge stitch-landscape --input a.png b.png --output out.png  (opencv feature required)");
+            eprintln!("  forge stitch-liveaction --input a.png b.png --output out.png (opencv feature required)");
             eprintln!("  forge animate --json frames.json");
             eprintln!("  forge animate --input f1.webp f2.webp ... --output out.gif --height 200 [--fps 5] [--timestamps ms1 ms2 ...]");
-            eprintln!();
-            eprintln!("  --json exclusively controls all params:");
-            eprintln!("  {{");
-            eprintln!("    \"frames\": [{{\"path\":\"frame.webp\",\"duration_ms\":200}}, ...],");
-            eprintln!("    \"output\": \"out.webp\",");
-            eprintln!("    \"height\": 200,");
-            eprintln!("    \"fps\": 5");
-            eprintln!("  }}");
             Ok(())
         }
     }
@@ -139,6 +141,31 @@ fn encode_and_save(images: &[DynamicImage], timestamps: &[u64], output: &str, he
     std::fs::write(output, &encoded)?;
     eprintln!("Saved: {output} ({} bytes)", encoded.len());
     Ok(())
+}
+
+fn cmd_stitch_opencv(args: &[String], mode: &str) -> anyhow::Result<()> {
+    #[cfg(not(feature = "opencv"))]
+    {
+        anyhow::bail!("stitch-{mode} requires --features opencv (not compiled into this binary)");
+    }
+    #[cfg(feature = "opencv")]
+    {
+        let kv = parse_kv(args);
+        let input: Vec<&str> = kv.iter().find(|(k,_)| *k == "input").map(|(_,v)| v.as_slice()).unwrap_or(&[]).to_vec();
+        let output = kv.iter().find(|(k,_)| *k == "output").and_then(|(_,v)| v.first()).map(|s| *s).unwrap_or("stitched.png");
+        if input.len() < 2 {
+            anyhow::bail!("stitch-{mode} requires at least 2 --input images");
+        }
+        let images = load_images(&input)?;
+        eprintln!("Stitching {} frames with {mode} algorithm...", images.len());
+        let result = match mode {
+            "liveaction" => stitch_liveaction::stitch_liveaction(&images)?,
+            _ => stitch_landscape::stitch_landscape(&images)?,
+        };
+        result.save(output)?;
+        eprintln!("Saved: {output} ({}x{})", result.width(), result.height());
+        Ok(())
+    }
 }
 
 #[derive(serde::Deserialize)]
