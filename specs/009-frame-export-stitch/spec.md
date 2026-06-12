@@ -272,6 +272,24 @@ GIF/WebP 动画生成相对简单，核心为：
 
 ---
 
+### User Story 9 - 自动化拼接质量评分 (Priority: P4)
+
+开发者运行测试套件时，Rust `#[cfg(test)]` 模块和 Python 评估脚本自动对拼接输出计算质量指标（SSIM、接缝梯度跳变、色差 ΔE Lab、RANSAC 内点率、RMSE），生成带通过/失败阈值的数值评分卡，无需人工目测拼接结果。
+
+**Why this priority**: 拼接算法复杂，三条路径（动漫/风景/真人）均需可重复的客观基准，以便在修改算法时快速判断是否回归；P4 因为不影响用户功能，但对算法迭代至关重要。
+
+**Independent Test**: 运行 `cargo test -p frame-forge stitch_quality` 以及 `python tests/stitch-eval/score.py`，两者均输出评分卡且所有指标通过阈值即为成功。
+
+**Acceptance Scenarios**:
+
+1. **Given** Rust 测试套件运行（`cargo test -p frame-forge`），**When** 拼接质量测试模块执行，**Then** 对每个测试用例输出包含 SSIM（≥0.80）、接缝梯度跳变（≤25.0）、色差 ΔE（≤10.0）、RANSAC 内点率（≥0.40，仅场景 B/C）的评分卡，所有指标通过则测试通过
+2. **Given** Python 评估脚本 `tests/stitch-eval/score.py` 执行，**When** 传入测试图像对目录（SEAGULL 场景 B 或 FFmpeg 生成的合成序列），**Then** 输出 JSON 格式评分卡，含 SSIM、ΔE、RMSE、接缝梯度每项的平均值和通过/失败状态
+3. **Given** 评分卡生成完成，**When** 某项指标低于阈值，**Then** 对应项标记为 FAIL 并在 stderr 输出具体数值（如 `SSIM=0.72 < threshold 0.80`），退出码为 1，允许 CI 捕获
+4. **Given** 测试数据集目录不存在，**When** 运行评估脚本，**Then** 脚本输出明确提示（如"测试数据集未找到，请参考 research.md 的数据集准备指南"）并以退出码 2 退出，不崩溃
+5. **Given** 合成测试序列生成（FFmpeg 裁切真实视频），**When** 对生成序列运行评分，**Then** 场景 A（动漫）Phase Correlation 路径在合成平移序列上 SSIM ≥ 0.90
+
+---
+
 ### Edge Cases
 
 - 视频无关键帧信息（如直播流、IPTV 流）�?帧选择器按钮禁用或隐藏
@@ -351,6 +369,15 @@ GIF/WebP 动画生成相对简单，核心为：
 
 - **FR-049**: 所有新�?UI 文字 MUST 支持中文、日语、英语三�?- **FR-050**: 帧导出功�?MUST 不破�?Jellyfin 原有播放器的任何现有功能
 - **FR-051**: DRM 内容 MUST 禁用帧导出按�?- **FR-052**: 整个 player-enhancer 前端 MUST 使用 **@alivecss/aliveui** CSS 框架（`aliveui`）进行样式开发，替换 `styles.ts` 中所有自定义 CSS（OSD 按钮、亮�?音量指示器、速度 OSD、seek OSD、截�?UI、帧选择�?Modal 等全部组件统一使用 @alivecss/aliveui 语义类名和内联工具类�?
+**自动化拼接质量评分**
+
+- **FR-053**: Rust `crates/frame-forge/src/stitch/` 各拼接模块 MUST 在 `#[cfg(test)]` 块内实现质量评分函数，计算以下指标：SSIM（结构相似度，≥0.80 为通过）、接缝像素梯度跳变均值（≤25.0 为通过）、色差 ΔE（CIELAB L*a*b* 欧氏距离，≤10.0 为通过）
+- **FR-054**: 场景 B/C 拼接模块（`stitch_landscape.rs`、`stitch_liveaction.rs`）MUST 在测试中额外输出 RANSAC 内点率（内点数/总匹配数，≥0.40 为通过）和 RMSE（对应点重投影误差，≤5.0px 为通过）
+- **FR-055**: `tests/stitch-eval/score.py` Python 脚本 MUST 接收测试图像对目录（含输入帧和对应参考拼接结果），批量计算上述指标，以 JSON 格式输出评分卡（每对图像一条记录 + 整体汇总），任一指标低于阈值时退出码为 1
+- **FR-056**: 合成测试序列 MUST 可通过 `tests/stitch-eval/gen_synthetic.sh` 生成：对真实视频裁切水平平移子图（模拟 Pan 镜头），用于场景 A Phase Correlation 路径验证；SEAGULL / UDIS-D 数据集图像对用于场景 B/C 路径验证（数据集准备方法详见 research.md）
+- **FR-057**: 评分指标阈值 MUST 在 `tests/stitch-eval/thresholds.json` 中统一配置（不硬编码），Rust 测试和 Python 脚本均从此文件读取
+
+
 ### Key Entities
 
 - **帧选择�?Modal**: 多页�?SPA 前端组件（网格页 / 进度�?/ 成果页），管理帧选择、参数配置、SSE 进度监听、成果预览全流程
