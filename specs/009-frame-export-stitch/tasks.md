@@ -13,264 +13,266 @@
 
 ---
 
-## Phase 1: Setup ¡ª crate ¹Ç¼Ü + ¹¹½¨ + @alivecss/aliveui ÒıÈë
+## Phase 1: Setup â€” crate æ¡†æ¶åˆå§‹åŒ– + è„šæ‰‹æ¶ + @alivecss/aliveui å®‰è£…
 
-**Purpose**: ½¨Á¢ frame-forge Rust crate¡¢C# ·şÎñ¹Ç¼Ü¡¢@alivecss/aliveui npm ÒÀÀµ¡¢Makefile/CI ¸üĞÂ¡£
+**Purpose**: åˆå§‹åŒ– frame-forge Rust crateã€C# æ§åˆ¶å™¨è„šæ‰‹æ¶ã€@alivecss/aliveui npm åŒ…å®‰è£…ã€Makefile/CI é…ç½®ã€‚
 
-- [x] T001 ´´½¨ `src/frame-forge/Cargo.toml`£ºpackage `frame-forge` edition 2021£»ÒÀÀµ tokio(full)¡¢ffmpeg-next(codec+format+software-scaling)¡¢image¡¢imageproc¡¢lru¡¢anyhow¡¢gif¡¢webp¡¢serde¡¢serde_json¡¢opencv¡¢rustfft
-- [x] T002 ´´½¨ `src/frame-forge/src/main.rs` Õ¼Î»¹Ç¼Ü£¨¿Õ `tokio::main`£¬`cargo check` Í¨¹ı£©
-- [x] T003 [P] ´´½¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` Õ¼Î»¹Ç¼Ü£ºÀàÉùÃ÷ + IDisposable + Unix socket Â·¾¶³£Á¿ + StartAsync/StopAsync stub
-- [x] T004 [P] ´´½¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` Õ¼Î»¹Ç¼Ü£ºApiController + Route("JellyfinSuite/FrameExport") + AllowAnonymous + ¹¹Ôìº¯Êı DI
-- [x] T005 [P] ´´½¨ `src/JellyfinSuite.Plugin/Models/FrameExportDto.cs`£º¶¨Òå GenerateRequest¡¢GenerateResponse¡¢TaskProgress¡¢FrameQualityMeta µÈ DTO Àà
-- [x] T006 [P] °²×° @alivecss/aliveui£º`cd src/player-enhancer && npm install @alivecss/aliveui`£¬È·ÈÏ `package.json` ÓĞÒÀÀµ¼ÇÂ¼
-- [x] T007 ¸üĞÂ `Makefile`£ºĞÂÔö build-frame-forge target£¨Docker ubuntu:24.04 + libopencv-dev + ffmpeg dev libs + cargo build --release ¡ú cp µ½ Plugin Ä¿Â¼£©¡¢build ÒÀÀµ¼Ó build-frame-forge¡¢update ×·¼Ó docker cp¡¢test-rust ×·¼Ó cd src/frame-forge && cargo test
-- [x] T008 [P] ¸üĞÂ `.github/workflows/build.yml`£ºCache Rust build workspaces ¼Ó src/frame-forge¡¢ĞÂÔö apt install libopencv-dev libavcodec-dev... ²½Öè¡¢test-rust ÓÉ Makefile ×Ô¶¯¸²¸Ç
-- [x] T009 [P] ¸üĞÂ `.github/workflows/release.yml`£ºCache Rust build workspaces ¼Ó src/frame-forge¡¢ĞÂÔö apt install libopencv-dev¡¢ĞÂÔö Build frame-forge (Linux x64) ²½Öè£¨cargo build --release£©¡¢Copy binaries ²½Öè¼Ó frame-forge-linux-x64¡¢zip ´ò°ü¼Ó frame-forge-linux-x64
-- [x] T010 ÔÚ `src/JellyfinSuite.Plugin/PluginServiceRegistrator.cs` ×¢²á FrameExportService Îªµ¥Àı
+- [x] T001 åˆ›å»º `src/frame-forge/Cargo.toml`ï¼Œpackage `frame-forge` edition 2021ï¼Œä¾èµ–ï¼štokio(full)ã€ffmpeg-next(codec+format+software-scaling)ã€imageã€imageprocã€lruã€anyhowã€gifã€webpã€serdeã€serde_jsonã€opencvã€rustfft
+- [x] T002 åˆ›å»º `src/frame-forge/src/main.rs` å ä½è„šæ‰‹æ¶ï¼ŒåŒ…å« `tokio::main`ï¼Œ`cargo check` é€šè¿‡å³å¯
+- [x] T003 [P] åˆ›å»º `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å ä½è„šæ‰‹æ¶ï¼šå‘½åç©ºé—´ + IDisposable + Unix socket è·¯å¾„å¸¸é‡ + StartAsync/StopAsync stub
+- [x] T004 [P] åˆ›å»º `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å ä½è„šæ‰‹æ¶ï¼šApiController + Route("JellyfinSuite/FrameExport") + AllowAnonymous + æ„é€ å‡½æ•° DI
+- [x] T005 [P] åˆ›å»º `src/JellyfinSuite.Plugin/Models/FrameExportDto.cs`ï¼Œå®šä¹‰ GenerateRequestã€GenerateResponseã€TaskProgressã€FrameQualityMeta ç­‰ DTO ç±»
+- [x] T006 [P] å®‰è£… @alivecss/aliveuiï¼Œ`cd src/player-enhancer && npm install @alivecss/aliveui`ï¼Œç¡®è®¤ `package.json` ä¾èµ–é¡¹å·²è®°å½•
+- [x] T007 æ›´æ–° `Makefile`ï¼Œæ·»åŠ  build-frame-forge targetï¼šDocker ubuntu:24.04 + libopencv-dev + ffmpeg dev libs + cargo build --release å cp åˆ° Plugin ç›®å½•ï¼›build ä¾èµ–æ·»åŠ  build-frame-forgeï¼Œupdate è¿½åŠ  docker cpï¼Œtest-rust è¿½åŠ  cd src/frame-forge && cargo test
+- [x] T008 [P] æ›´æ–° `.github/workflows/build.yml`ï¼šCache Rust build workspaces è‡³ src/frame-forgeï¼Œæ·»åŠ  apt install libopencv-dev libavcodec-dev... æ­¥éª¤ã€test-rust ç”± Makefile è‡ªåŠ¨è°ƒç”¨
+- [x] T009 [P] æ›´æ–° `.github/workflows/release.yml`ï¼šCache Rust build workspaces è‡³ src/frame-forgeï¼Œæ·»åŠ  apt install libopencv-dev æ­¥éª¤ã€Build frame-forge (Linux x64) æ­¥éª¤ï¼ˆcargo build --releaseï¼‰ã€Copy binaries è¾“å‡ºä¸º frame-forge-linux-x64ã€zip å‹ç¼©ä¸º frame-forge-linux-x64
+- [x] T010 åœ¨ `src/JellyfinSuite.Plugin/PluginServiceRegistrator.cs` æ³¨å†Œ FrameExportService ä¸ºå•ä¾‹
 
-**Checkpoint**: `make build-frame-forge` ²ú³ö¶ş½øÖÆ£»CI build.yml ÂÌ£»release.yml zip º¬ frame-forge-linux-x64
-
----
-
-## Phase 2: Foundational ¡ª Rust daemon ºËĞÄ + C# Í¨ĞÅ²ã + Ç°¶ËÈë¿Ú
-
-**Purpose**: ÊµÏÖ Rust daemon µÄ Unix socket ·şÎñ¡¢Ğ­ÒéÖ¡½âÎö¡¢µ¥Ö¡½âÂë+ÖÊÁ¿¼ì²âÁ÷Ë®Ïß£»C# ½ø³Ì¹ÜÀíÓë socket Á¬½Ó£»Ç°¶Ë injector ×¢ÈëÖ¡µ¼³ö°´Å¥µ½ OSD¡£
-
-**?? CRITICAL**: ËùÓĞ User Story ÒÀÀµ´Ë Phase Íê³É¡£
-
-### Rust ¡ª Socket + Ğ­Òé + µ¥Ö¡½âÂë
-
-- [x] T011 ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ Unix socket ·şÎñ¶Ë£¨`tokio::net::UnixListener`£©£»socket Â·¾¶ÓÉÃüÁîĞĞ²ÎÊı´«Èë£»Æô¶¯Ê±µ÷ÓÃ `opencv::core::ocl::haveOpenCL()` ¼ì²â GPU ¿ÉÓÃĞÔ²¢ÉèÖÃÈ«¾Ö flag£¨ÓÃÓÚºóĞø Warp/Blending ½×¶Î¾ö²ß£©
-- [x] T011b [P] ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ `FrameCache` ½á¹¹Ìå£º`LruCache<(PathBuf, i64), Arc<DynamicImage>>`£¨100 ÌõÉÏÏŞ£©£¬key=(canonical_path, pos_ms/500*500)£»±©Â¶ `fn get_or_insert(path, pos_ms) -> Arc<DynamicImage>`£¬ÄÚ²¿Ëø±£»¤£¬¹© handle_animate/handle_stitch ¹²ÏíÊ¹ÓÃ
-- [x] T012 [P] ÔÚ `src/frame-forge/src/protocol.rs` ÊµÏÖ¶ş½øÖÆĞ­ÒéÖ¡¶ÁĞ´º¯Êı£º`read_msg_type`¡¢`read_single_frame_req`¡¢`read_animate_req`¡¢`read_stitch_req`¡¢`write_jpeg_response`¡¢`write_progress_event`£¨²Î¿¼ seek-preview `protocol.rs` Ä£Ê½£©
-- [x] T013 [P] ÔÚ `src/frame-forge/src/decoder.rs` ´Ó seek-preview µÄ `decoder.rs` ¸´ÖÆ/ÊÊÅäºËĞÄÂß¼­£ºffmpeg-next ´ò¿ªÎÄ¼ş + ¶¨Î»¹Ø¼üÖ¡ + ½âÂëÎª RGB + width=0 ·µ»ØÔ­Í¼ / width>0 ÓÃ Lanczos3 Ëõ·Å + JPEG ±àÂë
-- [x] T014 [P] ÔÚ `src/frame-forge/src/quality.rs` ÊµÏÖÖ¡ÖÊÁ¿¼ì²â£ºÁÁ¶ÈÖ±·½Í¼·½²î£¨ºÚ/°×Ö¡£©¡¢3x3 Laplacian ·½²î£¨Ä£ºıÖ¡£©¡¢Ö¡¼äÏñËØ²îÒì±È£¨×ª³¡¼ì²â£©£»·µ»Ø `QualityFlags` bitmask + ÎÄ×Ö±êÇ©
-- [x] T015 ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ `handle_single_frame` ÇëÇó´¦Àí£º½âÂë(Ô­Í¼»òËõÂÔÍ¼) ¡ú ÖÊÁ¿¼ì²â ¡ú ·µ»Ø JPEG + quality_flags
-- [x] T016 [P] ÔÚ `src/frame-forge/src/resources.rs` ÊµÏÖ CPU/ÄÚ´æ¼à¿Ø£º¶ÁÈ¡ `/proc/stat` + `/proc/meminfo` ¡ú ¼ÆËã CPU Ê¹ÓÃÂÊºÍ¿ÉÓÃÄÚ´æ°Ù·Ö±È£»±©Â¶ `fn resource_pressure() -> f64` (0=¿ÕÏĞ, 1=±¥ºÍ)
-
-### C# ¡ª ½ø³Ì¹ÜÀí + Socket Á¬½Ó
-
-- [x] T017 ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` ÊµÏÖ½ø³Ì¹ÜÀí£º$env:SPECIFY_FEATURE = "009-frame-forge-stitch" ; StartAsync Æô¶¯ frame-forge-linux-x64 ×Ó½ø³Ì£¨Process.Start + Unix socket Â·¾¶²ÎÊı£©¡¢StopAsync ÓÅÑÅ¹Ø±Õ¡¢½ø³ÌÍË³öÊ± 3s ºó×Ô¶¯ÖØÁ¬
-- [x] T018 ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` ÊµÏÖ Unix socket Á¬½Ó£º`Socket(AddressFamily.Unix)` + `SemaphoreSlim(1,1)` ±£»¤Ğ´Èë + `ReceiveBytesAsync` ¾«È·¶ÁÈ¡ÏìÓ¦
-- [x] T019 ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` ÊµÏÖ `GetFrameAsync(string filePath, long posMs, int width, Guid itemId, CancellationToken ct)` ¡ú ·¢ËÍ 0x10 SINGLE_FRAME ÇëÇó ¡ú ·µ»Ø `(byte[] jpeg, QualityFlags flags)`
-
-### Ç°¶Ë ¡ª OSD °´Å¥×¢Èë
-
-- [x] T020 ÔÚ `src/player-enhancer/src/icons.ts` ĞÂÔöÖ¡µ¼³ö°´Å¥ SVG Í¼±ê `ICON_FRAME_EXPORT`£¨½¨ÒéÓÃ½ºÆ¬¸ñ»òÍø¸ñÍ¼±ê£©
-- [x] T021 ĞŞ¸Ä `src/player-enhancer/src/injector.ts`£ºÔÚ `injectPlayerButtons` ÖĞĞÂÔöÖ¡µ¼³ö°´Å¥£¨¸½ÔÚ½ØÍ¼°´Å¥ºó·½£©£¬°ó¶¨ click ¡ú ´ò¿ªÖ¡µ¼³ö Modal£¨Ô¤Áô `openFrameExportModal()` stub£¬¾ßÌåÊµÏÖÔÚ US1 ÈÎÎñ£©
-- [x] T022 ĞŞ¸Ä `src/player-enhancer/src/styles.ts`£ºÈ«Á¿Ç¨ÒÆµ½ @alivecss/aliveui CSS ¿ò¼Ü¡ª¡ªÉ¾³ıËùÓĞ×Ô¶¨Òå CSS£¬¸ÄÎª `import '@alivecss/aliveui/css'` + ÒıÈë @alivecss/aliveui Ö÷Ìâ±äÁ¿£»±£Áô CSS ×¢ÈëÈë¿Úº¯Êı `injectStyles()`
-
-**Checkpoint**: `GET /JellyfinSuite/FrameExport/{itemId}?positionMs=5000&width=320` ·µ»Ø JPEG ËõÂÔÍ¼£»OSD À¸³öÏÖĞÂ°´Å¥£»`styles.ts` Ê¹ÓÃ @alivecss/aliveui
+**Checkpoint**: `make build-frame-forge` æ„å»ºæˆåŠŸå¯æ‰§è¡Œï¼ŒCI build.yml è¿‡ï¼Œrelease.yml zip å« frame-forge-linux-x64
 
 ---
 
-## Phase 3: User Story 1 ¡ª ´ò¿ªÖ¡Ñ¡ÔñÆ÷ (Priority: P1) ?? MVP
+## Phase 2: Foundational â€” Rust daemon å®ç° + C# é€šä¿¡å±‚ + å‰ç«¯æ³¨å†Œ
 
-**Goal**: ÓÃ»§µã»÷"Ö¡µ¼³ö"°´Å¥ºóµ¯³ö Modal£¬ÒÔÍø¸ñĞÎÊ½Õ¹Ê¾µ±Ç°²¥·Å½ø¶ÈÇ°ºó 11 Ö¡ËõÂÔÍ¼¡£
+**Purpose**: å®ç° Rust daemon çš„ Unix socket ç›‘å¬åè®®ã€å¸§ç¼“å­˜ã€è§£ç å™¨ã€è´¨é‡æ£€æµ‹+èµ„æºç›‘æ§æµæ°´çº¿ï¼ŒC# è¿›ç¨‹ç®¡ç†ä¸ socket è¿æ¥ï¼Œå‰ç«¯ injector æ³¨å†Œå¸§å¯¼å‡ºæŒ‰é’®åˆ° OSDã€‚
 
-**Independent Test**: ²¥·ÅÈÎÒâÊÓÆµ£¬µã»÷"Ö¡µ¼³ö"°´Å¥£¬Modal µ¯³ö²¢ÏÔÊ¾ËõÂÔÍ¼Íø¸ñ£¬µã»÷ÕÚÕÖ¹Ø±Õ¡£
+**?? CRITICAL**: è¦†ç›–å…¨éƒ¨ User Story æ‰€éœ€çš„ Phase å®Œæˆã€‚
+
+### Rust â€” Socket + åè®® + å¸§ç¼“å­˜
+
+- [x] T011 åœ¨ `src/frame-forge/src/main.rs` å®ç° Unix socket ç›‘å¬å™¨ï¼š`tokio::net::UnixListener`ï¼Œsocket è·¯å¾„å¯é…ç½®ï¼Œå¹¶å‘è¿æ¥æ— é™åˆ¶ï¼›å¯åŠ¨æ—¶æ£€æµ‹ `opencv::core::ocl::haveOpenCL()` åˆ¤æ–­ GPU å¯ç”¨æ€§å¹¶è®°å½• flagï¼Œåœ¨åç»­ Warp/Blending é˜¶æ®µç”¨åˆ°
+- [x] T011b [P] åœ¨ `src/frame-forge/src/main.rs` å®ç° `FrameCache` ç»“æ„ä½“ï¼š`LruCache<(PathBuf, i64), Arc<DynamicImage>>`ï¼Œä¸Šé™ 100 é¡¹ï¼Œkey=(canonical_path, pos_ms/500*500)ï¼Œæš´éœ² `fn get_or_insert(path, pos_ms) -> Arc<DynamicImage>`ï¼Œåœ¨å¸§è§£ç åä¾› handle_animate/handle_stitch å¤ç”¨ä½¿ç”¨
+- [x] T012 [P] åœ¨ `src/frame-forge/src/protocol.rs` å®ç°è¯»å†™åè®®å¸§çš„å‡½æ•°ï¼š`read_msg_type`ã€`read_single_frame_req`ã€`read_animate_req`ã€`read_stitch_req`ã€`write_jpeg_response`ã€`write_progress_event`ï¼Œå‚è€ƒ seek-preview `protocol.rs` æ¨¡å¼
+- [x] T013 [P] åœ¨ `src/frame-forge/src/decoder.rs` å°† seek-preview çš„ `decoder.rs` å¤åˆ¶/æ”¹é€ ä¸ºè§£ç é€»è¾‘ï¼šffmpeg-next æ‰“å¼€æ–‡ä»¶ + å®šä½å…³é”®å¸§ + è§£ç ä¸º RGB + width=0 è¿”å›åŸå›¾ / width>0 ç”¨ Lanczos3 ç¼©æ”¾ + JPEG ç¼–ç 
+- [x] T014 [P] åœ¨ `src/frame-forge/src/quality.rs` å®ç°å¸§è´¨é‡æ£€æµ‹ï¼šæ£€æµ‹ç›´æ–¹å›¾å‡å€¼/æ–¹å·®ï¼ˆçº¯é»‘/çº¯ç™½å¸§ï¼‰ï¼Œ3x3 Laplacian æ–¹å·®æ¨¡ç³Šï¼Œå¸§é—´ç›¸ä¼¼åº¦/é‡å¤å¸§æ£€æµ‹ï¼ˆè½¬ç°åº¦ï¼‰ï¼Œè¾“å‡º `QualityFlags` bitmask + å¯è¯»æ ‡ç­¾
+- [x] T015 åœ¨ `src/frame-forge/src/main.rs` å®ç° `handle_single_frame` å‡½æ•°ï¼šè¯»å–è¯·æ±‚ï¼ˆåŸå›¾/ç¼©ç•¥å›¾ï¼‰å è°ƒç”¨è§£ç å™¨ å å†™å…¥ JPEG + quality_flags
+- [x] T016 [P] åœ¨ `src/frame-forge/src/resources.rs` å®ç° CPU/å†…å­˜è´Ÿè½½ï¼šè¯»å– `/proc/stat` + `/proc/meminfo` è®¡ç®— CPU ä½¿ç”¨ç‡å’Œå¯ç”¨å†…å­˜ç™¾åˆ†æ¯”ï¼Œæš´éœ² `fn resource_pressure() -> f64` (0=ç©ºé—², 1=æ»¡è½½)
+
+### C# â€” è¿›ç¨‹ç®¡ç† + Socket è¿æ¥
+
+- [x] T017 åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å®ç°è¿›ç¨‹ç®¡ç†ï¼šStartAsync å¯åŠ¨ frame-forge-linux-x64 å­è¿›ç¨‹ï¼ˆProcess.Start + Unix socket è·¯å¾„ä¼ å‚ï¼‰ï¼ŒStopAsync å‘ä¿¡å…³é—­ï¼Œè¿›ç¨‹é€€å‡ºæ—¶ 3s åè‡ªåŠ¨é‡å¯
+- [x] T018 åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å®ç° Unix socket è¿æ¥ï¼š`Socket(AddressFamily.Unix)` + `SemaphoreSlim(1,1)` ä¿æŠ¤è¯»å†™ + `ReceiveBytesAsync` ç¡®ä¿å®Œæ•´è¯»å–å“åº”
+- [x] T019 åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å®ç° `GetFrameAsync(string filePath, long posMs, int width, Guid itemId, CancellationToken ct)` ä»¥ å‘é€ 0x10 SINGLE_FRAME è¯·æ±‚ å è¿”å› `(byte[] jpeg, QualityFlags flags)`
+
+### å‰ç«¯ â€” OSD æŒ‰é’®æ³¨å†Œ
+
+- [x] T020 åœ¨ `src/player-enhancer/src/icons.ts` æ·»åŠ å¸§å¯¼å‡ºæŒ‰é’® SVG å›¾æ ‡ `ICON_FRAME_EXPORT`ï¼ˆå†…å®¹ä¸ºèƒ¶ç‰‡å‰ªè¾‘ç±»å›¾æ ‡ï¼‰
+- [x] T021 ä¿®æ”¹ `src/player-enhancer/src/injector.ts`ï¼Œåœ¨ `injectPlayerButtons` æ·»åŠ å¸§å¯¼å‡ºæŒ‰é’®ï¼ˆä½äºæˆªå›¾æŒ‰é’®åæ–¹ï¼‰ï¼Œç»‘å®š click åˆ° æ‰“å¼€å¸§å¯¼å‡º Modalï¼Œé¢„ç•™ `openFrameExportModal()` stubï¼Œä¾›åç»­ US1 å®ç°
+- [x] T022 ä¿®æ”¹ `src/player-enhancer/src/styles.ts`ï¼Œå…¨é‡è¿ç§»åˆ° @alivecss/aliveui CSS æ¡†æ¶ï¼Œåˆ é™¤åŸæœ‰è‡ªå®šä¹‰ CSSï¼Œæ”¹ä¸º `import '@alivecss/aliveui/css'` + ä¿ç•™ @alivecss/aliveui æ— æ³•è¦†ç›–çš„ CSS æ³¨å…¥å‡½æ•° `injectStyles()`
+
+**Checkpoint**: `GET /JellyfinSuite/FrameExport/{itemId}?positionMs=5000&width=320` è¿”å› JPEG ç¼©ç•¥å›¾ï¼ŒOSD æ’­æ”¾å™¨ä¸‹æ–¹æŒ‰é’®æ˜¾ç¤ºï¼Œ`styles.ts` ä½¿ç”¨ @alivecss/aliveui
+
+---
+
+## Phase 3: User Story 1 â€” å¸§é€‰æ‹©å™¨ Modal (Priority: P1) ?? MVP
+
+**Goal**: ç”¨æˆ·ç‚¹å‡»"å¸§å¯¼å‡º"æŒ‰é’®åå¼¹å‡º Modalï¼Œä»¥ç½‘æ ¼å½¢å¼å±•ç¤ºå½“å‰æ’­æ”¾ä½ç½®å‰å 11 å¸§ç¼©ç•¥å›¾ã€‚
+
+**Independent Test**: åœ¨æ’­æ”¾è§†é¢‘æ—¶ç‚¹å‡»"å¸§å¯¼å‡º"æŒ‰é’®ï¼ŒModal å¼¹å‡ºå¹¶æ˜¾ç¤ºç¼©ç•¥å›¾åˆ—è¡¨ï¼Œç‚¹å‡»å…³é—­å¯å…³é—­ã€‚
 
 ### Implementation
 
-- [x] T023 [P] [US1] ÔÚ `src/player-enhancer/src/frame-forge.ts` ´´½¨ Modal ÈİÆ÷¿Ç£ºbody-level ¹Ì¶¨¶¨Î» + ÕÚÕÖ + @alivecss/aliveui modal ÑùÊ½ + ´ò¿ª/¹Ø±Õº¯Êı `openFrameExportModal()` / `closeFrameExportModal()` + ¹Ø±ÕÊ±ÔİÍ£ÊÓÆµ£¨¿ÉÇĞ»»Îª²»ÔİÍ££©
-- [x] T024 [P] [US1] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖµ¥Ö¡ËõÂÔÍ¼¶Ëµã£º`GET /FrameExport/{itemId}?positionMs=N&width=320` ¡ú µ÷ `_service.GetFrameAsync()` ¡ú `File(jpeg, "image/jpeg")` + `Response.Headers["X-Frame-Quality"]` ·µ»ØÖÊÁ¿ÔªÊı¾İ JSON
-- [x] T025 [US1] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖ³õÊ¼Ö¡¼ÓÔØ£º¼ÆËãµ±Ç°²¥·Å½ø¶ÈÇ°ºó 5 Ö¡µÄÊ±¼ä´ÁÁĞ±í ¡ú Promise.all fetch ËõÂÔÍ¼ ¡ú äÖÈ¾Íø¸ñ
-- [x] T026 [P] [US1] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖÍø¸ñäÖÈ¾º¯Êı£º»îÓÃ @alivecss/aliveui grid Àà (`grid grid-cols-4 gap-2` µÈ) + Ã¿¸ñÄÚº¬ `<img>` + Ê±¼ä´Á±êÇ©ÎÄ×Ö
-- [x] T027 [US1] ÔÚ `src/player-enhancer/src/injector.ts` µÄÖ¡µ¼³ö°´Å¥ click handler µ÷ÓÃ `openFrameExportModal()`£º´«Èë videoEl¡¢getItemId()¡¢getServerAddress()¡¢getRawToken()
-- [x] T028 [US1] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ±ß½ç´¦Àí£ºitemId ²»´æÔÚ/ÎŞ±¾µØÎÄ¼ş ¡ú 404£»daemon ²»¿ÉÓÃ ¡ú 503
-- [x] T029 [US1] ĞŞ¸Ä `src/player-enhancer/src/i18n.ts`£ºĞÂÔö US1 Ïà¹Ø i18n key£¨zh/ja/en£©£º`frameExport.title`¡¢`frameExport.close`¡¢`frameExport.loading`
+- [x] T023 [P] [US1] åœ¨ `src/player-enhancer/src/frame-forge.ts` åˆ›å»º Modal å®¹å™¨ç»“æ„ï¼šbody-level å›ºå®šå®šä½ + é®ç½© + @alivecss/aliveui modal æ ·å¼ + æ‰“å¼€/å…³é—­å‡½æ•° `openFrameExportModal()` / `closeFrameExportModal()` + å…³é—­æ—¶æš‚åœè§†é¢‘å¹¶åˆ‡æ¢ä¸ºæš‚åœçŠ¶æ€
+- [x] T024 [P] [US1] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç°å•å¸§ç¼©ç•¥å›¾ç«¯ç‚¹ï¼š`GET /FrameExport/{itemId}?positionMs=N&width=320` å è°ƒç”¨ `_service.GetFrameAsync()` å `File(jpeg, "image/jpeg")` + `Response.Headers["X-Frame-Quality"]` å«è´¨é‡å…ƒæ•°æ® JSON
+- [x] T025 [US1] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°åˆå§‹å¸§åŠ è½½ï¼šè®¡ç®—å½“å‰æ’­æ”¾ä½ç½®å‰å 5 å¸§æ—¶é—´é—´éš”åˆ—è¡¨ å Promise.all fetch ç¼©ç•¥å›¾ å æ¸²æŸ“ç½‘æ ¼
+- [x] T026 [P] [US1] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°ç½‘æ ¼æ¸²æŸ“ï¼šä½¿ç”¨ @alivecss/aliveui grid ç±»ï¼ˆ`grid grid-cols-4 gap-2` ç­‰ï¼‰+ æ¯æ ¼åŒ…å« `<img>` + æ—¶é—´æˆ³æ ‡ç­¾æ˜¾ç¤º
+- [x] T027 [US1] åœ¨ `src/player-enhancer/src/injector.ts` å°†å¸§å¯¼å‡ºæŒ‰é’® click handler ç»‘å®šåˆ° `openFrameExportModal()`ï¼Œä¼ å…¥ videoElã€getItemId()ã€getServerAddress()ã€getRawToken()
+- [x] T028 [US1] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç°è¾¹ç•Œå¤„ç†ï¼šitemId ä¸å­˜åœ¨/æ— æƒé™/æ–‡ä»¶ä¸å­˜åœ¨ è¿”å› 404ï¼Œdaemon ä¸å¯ç”¨ è¿”å› 503
+- [x] T029 [US1] ä¿®æ”¹ `src/player-enhancer/src/i18n.ts`ï¼Œè¡¥å…… US1 ç›¸å…³ i18n keyï¼ˆzh/ja/enï¼‰ï¼š`frameExport.title`ã€`frameExport.close`ã€`frameExport.loading`
 
-**Checkpoint**: Ö¡Ñ¡ÔñÆ÷ Modal ¿É´ò¿ª¡¢¼ÓÔØ 11 Ö¡ËõÂÔÍ¼¡¢¿É¹Ø±Õ£»¶Ëµã 404/503 ÕıÈ·´¦Àí
+**Checkpoint**: å¸§é€‰æ‹©å™¨ Modal å¯æ‰“å¼€ã€æ˜¾ç¤º 11 å¸§ç¼©ç•¥å›¾ã€å¯å…³é—­ï¼Œç«¯ç‚¹ 404/503 æ­£ç¡®å“åº”
 
 ---
 
-## Phase 4: User Story 2 ¡ª À©Õ¹»ñÈ¡¸ü¶à¹Ø¼üÖ¡ (Priority: P1)
+## Phase 4: User Story 2 â€” æ‰©å±•è·å–æ›´å¤šå…³é”®å¸§ (Priority: P1)
 
-**Goal**: Ö¡Ñ¡ÔñÆ÷ÖĞ"ÏòÇ°"ºÍ"Ïòºó"°´Å¥¿É×·¼Ó¸ü¶àÖ¡ËõÂÔÍ¼¡£
+**Goal**: å¸§é€‰æ‹©å™¨å†…"å‘å‰"/"å‘å"æŒ‰é’®ï¼Œè¿½åŠ æ›´å¤šå¸§ç¼©ç•¥å›¾ã€‚
 
-**Independent Test**: ÔÚÖ¡Ñ¡ÔñÆ÷ÖĞµã»÷"ÏòÇ°À©Õ¹"°´Å¥£¬½çÃæ×·¼Ó 10 Ö¡ËõÂÔÍ¼£»µã»÷"ÏòºóÀ©Õ¹"Í¬Àí£»µ½´ï±ß½çÊ±°´Å¥½ûÓÃ¡£
+**Independent Test**: åœ¨å¸§é€‰æ‹©å™¨å†…ç‚¹å‡»"å‘å‰æ‰©å±•"æŒ‰é’®ï¼Œèƒ½è¿½åŠ  10 å¸§ç¼©ç•¥å›¾ï¼›ç‚¹å‡»"å‘åæ‰©å±•"åŒç†ï¼›åˆ°è¾¾è¾¹ç•Œæ—¶æŒ‰é’®ç¦ç”¨ã€‚
 
 ### Implementation
 
-- [x] T030 [P] [US2] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖ"ÏòÇ°"/"Ïòºó"Á½¸öÀ©Õ¹°´Å¥£¨@alivecss/aliveui btn ÑùÊ½ + ¼ıÍ·Í¼±ê£©£¬¼ÓÔØÖĞÏÔÊ¾ spinner + disabled
-- [x] T031 [US2] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖÀ©Õ¹Âß¼­£ºÎ¬»¤µ±Ç°ÏÔÊ¾Ö¡·¶Î§ `[minPosMs, maxPosMs]` ¡ú µã»÷À©Õ¹Ê±¼ÆËãĞÂ·¶Î§£¨Æ«ÒÆ N¡ÁM Ö¡¼ä¸ô£©¡ú fetch ĞÂÖ¡ ¡ú append µ½Íø¸ñÍ·²¿»òÎ²²¿ + ¹ö¶¯µ½ĞÂÔöÎ»ÖÃ
-- [x] T032 [US2] ÊµÏÖÇëÇóºÏ²¢£¨debounce 300ms£©£º¿ìËÙÁ¬Ğøµã»÷À©Õ¹Ê±Ö»·¢ËÍ×îºóÒ»´ÎÇëÇó£¬±ÜÃâ DDOS ºó¶Ë
-- [x] T033 [US2] ÊµÏÖ±ß½ç¼ì²â£ºvideoTime=0 Ê±½ûÓÃ"ÏòÇ°"°´Å¥£»videoTime¡İduration Ê±½ûÓÃ"Ïòºó"°´Å¥£»°´Å¥ÎÄ×Ö±ä»Ò + ÌáÊ¾ÎÄ×Ö£¨Èç"ÒÑµ½´ïÊÓÆµ¿ªÍ·"£©
+- [x] T030 [P] [US2] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°"å‘å‰"/"å‘å"æ–¹å‘æ‰©å±•æŒ‰é’®ï¼ˆ@alivecss/aliveui btn æ ·å¼ + ç®­å¤´å›¾æ ‡ï¼‰ï¼ŒåŠ è½½æ—¶æ˜¾ç¤º spinner + disabled
+- [x] T031 [US2] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°æ‰©å±•é€»è¾‘ï¼šç»´æŠ¤å½“å‰æ˜¾ç¤ºå¸§èŒƒå›´ `[minPosMs, maxPosMs]` å æ¯æ¬¡æ‰©å±•æ—¶è®¡ç®—æ–°èŒƒå›´ã€åç§» N æ­¥/M å¸§ï¼Œæ‰¹é‡ fetch æ–°å¸§ å append åˆ°ç½‘æ ¼å¤´éƒ¨/å°¾éƒ¨ + æ›´æ–°èŒƒå›´è¾¹ç•Œä½ç½®
+- [x] T032 [US2] å®ç°æ‰©å±•é˜²æŠ–ï¼šdebounce 300msï¼Œå¿«é€Ÿè¿ç»­ç‚¹å‡»æ—¶åªè§¦å‘æœ€åä¸€æ¬¡è¯·æ±‚ï¼Œé˜²æ­¢ DDOS é£é™©
+- [x] T033 [US2] å®ç°è¾¹ç•Œæ£€æµ‹ï¼švideoTime=0 æ—¶ç¦ç”¨"å‘å‰"æŒ‰é’®ï¼ŒvideoTimeâ‰¥duration æ—¶ç¦ç”¨"å‘å"æŒ‰é’®ï¼ŒæŒ‰é’®ç¦ç”¨æ ·å¼ + æ˜¾ç¤ºæç¤ºæ–‡å­—ï¼ˆå¦‚"å·²åˆ°è¾¾è§†é¢‘å¤´"ï¼‰
 
-**Checkpoint**: ¿É×ÔÓÉÇ°ºóä¯ÀÀÊÓÆµ¹Ø¼üÖ¡£¬±ß½ç´¦ÀíÕıÈ·
+**Checkpoint**: æ‰©å±•å‘å‰å‘åå‡å¯ï¼Œè¾¹ç•Œå¤„ç†æ­£ç¡®
 
 ---
 
-## Phase 5: User Story 3 ¡ª Ö¡Ñ¡ÔñÓëÔ¤ÀÀ (Priority: P1)
+## Phase 5: User Story 3 â€” å¸§é€‰æ‹©ä¸é¢„è§ˆ (Priority: P1)
 
-**Goal**: Ã¿Ö¡ËõÂÔÍ¼ÓĞ checkbox£¨Ä¬ÈÏ¹´Ñ¡£©£¬À¬»øÖ¡×Ô¶¯È¡Ïû¹´Ñ¡²¢±ê¼Ç£¬µ×²¿ÏÔÊ¾ÒÑÑ¡Ö¡Êı¡£
+**Goal**: æ¯å¸§ç¼©ç•¥å›¾æœ‰ checkboxï¼ˆé»˜è®¤å‹¾é€‰ï¼‰ï¼Œåƒåœ¾å¸§è‡ªåŠ¨å–æ¶ˆå‹¾é€‰ï¼Œåº•éƒ¨æ˜¾ç¤ºå·²é€‰å¸§æ•°é‡ã€‚
 
-**Independent Test**: È¡Ïû²¿·ÖÖ¡¹´Ñ¡£¬µ×²¿¼ÆÊı¸üĞÂ£¬¹´Ñ¡»Ö¸´£»µã»÷ËõÂÔÍ¼·Å´óÔ¤ÀÀ¡£
+**Independent Test**: å–æ¶ˆå‹¾é€‰æŸå¸§ã€å‹¾é€‰åº•éƒ¨è®¡æ•°æ›´æ–°ï¼Œå…¨é€‰æ¢å¤ï¼Œç‚¹å‡»ç¼©ç•¥å›¾æ”¾å¤§é¢„è§ˆã€‚
 
 ### Implementation
 
-- [x] T034 [P] [US3] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÎªÃ¿Ö¡Ìí¼Ó checkbox£¨Ä¬ÈÏ checked£©¡ú onChange ¸üĞÂÑ¡ÖĞ×´Ì¬ + µ×²¿¹¤¾ßÀ¸¼ÆÊı `"ÒÑÑ¡ X/×ÜÊı Y Ö¡"`
-- [x] T035 [P] [US3] ÊµÏÖÖ¡µã»÷·Å´óÔ¤ÀÀ£ºµã»÷ËõÂÔÍ¼£¨·Ç checkbox ÇøÓò£©¡ú ÔÚÔ­Î»»ò lightbox ÖĞÕ¹Ê¾´óÍ¼£¨µ÷ GET ¶Ëµã width=0 »ñÈ¡Ô­Í¼£©+ ÏÔÊ¾Ê±¼ä´Á
-- [x] T036 [US3] ½âÎö `X-Frame-Quality` ÏìÓ¦Í·£º`isJunk=true` µÄÖ¡×Ô¶¯È¡Ïû¹´Ñ¡ ¡ú UI Ìí¼ÓºìÉ«±ß¿ò + ±êÇ©ÎÄ×Ö£¨Èç "ºÚÖ¡"/"Ä£ºıÖ¡"£©¡ú Í¸Ã÷¶È½µµÍ
-- [x] T037 [US3] ÊµÏÖÈ«Ñ¡/È«²»Ñ¡¿ì½İ²Ù×÷£ºµ×²¿¹¤¾ßÀ¸Ìí¼Ó"È«Ñ¡"/"È¡ÏûÈ«Ñ¡"Á´½Ó°´Å¥
+- [x] T034 [P] [US3] åœ¨ `src/player-enhancer/src/frame-forge.ts` ä¸ºæ¯å¸§æ·»åŠ  checkboxï¼ˆé»˜è®¤ checkedï¼‰ï¼Œç»‘å®š onChange æ›´æ–°é€‰ä¸­çŠ¶æ€ + åº•éƒ¨å®æ—¶æ›´æ–°è®¡æ•° `"å·²é€‰ X/å…±è®¡ Y å¸§"`
+- [x] T035 [P] [US3] å®ç°å¸§å›¾ç‰‡æ”¾å¤§é¢„è§ˆï¼šç‚¹å‡»ç¼©ç•¥å›¾ï¼ˆè€Œé checkbox åŒºåŸŸï¼‰å åœ¨åŸä½ lightbox å±•ç¤ºå¤§å›¾ï¼ˆè°ƒç”¨ GET ç«¯ç‚¹ width=0 è·å–åŸå›¾ï¼‰+ æ˜¾ç¤ºæ—¶é—´æˆ³
+- [x] T036 [US3] è¯»å– `X-Frame-Quality` å“åº”å¤´ï¼Œ`isJunk=true` çš„å¸§è‡ªåŠ¨å–æ¶ˆå‹¾é€‰ å UI æ·»åŠ çº¢è‰²è¾¹æ¡† + æ ‡ç­¾æ–‡å­—ï¼ˆå¦‚ "é»‘å¸§"/"æ¨¡ç³Šå¸§"ï¼‰ä¸” é€æ˜åº¦é™ä½
+- [x] T037 [US3] å®ç°å…¨é€‰/å…¨å–æ¶ˆæŒ‰é’®ï¼ˆåº•éƒ¨å·¥å…·æ ï¼‰ï¼š"å…¨é€‰"/"å–æ¶ˆå…¨é€‰"ä¸¤ä¸ªæŒ‰é’®
 
-**Checkpoint**: Ö¡Ñ¡ÔñÆ÷ MVP ¿É½»»¥¡ª¡ªä¯ÀÀ¡¢Ñ¡Ôñ¡¢Ô¤ÀÀÖ¡
-
----
-
-## Phase 6: User Story 4 ¡ª µ¼³ö¶¯»­ GIF/WebP (Priority: P2)
-
-**Goal**: ÓÃ»§ÅäÖÃ²ÎÊıºóµã»÷"Éú³É"£¬ºó¶ËÉú³É GIF/WebP ¶¯»­ÎÄ¼ş£¬Í¨¹ı SSE ±¨¸æ½ø¶È£¬³É¹ûÕ¹Ê¾ÔÚ Modal¡£
-
-**Independent Test**: Ñ¡ 3 Ö¡£¬Ä¬ÈÏ²ÎÊı£¬µã»÷Éú³É ¡ú SSE ½ø¶È ¡ú Modal Õ¹Ê¾¶¯»­Ô¤ÀÀ ¡ú ÏÂÔØÎÄ¼ş¡£
-
-### Rust ¡ª ¶¯»­±àÂë
-
-- [x] T038 [P] [US4] ÔÚ `src/frame-forge/src/animate.rs` ÊµÏÖ GIF ±àÂëº¯Êı `encode_gif(frames: Vec<DynamicImage>, fps: u16, loop_count: u16) -> Vec<u8>`£ºÊ¹ÓÃ `gif` crate ±àÂë£¬µ÷É«°åÁ¿»¯Îª 256 É«
-- [x] T039 [P] [US4] ÔÚ `src/frame-forge/src/animate.rs` ÊµÏÖ WebP ±àÂëº¯Êı `encode_webp_anim(frames: Vec<DynamicImage>, fps: u16, loop_count: u16) -> Vec<u8>`£ºÊ¹ÓÃ `webp` crate ¶¯»­±àÂë
-- [x] T040 [US4] ÔÚ `src/frame-forge/src/animate.rs` ÊµÏÖËõ·ÅÂß¼­£º¸ù¾İ `resizeMode`("width"/"height") + `customWidth/customHeight` »ò `resolutionPreset` ¡ú `image::imageops::resize`(Lanczos3) µÈ±ÈËõ·ÅÃ¿Ö¡
-- [x] T041 [US4] ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ `handle_animate` ÇëÇó£ºÖğÖ¡½âÂëÔ­Í¼(width=0) ¡ú ÖÊÁ¿¼ì²â(Ìø¹ı,½ö¼ÇÂ¼) ¡ú Ëõ·Å ¡ú push Ö¡»º³å ¡ú µ÷ÓÃ encode_xxx ¡ú Ã¿Ö¡Íê³ÉÍÆËÍ progress event ¡ú ×îÖÕ·µ»Ø±àÂë×Ö½Ú
-
-### C# ¡ª ÈÎÎñ¹ÜÀí + Éú³É¶Ëµã
-
-- [x] T042 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` ÊµÏÖÈÎÎñ×Öµä£º`ConcurrentDictionary<taskId, TaskState>` + ÈÎÎñ×´Ì¬Ã¶¾Ù (pending¡úrunning¡úcomplete/error/cancelled) + Ã¿ÈÎÎñ³ÖÓĞ `Channel<TaskProgress>` ÓÃÓÚ SSE ÇÅ½Ó
-- [x] T043 [US4] ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` ÊµÏÖ `SubmitAnimateTask(GenerateRequest req) -> taskId`£ºÉú³É UUID ¡ú ´´½¨ TaskState ¡ú Ğ´Èë `{tempDir}/{taskId}/` ¡ú ±éÀú frames µ÷ Rust GetFrameAsync »º´æÔ­Ê¼Ö¡µ½´ÅÅÌ ¡ú µ÷ Rust handle_animate ¡ú Ğ´ output ÎÄ¼ş ¡ú Éè status=complete
-- [x] T044 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ `POST /FrameExport/Generate` ¶Ëµã£ºÑéÖ¤ params£¨fps 1-30, ÖÁÉÙ 2 Ö¡£©¡ú `_service.SubmitAnimateTask()` ¡ú 202 { taskId }
-- [x] T045 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ `GET /FrameExport/Result/{taskId}/{filename}` ¶Ëµã£ºÎÄ¼ş´æÔÚÇÒ status=complete ¡ú File(bytes, content-type) + Content-Disposition ÏÂÔØÍ·
-- [x] T046 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ `DELETE /FrameExport/Result/{taskId}` ¶Ëµã£º`Directory.Delete(tempDir, recursive)` + ÒÆ³ı×Öµä¼ÇÂ¼ ¡ú 200
-- [x] T047 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ `POST /FrameExport/Cancel/{taskId}` ¶Ëµã£ºµ÷ Process.Kill() + WaitForExit(3000) + `rm -rf tempDir` + status=cancelled ¡ú 200
-- [x] T048 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` ÊµÏÖ 5 ·ÖÖÓ¶¨Ê±ÇåÀí£º`Timer` ¡ú ±éÀú×Öµä ¡ú createdAt+5min ¹ıÆÚ ¡ú `Directory.Delete(tempDir, recursive)` + ÒÆ³ı¼ÇÂ¼
-- [x] T049 [P] [US4] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ `GET /FrameExport/Health` ¶Ëµã£º·µ»Ø daemon ¿ÉÓÃ×´Ì¬ + »îÔ¾ÈÎÎñÊı + CPU/ÄÚ´æÊ¹ÓÃÂÊ
-
-**Checkpoint**: cURL ²âÊÔ Generate ¡ú Progress(SSE) ¡ú Result download È«Á÷³ÌÍ¨¹ı
+**Checkpoint**: å¸§é€‰æ‹©å™¨ MVP å®Œæˆï¼Œæ”¯æŒå‹¾é€‰ã€é¢„è§ˆå¸§
 
 ---
 
-## Phase 7: User Story 7 ¡ª SSE ½ø¶ÈÓë³É¹û¹ÜÀí (Priority: P2)
+## Phase 6: User Story 4 â€” åŠ¨å›¾å¯¼å‡º GIF/WebP (Priority: P2)
 
-**Goal**: Ç°¶ËÍ¨¹ı SSE ½ÓÊÕ½ø¶ÈÊÂ¼ş£¬Õ¹Ê¾½ø¶ÈÌõºÍ²½ÖèÎÄ×Ö£»Íê³Éºó×Ô¶¯Õ¹Ê¾³É¹ûÔ¤ÀÀ£¨¶¯»­Ñ­»·²¥·Å£©£¬³É¹ûÒ³Ìá¹©ÏÂÔØ/É¾³ı/·µ»Ø²Ù×÷¡£
+**Goal**: ç”¨æˆ·é…ç½®å‚æ•°å¹¶ç‚¹å‡»"å¯¼å‡º"ï¼Œç”Ÿæˆ GIF/WebP åŠ¨å›¾æ–‡ä»¶ï¼Œé€šè¿‡ SSE è·å–è¿›åº¦ï¼ŒæˆåŠŸå±•ç¤ºåœ¨ Modalã€‚
 
-**Independent Test**: µã»÷Éú³É ¡ú ½ø¶ÈÌõÖğ²½Ôö³¤ ¡ú Íê³Éºó×Ô¶¯Ìø³É¹ûÔ¤ÀÀ ¡ú µã»÷ÏÂÔØ»ñµÃÕıÈ·ÎÄ¼ş¡£
+**Independent Test**: é€‰ 3 å¸§ï¼Œé»˜è®¤å‚æ•°é…ç½®å¯¼å‡º å SSE è¿›åº¦æ›´æ–° å Modal å±•ç¤ºåŠ¨å›¾é¢„è§ˆ å ä¸‹è½½æ–‡ä»¶ã€‚
 
-### Ç°¶Ë ¡ª SSE + ½ø¶ÈÒ³ + ³É¹ûÒ³
+### Rust â€” åŠ¨å›¾ç¼–ç 
 
-- [x] T050 [P] [US7] ÔÚ `src/player-enhancer/src/frame-progress.ts` ÊµÏÖ SSE ½ø¶ÈÁ¬½Ó£º`new EventSource(url)` ¡ú `onmessage` ½âÎö JSON ¡ú ¸üĞÂ½ø¶È×´Ì¬£»`onerror` ×Ô¶¯ÖØÁ¬(×î¶à3´Î, ¼ä¸ô1s)
-- [x] T051 [US7] ÔÚ `src/player-enhancer/src/frame-progress.ts` ÊµÏÖ½ø¶È UI£º¶¥²¿½ø¶ÈÌõ(@alivecss/aliveui progress) + °Ù·Ö±ÈÎÄ×Ö + µ±Ç°²½ÖèÃèÊöÎÄ×Ö(phase¡úi18n Ó³Éä£º"decoding"¡ú"½âÂëÖĞ"¡¢"encoding"¡ú"±àÂëÖĞ"¡¢"matching"¡ú"ÌØÕ÷Æ¥ÅäÖĞ"µÈ)
-- [x] T052 [P] [US7] ÔÚ `src/player-enhancer/src/frame-result.ts` ÊµÏÖ³É¹ûÔ¤ÀÀÒ³£º¶¯»­ `<img>` ÔªËØ¼ÓÔØ resultUrl Ñ­»·²¥·Å£»È«¾°Í¼ `<img>` ÊÊÅäÈİÆ÷ + ÍÏ¶¯/Ëõ·Å£»ÏÔÊ¾ fileSize£¨¸ñÊ½»¯Îª KB/MB£©
-- [x] T053 [P] [US7] ÔÚ `src/player-enhancer/src/frame-result.ts` ÊµÏÖ"ÏÂÔØ"°´Å¥£º`window.open(resultUrl)` ´¥·¢ä¯ÀÀÆ÷ÏÂÔØ£»"É¾³ı"°´Å¥£º`DELETE /FrameExport/Result/{taskId}` ¡ú ÇåÀí³É¹¦ ¡ú ·µ»ØÍø¸ñÒ³£»"·µ»Ø"°´Å¥£ºµ÷ delete + ·µ»ØÍø¸ñÒ³
-- [x] T054 [US7] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖÒ³ÃæÇĞ»»Âß¼­£ºÍø¸ñÒ³ ¡ú Ìá½» Generate ¡ú ÇĞ»»µ½½ø¶ÈÒ³(T050+T051) ¡ú status=complete ¡ú ÇĞ»»µ½³É¹ûÒ³(T052+T053)
-- [x] T055 [US7] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ÊµÏÖ SSE ¶Ëµã£º`GET /FrameExport/Progress?taskId={uuid}` ¡ú `Response.ContentType = "text/event-stream"` ¡ú `ChannelReader.ReadAllAsync` ¡ú `"data: {json}\n\n"` ¡ú channel ¹Ø±ÕÊ±¶Ï¿ªÁ¬½Ó
+- [x] T038 [P] [US4] åœ¨ `src/frame-forge/src/animate.rs` å®ç° GIF ç¼–ç å‡½æ•° `encode_gif(frames: Vec<DynamicImage>, fps: u16, loop_count: u16) -> Vec<u8>`ï¼Œä½¿ç”¨ `gif` crate ç¼–ç ï¼Œé¢œè‰²é‡åŒ–ä¸º 256 è‰²
+- [x] T039 [P] [US4] åœ¨ `src/frame-forge/src/animate.rs` å®ç° WebP åŠ¨å›¾ç¼–ç å‡½æ•° `encode_webp_anim(frames: Vec<DynamicImage>, fps: u16, loop_count: u16) -> Vec<u8>`ï¼Œä½¿ç”¨ `webp` crate æ— æŸç¼–ç 
+- [x] T040 [US4] åœ¨ `src/frame-forge/src/animate.rs` å®ç°ç¼©æ”¾é¢„å¤„ç†é€»è¾‘ï¼šæ ¹æ® `resizeMode`("width"/"height") + `customWidth/customHeight` æˆ– `resolutionPreset` ç”¨ `image::imageops::resize`(Lanczos3) ç­‰æ¯”ç¼©æ”¾æ¯å¸§
+- [x] T041 [US4] åœ¨ `src/frame-forge/src/main.rs` å®ç° `handle_animate` å‡½æ•°ï¼šè¯»å–å¸§åˆ—è¡¨åŸå›¾(width=0) å ç¼©æ”¾é¢„å¤„ç†ï¼ˆè®°å½•æ—¥å¿—ï¼‰å æŒ‰åº push å¸§åˆ°æ•°ç»„ å è°ƒç”¨ encode_xxx å æ¯å¸§å¤„ç†åå‘é€ progress event å æœ€ç»ˆå‘å›ç»“æœå­—èŠ‚
 
-**Checkpoint**: ¶Ëµ½¶Ë SSE Á÷³Ì¡ª¡ªÌá½»ÈÎÎñ ¡ú ÊµÊ±½ø¶È ¡ú ³É¹ûÔ¤ÀÀ ¡ú ÏÂÔØ/É¾³ı/·µ»Ø
+### C# â€” ä»»åŠ¡ç®¡ç† + ç”Ÿæˆç«¯ç‚¹
+
+- [x] T042 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` å®ç°ä»»åŠ¡å­—å…¸ï¼š`ConcurrentDictionary<taskId, TaskState>` + ä»»åŠ¡çŠ¶æ€æšä¸¾ (pendingã€runningã€complete/error/cancelled) + æ¯ä»»åŠ¡ç‹¬ç«‹ `Channel<TaskProgress>` ä¾› SSE æ¶ˆè´¹
+- [x] T043 [US4] åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å®ç° `SubmitAnimateTask(GenerateRequest req) -> taskId`ï¼šç”Ÿæˆ UUID å åˆ›å»º TaskState å å†™å…¥ `{tempDir}/{taskId}/` å é€å¸§ frames ç”¨ Rust GetFrameAsync è·å–åŸå§‹å¸§æ•°æ® å è°ƒç”¨ Rust handle_animate å å†™ output æ–‡ä»¶ å è®¾ status=complete
+- [x] T044 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° `POST /FrameExport/Generate` ç«¯ç‚¹ï¼šéªŒè¯ paramsï¼ˆfps 1-30ï¼Œå¸§æ•° â‰¥ 2ï¼‰å `_service.SubmitAnimateTask()` å 202 { taskId }
+- [x] T045 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° `GET /FrameExport/Result/{taskId}/{filename}` ç«¯ç‚¹ï¼šæ–‡ä»¶å­˜åœ¨ä¸” status=complete å File(bytes, content-type) + Content-Disposition ä¸‹è½½å¤´
+- [x] T046 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° `DELETE /FrameExport/Result/{taskId}` ç«¯ç‚¹ï¼š`Directory.Delete(tempDir, recursive)` + ç§»é™¤å­—å…¸è®°å½• å 200
+- [x] T047 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° `POST /FrameExport/Cancel/{taskId}` ç«¯ç‚¹ï¼šå‘ Process.Kill() + WaitForExit(3000) + `rm -rf tempDir` + status=cancelled å 200
+- [x] T048 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` å®ç° 5 åˆ†é’Ÿå®šæ—¶æ¸…ç†ï¼š`Timer` å éå†å­—å…¸ å createdAt+5min è¿‡æœŸ å `Directory.Delete(tempDir, recursive)` + ç§»é™¤è®°å½•
+- [x] T049 [P] [US4] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° `GET /FrameExport/Health` ç«¯ç‚¹ï¼šè¿”å› daemon è¿è¡ŒçŠ¶æ€ + å¿ƒè·³æ—¶é—´æˆ³ + CPU/å†…å­˜ä½¿ç”¨ç‡
+
+**Checkpoint**: cURL æµ‹è¯• Generate â†’ Progress(SSE) â†’ Result download å…¨æµç¨‹é€šè¿‡
 
 ---
 
-## Phase 8: User Story 6 ¡ª µ¼³ö²ÎÊıÅäÖÃÓë³Ö¾Ã»¯ (Priority: P2)
+## Phase 7: User Story 7 â€” SSE è¿›åº¦ä¸æˆåŠŸé¡µé¢ (Priority: P2)
 
-**Goal**: ¸ñÊ½ÏÂÀ­²Ëµ¥¡¢·Ö±æÂÊÔ¼Êø£¨¿í/¸ß»¥³â+Ô¤ÉèµµÎ»£©¡¢Ö¡ÂÊ»¬¿é¡¢Ñ­»·´ÎÊıÊäÈë¡£ËùÓĞ²ÎÊı×Ô¶¯ localStorage ³Ö¾Ã»¯¡£
+**Goal**: å‰ç«¯é€šè¿‡ SSE æ¥æ”¶è¿›åº¦äº‹ä»¶ï¼Œå±•ç¤ºè¿›åº¦æ¡å’Œé˜¶æ®µæ–‡å­—ï¼Œå®Œæˆåè‡ªåŠ¨å±•ç¤ºæˆåŠŸé¢„è§ˆï¼›æˆåŠŸé¡µæä¾›ä¸‹è½½/åˆ é™¤/é‡åšæ“ä½œã€‚
 
-**Independent Test**: ĞŞ¸ÄÖ¡ÂÊ 15fps¡¢·Ö±æÂÊ 720p ¡ú ¹Ø±Õ Modal ¡ú ÔÙ´ò¿ª ¡ú ²ÎÊı»Ö¸´¡£
+**Independent Test**: æäº¤å¯¼å‡ºå æŸ¥çœ‹è¿›åº¦åŠ¨ç”»å’Œé˜¶æ®µæ–‡å­— å å®Œæˆåè‡ªåŠ¨å±•ç¤ºæˆåŠŸé¢„è§ˆ å ä¸‹è½½å’Œå…³é—­æŒ‰é’®å“åº”æ­£ç¡®æ–‡ä»¶ã€‚
+
+### å‰ç«¯ â€” SSE + è¿›åº¦é¡µ + æˆåŠŸé¡µ
+
+- [x] T050 [P] [US7] åœ¨ `src/player-enhancer/src/frame-progress.ts` å®ç° SSE è¿æ¥å™¨ï¼š`new EventSource(url)` å `onmessage` è§£æ JSON å æ›´æ–°è¿›åº¦çŠ¶æ€ï¼Œ`onerror` è‡ªåŠ¨é‡è¿ï¼ˆæœ€å¤š3æ¬¡ï¼Œé—´éš”1sï¼‰
+- [x] T051 [US7] åœ¨ `src/player-enhancer/src/frame-progress.ts` å®ç°è¿›åº¦ UIï¼šè¿›åº¦æ¡ç»„ä»¶ï¼ˆ@alivecss/aliveui progressï¼‰+ ç™¾åˆ†æ¯”æ•°å­— + å½“å‰é˜¶æ®µæ–‡å­—æè¿°ï¼ˆphase ä¸ i18n æ˜ å°„ï¼š"decoding"â†’"è§£ç å¸§"ï¼Œ"encoding"â†’"ç¼–ç åŠ¨å›¾"ï¼Œ"matching"â†’"ç‰¹å¾åŒ¹é…ä¸­"ç­‰ï¼‰
+- [x] T052 [P] [US7] åœ¨ `src/player-enhancer/src/frame-result.ts` å®ç°æˆåŠŸé¢„è§ˆé¡µï¼šåŒ…å« `<img>` å…ƒç´ åŠ è½½ resultUrl å¾ªç¯åŠ¨å›¾ï¼Œå…¨å®½å›¾ `<img>` é“ºæ»¡å®¹å™¨ + æ»šåŠ¨/ç¼©æ”¾ï¼Œæ˜¾ç¤º fileSizeï¼ˆæ ¼å¼åŒ–ä¸º KB/MBï¼‰
+- [x] T053 [P] [US7] åœ¨ `src/player-enhancer/src/frame-result.ts` å®ç°"ä¸‹è½½"æŒ‰é’®ï¼ˆ`window.open(resultUrl)` æµè§ˆå™¨ç›´æ¥ä¸‹è½½ï¼‰ï¼Œ"åˆ é™¤"æŒ‰é’®ï¼ˆ`DELETE /FrameExport/Result/{taskId}` å æˆåŠŸè·³è½¬ å è¿”å›å¸§é€‰æ‹©é¡µï¼‰ï¼Œ"é‡åš"æŒ‰é’®ï¼ˆå…ˆ delete + è¿”å›å¸§é€‰æ‹©é¡µï¼‰
+- [x] T054 [US7] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°é¡µé¢åˆ‡æ¢é€»è¾‘ï¼šå¸§é€‰æ‹©é¡µ å æäº¤ Generate å åˆ‡æ¢åˆ°è¿›åº¦é¡µ(T050+T051) å status=complete å åˆ‡æ¢åˆ°æˆåŠŸé¡µ(T052+T053)
+- [x] T055 [US7] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å®ç° SSE ç«¯ç‚¹ï¼š`GET /FrameExport/Progress?taskId={uuid}` å `Response.ContentType = "text/event-stream"` å `ChannelReader.ReadAllAsync` å `"data: {json}
+
+"` å channel å…³é—­æ—¶æ–­å¼€è¿æ¥
+
+**Checkpoint**: ç«¯ç‚¹çº§ SSE æµ‹é€šï¼Œæäº¤å¯¼å‡ºå å®æ—¶è¿›åº¦ å æˆåŠŸé¢„è§ˆ å ä¸‹è½½/åˆ é™¤/é‡åš
+
+---
+
+## Phase 8: User Story 6 â€” å‚æ•°é¢æ¿ä¸æŒä¹…åŒ– (Priority: P2)
+
+**Goal**: æ ¼å¼/æ¨¡å¼/åˆ†è¾¨ç‡åŠå®½é«˜/é•¿è¾¹+é¢„è®¾è·³ä½/å¸§ç‡å’Œè´¨é‡ã€å¾ªç¯æ¬¡æ•°ç­‰å‚æ•°è¾“å…¥ã€‚æ‰€æœ‰å‚æ•°è‡ªåŠ¨ localStorage æŒä¹…åŒ–ã€‚
+
+**Independent Test**: ä¿®æ”¹å¸§ç‡ 15fpsï¼Œåˆ†è¾¨ç‡ 720p å å…³é—­ Modal å å†æ¬¡æ‰“å¼€ å å‚æ•°æ¢å¤ã€‚
 
 ### Implementation
 
-- [x] T056 [P] [US6] ÔÚ `src/player-enhancer/src/frame-params.ts` ÊµÏÖ `LocalExportSettings` ÀàĞÍ + `loadSettings(): LocalExportSettings` / `saveSettings(s: LocalExportSettings)` º¯Êı£¨localStorage key: `jfs-frameexport-settings`£¬Ä¬ÈÏÖµ£ºGIF/PNG¡¢width¡¢original¡¢5fps¡¢infinite loop£©
-- [x] T057 [US6] ÔÚ `src/player-enhancer/src/frame-forge.ts` µ×²¿¹¤¾ßÀ¸ÊµÏÖ¸ñÊ½ÏÂÀ­²Ëµ¥£¨@alivecss/aliveui dropdown£©£º¶¯»­Ä£Ê½ÏÂ GIF/WebP Ñ¡Ïî¡¢È«¾°Í¼Ä£Ê½ÏÂ PNG/WebP-lossless Ñ¡Ïî£»Ä¬ÈÏÖµ´Ó localStorage ¶ÁÈ¡
-- [x] T058 [P] [US6] ÔÚ `src/player-enhancer/src/frame-params.ts` ÊµÏÖ²ÎÊıÃæ°å×é¼ş£¨ÕÛµşÊ½ @alivecss/aliveui details/summary£©£º·Ö±æÂÊÔ¼ÊøÄ£Ê½ÇĞ»»£¨"°´¿í¶È"/"°´¸ß¶È" radio£©+ ×Ô¶¨ÒåÏñËØÊäÈë£¨Ò»¸ö¿É±à¼­£¬ÁíÒ»¸ö×Ô¶¯¼ÆËã²¢ÖÃ»Ò£©+ Ô¤ÉèµµÎ»ÏÂÀ­£¨Ñ¡Ôñºó×Ô¶¯ÇĞ»Ø"°´¿í¶È"£©+ Ö¡ÂÊ»¬¿é(1-30) + Ñ­»·´ÎÊıÊäÈë(0-99)
-- [x] T059 [US6] ÊµÏÖ²ÎÊıÁª¶¯Âß¼­£º`resizeMode` ÇĞ»» ¡ú ÁíÒ»ÊäÈë¿ò×Ô¶¯¼ÆËã(±£³Ö¿í¸ß±È) + ÖÃ»Ò disabled£»Ô¤ÉèµµÎ»Ñ¡Ôñ ¡ú ×Ô¶¯ÇĞ resizeMode="width" + ÌîÔ¤ÉèÖµ£»¶¯»­Ä£Ê½ÏÂÒş²ØÖ¡ÂÊ/Ñ­»·´ÎÊıÍâµÄÆ´½ÓÏà¹Ø²ÎÊı
-- [x] T060 [US6] ÊµÏÖ²ÎÊı±ä¸ü ¡ú ×Ô¶¯ `saveSettings()` + `Generate` ÇëÇó body ¶ÁÈ¡µ±Ç° params
+- [x] T056 [P] [US6] åœ¨ `src/player-enhancer/src/frame-params.ts` å®ç° `LocalExportSettings` ç»“æ„ + `loadSettings(): LocalExportSettings` / `saveSettings(s: LocalExportSettings)` å‡½æ•°ï¼ˆlocalStorage key: `jfs-frameexport-settings`ï¼Œé»˜è®¤å€¼ï¼šGIF/PNGã€widthã€originalã€5fpsã€infinite loopï¼‰
+- [x] T057 [US6] åœ¨ `src/player-enhancer/src/frame-forge.ts` åº•éƒ¨é¢æ¿å®ç°æ ¼å¼/æ¨¡å¼é€‰æ‹©å™¨ï¼ˆ@alivecss/aliveui dropdownï¼‰ï¼šåŠ¨å›¾æ¨¡å¼é€‰ GIF/WebP å…¨å¸§ï¼Œå…¨æ™¯å›¾æ¨¡å¼é€‰ PNG/WebP-losslessï¼›é»˜è®¤å€¼ä» localStorage è¯»å–
+- [x] T058 [P] [US6] åœ¨ `src/player-enhancer/src/frame-params.ts` å®ç°å‚æ•°é¢æ¿ç»“æ„ï¼ˆæŠ˜å å¼ @alivecss/aliveui details/summaryï¼‰ï¼šåˆ†è¾¨ç‡åŠæ¯”ä¾‹æ¨¡å¼åˆ‡æ¢ï¼ˆ"æŒ‰å®½åº¦"/"æŒ‰é«˜åº¦" radioï¼‰+ è‡ªå®šä¹‰åˆ†è¾¨ç‡è¾“å…¥ï¼ˆä¸€æ ¼å¯ç¼–è¾‘å¦ä¸€æ ¼è‡ªåŠ¨è”åŠ¨ï¼‰+ é¢„è®¾è·³ä½ï¼ˆä¸‹æ‹‰é€‰åè‡ªåŠ¨åˆ‡æ¢"æŒ‰å®½åº¦"ï¼‰+ å¸§ç‡èŒƒå›´(1-30) + å¾ªç¯æ¬¡æ•°èŒƒå›´(0-99)
+- [x] T059 [US6] å®ç°å‚æ•°è”åŠ¨é€»è¾‘ï¼š`resizeMode` åˆ‡æ¢ å åªæœ‰å¯¹åº”ç»´åº¦å¯ç¼–è¾‘ï¼ˆä¿æŒå®½é«˜æ¯”ï¼‰+ å¦ä¸€æ ¼ disabledï¼Œé¢„è®¾è·³ä½é€‰æ‹© å è‡ªåŠ¨è®¾ resizeMode="width" + å¡«å…¥é¢„è®¾å€¼ï¼Œå…¶ä»–æ¨¡å¼ï¼ˆçº¯åŠ¨å›¾/å¾ªç¯æ¬¡æ•°ç­‰ï¼‰çº¦æŸå‚æ•°
+- [x] T060 [US6] å®ç°å‚æ•°å˜æ›´ å è‡ªåŠ¨ `saveSettings()` + `Generate` è¯·æ±‚ body å–å½“å‰ params
 
-**Checkpoint**: ËùÓĞ²ÎÊı¿Éµ÷½Ú¡¢×Ô¶¯³Ö¾Ã»¯¡¢¿í¸ß»¥³âÁª¶¯ÕıÈ·
+**Checkpoint**: æ‰€æœ‰å‚æ•°å¯è°ƒã€è‡ªåŠ¨æŒä¹…åŒ–ï¼Œå®½é«˜è”åŠ¨ã€åˆ†è¾¨ç‡å‡æ­£ç¡®
 
 ---
 
-## Phase 9: User Story 8 ¡ª ¶àÒ³Ãæ Modal µ¼º½ (Priority: P3)
+## Phase 9: User Story 8 â€” å¤šé¡µ Modal å¯¼èˆª (Priority: P3)
 
-**Goal**: Modal ÄÚÈıÒ³ÃæÕ»½á¹¹£¨Íø¸ñÒ³ ¡ú ½ø¶ÈÒ³ ¡ú ³É¹ûÒ³£©£¬¶¥²¿µ¼º½À¸ËæÒ³ÃæÇĞ»»±ä»¯¡£
+**Goal**: Modal å«é¡µé¢æ ˆç»“æ„ï¼šå¸§é€‰æ‹©é¡µ â†’ è¿›åº¦é¡µ â†’ æˆåŠŸé¡µï¼Œå„é¡µé¢é¡¶æ ã€æ“ä½œæŒ‰é’®ä¸é¡µé¢åˆ‡æ¢è”åŠ¨ã€‚
 
-**Independent Test**: Íø¸ñÒ³ ¡ú µã»÷Éú³É ¡ú ½ø¶ÈÒ³ ¡ú Íê³É ¡ú ³É¹ûÒ³ ¡ú ·µ»Ø ¡ú Íø¸ñÒ³¡£
+**Independent Test**: å¸§é€‰æ‹©é¡µ â†’ æäº¤å¯¼å‡º â†’ è¿›åº¦é¡µ â†’ å®Œæˆ â†’ æˆåŠŸé¡µ â†’ é‡åš â†’ å¸§é€‰æ‹©é¡µã€‚
 
 ### Implementation
 
-- [x] T061 [P] [US8] ÔÚ `src/player-enhancer/src/frame-forge.ts` ÊµÏÖÒ³ÃæÕ»¹ÜÀí£º`currentPage: "grid" | "progress" | "result"` + `navigateTo(page, ...)` º¯Êı + Ò³ÃæÇĞ»»Ê±ÏÔÊ¾/Òş²Ø¶ÔÓ¦ DOM ÈİÆ÷
-- [x] T062 [P] [US8] ÊµÏÖ¶¥²¿µ¼º½À¸äÖÈ¾º¯Êı£ºÍø¸ñÒ³ ¡ú ±êÌâ"Ö¡µ¼³ö" + X ¹Ø±Õ°´Å¥£»½ø¶ÈÒ³ ¡ú ±êÌâ"Éú³ÉÖĞ" + È¡Ïû°´Å¥£»³É¹ûÒ³ ¡ú ±êÌâ"Ô¤ÀÀ" + ·µ»Ø°´Å¥(¡û) + X ¹Ø±Õ°´Å¥
-- [x] T063 [US8] ÊµÏÖÈ¡Ïû°´Å¥Âß¼­£ºµ÷ `POST /FrameExport/Cancel/{taskId}` ¡ú µ¼º½»ØÍø¸ñÒ³
-- [x] T064 [US8] ÊµÏÖ Modal ¹Ø±ÕÊ±ÇåÀí£ºµ÷ `DELETE /FrameExport/Result/{taskId}`£¨ÈçÓĞ»îÔ¾ÈÎÎñ£©¡ú ÒÆ³ı Modal DOM
+- [x] T061 [P] [US8] åœ¨ `src/player-enhancer/src/frame-forge.ts` å®ç°é¡µé¢æ ˆçŠ¶æ€æœºï¼š`currentPage: "grid" | "progress" | "result"` + `navigateTo(page, ...)` å‡½æ•° + é¡µé¢åˆ‡æ¢æ—¶æ˜¾ç¤º/éšè—å¯¹åº” DOM åŒºåŸŸ
+- [x] T062 [P] [US8] å®ç°å¤šé¡µé¢é¡¶æ æ¸²æŸ“ï¼šå¸§é€‰æ‹©é¡µ â†’ æ˜¾ç¤º"å¸§å¯¼å‡º" + X å…³é—­æŒ‰é’®ï¼Œè¿›åº¦é¡µ â†’ æ˜¾ç¤º"å¯¼å‡ºä¸­" + å–æ¶ˆæŒ‰é’®ï¼ŒæˆåŠŸé¡µ â†’ æ˜¾ç¤º"é¢„è§ˆ" + è¿”å›æŒ‰é’®ï¼ˆå¯é€‰ï¼‰+ X å…³é—­æŒ‰é’®
+- [x] T063 [US8] å®ç°å–æ¶ˆæŒ‰é’®é€»è¾‘ï¼šè°ƒç”¨ `POST /FrameExport/Cancel/{taskId}` å è¿”å›å¸§é€‰æ‹©é¡µ
+- [x] T064 [US8] å®ç° Modal å…³é—­æ—¶èµ„æºæ¸…ç†ï¼šè°ƒç”¨ `DELETE /FrameExport/Result/{taskId}`ï¼ˆè‹¥æœ‰æ´»è·ƒä»»åŠ¡ï¼‰ï¼Œç§»é™¤ Modal DOM
 
-**Checkpoint**: ÈıÒ³Ãæµ¼º½Á÷³©£»È¡Ïû¡¢·µ»Ø¡¢¹Ø±Õ°´Å¥¾ùÕıÈ·ÇåÀí×ÊÔ´
+**Checkpoint**: å¤šé¡µå¯¼èˆªæµç•…ï¼Œå–æ¶ˆã€ä¸‹è½½ã€å…³é—­æŒ‰é’®å‡æ­£ç¡®é‡Šæ”¾èµ„æº
 
 ---
 
-## Phase 10: User Story 5 ¡ª µ¼³öÈ«¾°Í¼ (Priority: P3)
+## Phase 10: User Story 5 â€” ç”Ÿæˆå…¨æ™¯å›¾ (Priority: P3)
 
-**Goal**: ÓÃ»§Ñ¡Ö¡ºóµã»÷"µ¼³öÈ«¾°Í¼"£¬Rust ¶Ë°´³¡¾°·ÖÀà×ß¶ÔÓ¦Ëã·¨Â·¾¶£¬SSE ±¨¸æ½ø¶È£¬Íê³ÉºóÕ¹Ê¾È«¾°Ô¤ÀÀ¡£
+**Goal**: ç”¨æˆ·é€‰å¸§å¹¶ç‚¹å‡»"ç”Ÿæˆå…¨æ™¯å›¾"ï¼ŒRust ç«¯æŒ‰åœºæ™¯ç±»å‹é€‰æ‹©ç®—æ³•è·¯å¾„ï¼ŒSSE ä¼ é€’è¿›åº¦ï¼Œå®Œæˆåå±•ç¤ºå…¨æ™¯é¢„è§ˆã€‚
 
-**Independent Test**: Ñ¡ 3 Ö¡Í¬³¡¾°Ö¡ ¡ú µã»÷µ¼³öÈ«¾°Í¼ ¡ú SSE ½ø¶È ¡ú Modal Õ¹Ê¾È«¾° ¡ú ÏÂÔØ PNG¡£
+**Independent Test**: é€‰ 3 å¸§åŒåœºæ™¯æ¨ªç§»å¸§ å è§¦å‘ç”Ÿæˆå…¨æ™¯å›¾ å SSE è¿›åº¦ å Modal å±•ç¤ºå…¨æ™¯ å ä¸‹è½½ PNGã€‚
 
-### Rust ¡ª ³¡¾°·ÖÀàÆ÷
+### Rust â€” åœºæ™¯åˆ†ç±»å™¨
 
-- [x] T065 [P] [US5] ÔÚ `src/frame-forge/src/scene_classifier.rs` ÊµÏÖ³¡¾°·ÖÀàÆ÷£ºÊäÈë¶àÖ¡ ¡ú ¼ÆËãÑÕÉ«ìØ(`imageproc::stats::histogram` ¡ú entropy)¡¢Canny ±ßÔµÃÜ¶È(`imageproc::edges::canny` ¡ú count_nonzero/total_pixels)¡¢Ö¡¼ä²î·ÖÔË¶¯ÇøÓòÕ¼±È ¡ú ·ÖÀàÎª anime/landscape/liveaction
-- [x] T066 [P] [US5] ÔÚ `src/frame-forge/src/scene_classifier.rs` ÊµÏÖ¾µÍ·ÔË¶¯ÀàĞÍÔ¤¼ì£ºÇ°Á½Ö¡¼ä¹ÀËãÖ÷µ¼ÔË¶¯(pan/zoom/rotation/static) + Æ´½Ó·½Ïò(horizontal/vertical)
+- [x] T065 [P] [US5] åœ¨ `src/frame-forge/src/scene_classifier.rs` å®ç°åœºæ™¯åˆ†ç±»ç‰¹å¾æå–ï¼šå„å¸§ å æå–é¢œè‰²ç†µï¼ˆ`imageproc::stats::histogram` å entropyï¼‰ï¼ŒCanny è¾¹ç¼˜å¯†åº¦ï¼ˆ`imageproc::edges::canny` å count_nonzero/total_pixelsï¼‰ï¼Œå¸§é—´å¹³å‡è¿åŠ¨å¹…åº¦ å åˆ†ç±»ä¸º anime/landscape/liveaction
+- [x] T066 [P] [US5] åœ¨ `src/frame-forge/src/scene_classifier.rs` å®ç°é•œå¤´è¿åŠ¨åˆ†ç±»é¢„åˆ¤ï¼šç›¸é‚»å¸§å…‰æµä¼°ç®—è¿åŠ¨å‘é‡ï¼ˆpan/zoom/rotation/staticï¼‰+ æ‹¼æ¥æ–¹å‘ï¼ˆhorizontal/verticalï¼‰
 
-### Rust ¡ª ³¡¾° A: ¶¯Âş Phase Correlation
+### Rust â€” è·¯å¾„ Aï¼šåŠ¨æ¼« Phase Correlation
 
-- [x] T067 [P] [US5] ÔÚ `src/frame-forge/src/stitch_anime.rs` ÊµÏÖ Phase Correlation Æ´½Ó£º»Ò¶È»¯ + ººÃ÷´°¼ÓÈ¨ ¡ú 2D FFT(rustfft) ¡ú ¹éÒ»»¯»¥¹¦ÂÊÆ× ¡ú IFFT ¡ú ·åÖµ¶¨Î»(Å×ÎïÏß²åÖµÑÇÏñËØ) ¡ú (dx, dy) Æ½ÒÆ ¡ú Ö±½Ó warp Æ´½Ó
-- [x] T068 [US5] ÔÚ `src/frame-forge/src/stitch_anime.rs` ÊµÏÖ¶àÖ¡ÔöÁ¿Æ´½Ó£º»ù×¼Ö¡(Ê×Ö¡) ¡ú ÏàÁÚÖ¡Öğ¶Ô¼ÆËã PhaseCorr ¡ú ÀÛ»ıÆ½ÒÆÆ«ÒÆ ¡ú Æ´½Ó + ¸üĞÂ»ù×¼
+- [x] T067 [P] [US5] åœ¨ `src/frame-forge/src/stitch_anime.rs` å®ç° Phase Correlation æ‹¼æ¥ï¼šç°åº¦åŒ– + çª—å‡½æ•°åŠ æƒ å 2D FFT(rustfft) å å½’ä¸€åŒ–äº’åŠŸç‡è°± å IFFT å å³°å€¼å®šä½ï¼ˆäºšåƒç´ æ’å€¼ç²¾åŒ–ï¼‰å (dx, dy) å¹³ç§» å ç›´æ¥ warp æ‹¼æ¥
+- [x] T068 [US5] åœ¨ `src/frame-forge/src/stitch_anime.rs` å®ç°å¤šå¸§ç´¯ç§¯æ‹¼æ¥ï¼šåŸºå‡†å¸§ï¼ˆé¦–å¸§ï¼‰å é€å¸§å¯¹ä¸åŸºå‡† PhaseCorr å ç´¯ç§¯å¹³ç§»åç§» å æ‹¼æ¥ + æ›´æ–°åŸºå‡†
 
-### Rust ¡ª ³¡¾° B: ·ç¾° AKAZE + Phase Correlation ¶µµ×
+### Rust â€” è·¯å¾„ Bï¼šå®æ™¯ AKAZE + Phase Correlation æ··åˆ
 
-- [x] T069 [P] [US5] ÔÚ `src/frame-forge/src/stitch_landscape.rs` ÊµÏÖ¸ßÎÆÀí ROI ÑÚÂëÌáÈ¡£ºÌİ¶È·ùÖµÍ¼(`imageproc::gradients`) ¡ú ãĞÖµ·Ö¸î ¡ú ROI ÑÚÂë
-- [x] T070 [US5] ÔÚ `src/frame-forge/src/stitch_landscape.rs` ÊµÏÖ AKAZE + RANSAC Homography£¨opencv crate£©£º½öÔÚ ROI ÄÚ×ö AKAZE ¼ì²â ¡ú BFMatcher(Hamming) ¡ú findHomography(RANSAC, threshold=3.0) ¡ú ÈôÄÚµãÊı<4 ¡ú ½µ¼¶µ½ Phase Correlation
-- [x] T071 [P] [US5] ÔÚ `src/frame-forge/src/stitch_landscape.rs` ÊµÏÖ¿í»­·ù(FrameCount>5)ÖùÃæÍ¶Ó°£ºÓÃ opencv warp ÖùÃæ±ä»»´úÌæÆ½Ãæ Homography
+- [x] T069 [P] [US5] åœ¨ `src/frame-forge/src/stitch_landscape.rs` å®ç°å‰æ™¯ ROI æå–ï¼šè®¡ç®—æ¢¯åº¦åˆ†å€¼å›¾ï¼ˆ`imageproc::gradients`ï¼‰å é˜ˆå€¼åˆ†å‰² å ROI æ©ç 
+- [x] T070 [US5] åœ¨ `src/frame-forge/src/stitch_landscape.rs` å®ç° AKAZE + RANSAC Homographyï¼ˆopencv crateï¼‰ï¼šä»…åœ¨ ROI å†…åš AKAZE ç‰¹å¾ å BFMatcher(Hamming) å findHomography(RANSAC, threshold=3.0) å å†…ç‚¹æ•° <4 æ—¶å›é€€ Phase Correlation
+- [x] T071 [P] [US5] åœ¨ `src/frame-forge/src/stitch_landscape.rs` å®ç°å®½åŸºçº¿ï¼ˆFrameCount>5ï¼‰ç´¯ç§¯æŠ•å½±ï¼šæ»‘çª—ç´¯ç§¯ Homography
 
-### Rust ¡ª ³¡¾° C: ÕæÈË Ö¡²îÑÚÂë + AKAZE
+### Rust â€” è·¯å¾„ Cï¼šå®å½• å¸§å·®è¿åŠ¨ + AKAZE
 
-- [x] T072 [P] [US5] ÔÚ `src/frame-forge/src/stitch_liveaction.rs` ÊµÏÖÖ¡²îÔË¶¯ÑÚÂë£ºÏàÁÚÖ¡²î·Ö ¡ú ĞÎÌ¬Ñ§ÅòÕÍ(3x3 kernel, 2 iterations) ¡ú ÔË¶¯ÇøÓòÑÚÂë
-- [x] T073 [US5] ÔÚ `src/frame-forge/src/stitch_liveaction.rs` ÊµÏÖÑÚÂë¹ıÂË AKAZE + RANSAC£ºÈ«Í¼ AKAZE ¼ì²â ¡ú ¹ıÂËµôÂäÈëÔË¶¯ÑÚÂëµÄ¹Ø¼üµã ¡ú ¶ÔÊ£Óà¾²Ì¬±³¾°µã×ö RANSAC Homography ¡ú Á¬Ğø N Ö¡ Homography È¡·ÖÁ¿ÖĞÖµ(Â³°ô¾ÛºÏ)
-- [x] T074 [P] [US5] ÔÚ `src/frame-forge/src/stitch_liveaction.rs` ÊµÏÖ±³¾°ÇøÓò warp + Ç°¾°ÇøÓòË«ÏßĞÔ²åÖµÌî³ä
+- [x] T072 [P] [US5] åœ¨ `src/frame-forge/src/stitch_liveaction.rs` å®ç°å¸§é—´è¿åŠ¨æ©ç ï¼šå„ç›¸é‚»å¸§ä½œå·® å å½¢æ€å­¦è†¨èƒ€ï¼ˆ3x3 kernel, 2 iterationsï¼‰å è¿åŠ¨æ©ç è¾“å‡º
+- [x] T073 [US5] åœ¨ `src/frame-forge/src/stitch_liveaction.rs` å®ç°å‰æ™¯é®æŒ¡ AKAZE + RANSACï¼šå…¨å›¾ AKAZE ç‰¹å¾ å è¿‡æ»¤ä½äºè¿åŠ¨æ©ç å†…çš„å…³é”®ç‚¹ å ç”¨å‰©ä½™é™æ€åŒºåŸŸç‰¹å¾åš RANSAC Homography å å¤šå¸§ N ä¸ª Homography å–å‡ ä½•ä¸­å€¼ï¼ˆé²æ£’èšåˆï¼‰
+- [x] T074 [P] [US5] åœ¨ `src/frame-forge/src/stitch_liveaction.rs` å®ç°èƒŒæ™¯å›¾å±‚ warp + å‰æ™¯åŒçº¿æ€§æ’å€¼å¡«å……
 
-### Rust ¡ª »ìºÏ + Ö÷Á÷³Ì
+### Rust â€” æ··åˆ + èåˆ
 
-- [x] T075 [P] [US5] ÔÚ `src/frame-forge/src/blender.rs` ÊµÏÖÔöÒæ²¹³¥£º¼ÆËãÖØµşÇøÓòÆ½¾ùÁÁ¶È±È ¡ú È«¾ÖÔöÒæµ÷ÕûÏû³ıÖ¡¼äÉ«²î
-- [x] T076 [US5] ÔÚ `src/frame-forge/src/blender.rs` ÊµÏÖ Laplacian ½ğ×ÖËş¶àÆµ´ø»ìºÏ£º¹¹½¨ 4 ²ã¸ßË¹½ğ×ÖËş + Laplacian ½ğ×ÖËş ¡ú Ã¿²ã¼ÓÈ¨Æ½¾ù(È¨ÖØ=¾àÖ¡±ß½çµÄ¾àÀë) ¡ú ÖØ½¨ºÏ³ÉÍ¼Ïñ
-- [x] T077 [US5] ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ `handle_stitch` ÇëÇó£º½âÂëÔ­Í¼ ¡ú ½üÖØ¸´Ö¡ÌŞ³ı(pHash ÏàËÆ¶È¼ì²â£¬±ê¼ÇÈßÓàÖ¡) ¡ú ³¡¾°·ÖÀàÆ÷ ¡ú route µ½ stitch_anime/stitch_landscape/stitch_liveaction ¡ú ÔöÒæ²¹³¥ + Blender ¡ú °´ format(PNG/WebP-lossless)±àÂë ¡ú Ã¿½×¶ÎÍÆËÍ progress event ¡ú ×îÖÕ·µ»ØÊä³ö×Ö½Ú
-- [x] T078 [P] [US5] ÔÚ `src/frame-forge/src/main.rs` ÊµÏÖ½üÖØ¸´Ö¡¼ì²â(pHash)£º`image::imageops::resize(8x8)` ¡ú »Ò¶È»¯ ¡ú DCT ¡ú ±È½ÏººÃ÷¾àÀë ¡ú similarity>90% ±ê¼ÇÈßÓà
+- [x] T075 [P] [US5] åœ¨ `src/frame-forge/src/blender.rs` å®ç°ç®€å•çº¿æ€§æ··åˆï¼šé‡å åŒºåŸŸçš„çº¿æ€§å¹³å‡ï¼Œæµ‹é‡ä¼˜å…ˆ å å…¨é‡åŠ æƒä»¥æ¶ˆé™¤æ¥ç¼é¢œè‰²å·®
+- [x] T076 [US5] åœ¨ `src/frame-forge/src/blender.rs` å®ç° Laplacian é‡‘å­—å¡”å¤šé¢‘æ®µèåˆï¼šæ„å»º 4 å±‚é«˜æ–¯é‡‘å­—å¡” + Laplacian æ®‹å·® å æ¯å±‚åŠ æƒå¹³å‡ï¼ˆæƒé‡=åˆ°å¸§è¾¹ç•Œçš„è·ç¦»ï¼‰å é‡å»ºåˆæˆå›¾åƒ
+- [x] T077 [US5] åœ¨ `src/frame-forge/src/main.rs` å®ç° `handle_stitch` å‡½æ•°ï¼šè¯»å–åŸå›¾ å è¿‘ä¼¼é‡å¤å¸§å‰”é™¤ï¼ˆpHash ç›¸ä¼¼åº¦æ£€æµ‹ï¼Œä¿ç•™æœ€ä¸ç›¸ä¼¼å¸§ï¼‰å åœºæ™¯åˆ†ç±» å route åˆ° stitch_anime/stitch_landscape/stitch_liveaction å æ··åˆ + Blender å æŒ‰ format(PNG/WebP-lossless)ç¼–ç  å æ¯é˜¶æ®µå‘é€ progress event å æœ€ç»ˆå‘å›ç»“æœå­—èŠ‚
+- [x] T078 [P] [US5] åœ¨ `src/frame-forge/src/main.rs` å®ç°è¿‘ä¼¼é‡å¤å¸§æ£€æµ‹ï¼ˆpHashï¼‰ï¼š`image::imageops::resize(8x8)` å ç°åº¦åŒ– å DCT å æ¯”è¾ƒå“ˆå¸Œæ±‰æ˜è·ç¦» å similarity>90% åˆ™è·³è¿‡
 
-### C# ¡ª È«¾°ÈÎÎñÌá½»
+### C# â€” å…¨æ™¯ä»»åŠ¡æäº¤
 
-- [x] T079 [US5] ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` ÊµÏÖ `SubmitStitchTask(GenerateRequest req) -> taskId`£ºÍ¬ SubmitAnimateTask Ä£Ê½£¬µ÷ Rust handle_stitch Â·¾¶
-- [x] T080 [US5] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` µÄ `POST /FrameExport/Generate` ¶ËµãÔö¼Ó `type: "stitch"` Â·¾¶·Ö·¢
+- [x] T079 [US5] åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportService.cs` å®ç° `SubmitStitchTask(GenerateRequest req) -> taskId`ï¼ŒåŒ SubmitAnimateTask æ¨¡å¼ï¼Œè·¯ç”± Rust handle_stitch è·¯å¾„
+- [x] T080 [US5] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å°† `POST /FrameExport/Generate` ç«¯ç‚¹æ·»åŠ  `type: "stitch"` è·¯ç”±åˆ†å‘
 
-### Ç°¶Ë ¡ª È«¾°µ¼³ö UI
+### å‰ç«¯ â€” å…¨æ™¯æ‹¼æ¥ UI
 
-- [x] T081 [US5] ÔÚ `src/player-enhancer/src/frame-forge.ts` µ×²¿¹¤¾ßÀ¸Ìí¼Ó"µ¼³öÈ«¾°Í¼"°´Å¥£¨Óë"µ¼³ö¶¯»­"²¢ÁĞ»òÔÚÄ£Ê½ÏÂÇĞ»»£©
-- [x] T082 [US5] ÔÚ `src/player-enhancer/src/frame-result.ts` È«¾°Í¼³É¹ûÕ¹Ê¾£º`<img>` ´óÍ¼ÊÊÅäÈİÆ÷ + `object-fit: contain` + ¿ÉÍÏ¶¯/Ëõ·Å£¨Èç¹û @alivecss/aliveui ²»Ìá¹©£¬ÓÃ¼òµ¥µÄ CSS `overflow: auto` ÈİÆ÷£©
+- [x] T081 [US5] åœ¨ `src/player-enhancer/src/frame-forge.ts` åº•éƒ¨é¢æ¿æ·»åŠ "ç”Ÿæˆå…¨æ™¯å›¾"æŒ‰é’®ï¼Œç‚¹å‡»"å…¨æ™¯æ¨¡å¼"åˆ‡æ¢æ¨¡å¼ï¼ˆåˆ‡æ¢ä¸ºå…¨æ™¯ï¼‰
+- [x] T082 [US5] åœ¨ `src/player-enhancer/src/frame-result.ts` å…¨æ™¯å›¾æˆåŠŸå±•ç¤ºï¼š`<img>` æ»¡å›¾å®¹å™¨å±•ç¤º + `object-fit: contain` + æ”¯æŒæ»šåŠ¨/ç¼©æ”¾ï¼Œä¼˜å…ˆ @alivecss/aliveui æä¾›ï¼Œå…¶æ¬¡ç®€å• CSS `overflow: auto` å®ç°
 
-**Checkpoint**: È«¾°Æ´½Ó¶Ëµ½¶Ë¡ª¡ª¶¯Âş×ß PhaseCorr¡¢·ç¾°×ß AKAZE+PhaseCorr ¶µµ×¡¢ÕæÈË×ßÖ¡²î+AKAZE£»SSE ±¨¸æ¸÷½×¶Î½ø¶È
+**Checkpoint**: å…¨æ™¯æ‹¼æ¥ç«¯åˆ°ç«¯é€šï¼ŒåŠ¨æ¼«ç”¨ PhaseCorrï¼Œå®æ™¯ç”¨ AKAZE+PhaseCorr æ··åˆï¼Œå®å½•ç”¨å¸§å·®+AKAZEï¼ŒSSE ä¼ é€’é˜¶æ®µè¿›åº¦
 
 ---
 
 ## Phase 11: Polish & Cross-Cutting Concerns
 
-**Purpose**: ÈıÓï i18n ²¹Æë¡¢´íÎó´¦ÀíÍêÉÆ¡¢×ÊÔ´µ÷¶È¼¯³É¡¢DRM ¼ì²é¡¢README ¸üĞÂ¡¢¶Ëµ½¶ËÑéÖ¤¡£
+**Purpose**: è¡¥å…¨ i18n æ¡ç›®ã€é”™è¯¯å¤„ç†ã€èµ„æºé™æµã€DRM æ£€æµ‹ã€ä¸´æ—¶ç›®å½•æ¸…ç†ã€æµ‹è¯•éªŒè¯ã€README å’Œ workflow æ£€æŸ¥ã€‚
 
-- [x] T083 [P] ²¹È« `src/player-enhancer/src/i18n.ts` ËùÓĞĞÂÔö UI ÎÄ×ÖµÄÈıÓï·­Òë£¨zh/ja/en£©£ºframeExport ÏÂËùÓĞÒ³ÃæµÄ±êÌâ¡¢°´Å¥¡¢×´Ì¬ÎÄ×Ö£»ÖÊÁ¿±êÇ©("ºÚÖ¡"/"Ä£ºıÖ¡")£»½ø¶È½×¶ÎÎÄ×Ö
-- [x] T084 [P] Ç°¶Ë´íÎó´¦ÀíÍêÉÆ£ºÍøÂç³¬Ê±ÌáÊ¾¡¢SSE ÖØÁ¬´ÎÊıºÄ¾¡ÌáÊ¾¡¢Éú³É´íÎó retry Âß¼­
-- [x] T085 ÔÚ `src/frame-forge/src/resources.rs` ¼¯³É×ÊÔ´¸ĞÖªµ÷¶Èµ½ `handle_animate` / `handle_stitch`£º`resource_pressure() > 0.8`£¨¼´ CPU>80% »ò ¿ÉÓÃÄÚ´æ <512MB Ê±µÄÊä³öÖµ£©Ê± Semaphore ×èÈûĞÂÈÎÎñ£¬ÓÅÏÈ±£ÕÏ seek-preview ÑÓ³Ù<50ms
-- [x] T086 [P] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ËùÓĞ¶ËµãÌí¼Ó DRM ¼ì²é£¨Í¬ seek-preview ºÍ screenshot Ä£Ê½£©£ºitem.MediaStreams º¬ IsEncrypted ¡ú 403
-- [x] T087 [P] ÔÚ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` ÊµÏÖ EntryPoint ÖĞ¹Â¶ùÄ¿Â¼ÇåÀí£º·şÎñÆô¶¯Ê± `Directory.Delete("temp/frame-forge", recursive)` ¡ú `Directory.CreateDirectory`
-- [x] T088 [P] ÔËĞĞ `make test`£ºÈ·ÈÏ Rust + TypeScript + C# È«Ì×²âÊÔÍ¨¹ı
-- [ ] T089 `make update` ²¿Êğµ½ jellyfin-dev ÈİÆ÷£¬ÊÖ¶¯¶Ëµ½¶ËÑéÖ¤£º
-  - ´ò¿ªÊÓÆµ ¡ú µã»÷Ö¡µ¼³ö ¡ú ä¯ÀÀ/Ñ¡ÔñÖ¡
-  - ¶¯»­µ¼³ö£ºÅäÖÃ²ÎÊı ¡ú Éú³É ¡ú SSE ½ø¶È ¡ú Ô¤ÀÀ ¡ú ÏÂÔØ GIF/WebP ÕıÈ·
-  - È«¾°Æ´½Ó£ºÑ¡Í¬³¡¾°Ö¡ ¡ú µ¼³öÈ«¾°Í¼ ¡ú SSE ½×¶Î½ø¶È ¡ú Ô¤ÀÀ ¡ú ÏÂÔØ PNG/WebP-lossless ÕıÈ·
-  - È¡ÏûÈÎÎñ ¡ú ×Ó½ø³Ì±»É± + ÁÙÊ±ÎÄ¼şÇåÀí
-  - ¹Ø±Õ Modal ¡ú ÁÙÊ±ÎÄ¼şÇåÀí
-  - ÎŞ±¾µØÂ·¾¶ÊÓÆµ ¡ú °´Å¥½ûÓÃ/404
-  - CSS ÑéÖ¤£ºËùÓĞ UI Ê¹ÓÃ @alivecss/aliveui Àà£¬ÎŞ×Ô¶¨Òå CSS ²ĞÁô
-- [ ] T090 [P] ¼ì²é `README.md` / `README.zh-CN.md` ÊÇ·ñĞèÒª¸üĞÂ£¨ĞÂ¹¦ÄÜ£ºÖ¡µ¼³öÓëÈ«¾°Æ´½Ó£©
-- [x] T091 [P] ¸üĞÂ `src/player-enhancer/package.json` µÄ `dependencies`£¨@alivecss/aliveui °æ±¾¹Ì¶¨£©²¢¼ì²éÎŞ¶àÓàÒÀÀµ
-- [x] T091b [P] ÔÚ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` ±©Â¶ÖÊÁ¿¼ì²âãĞÖµÅäÖÃ¶Ëµã£º`GET /FrameExport/QualityThresholds` ·µ»Øµ±Ç°ãĞÖµ JSON¡¢`PUT /FrameExport/QualityThresholds` ½ÓÊÕ `{ blackBrightnessVarMin, whiteBrightnessVarMax, blurLaplacianVarMin }` ¡ú ´æÓÚ C# ¾²Ì¬×Ö¶Î£¨·şÎñÖØÆô»Ö¸´Ä¬ÈÏÖµ£©£»ãĞÖµ´«µİµ½ Rust ¶ËÃ¿´Î SINGLE_FRAME ÇëÇóÊ±×÷Îª header ²ÎÊı
-- [x] T091c ÊÖ¶¯ĞÔÄÜ´ï±êÑéÖ¤£ºËõÂÔÍ¼ 11 Ö¡ ¡Ü2s(SC-002)¡¢¶¯»­ 10f¡Á480p ¡Ü8s(SC-003)¡¢È«¾° 5f¡Á720p ¡Ü15s(SC-004)¡¢ºÚ/°×Ö¡¼ì²âÂÊ >95% + Ä£ºıÖ¡¼ì²âÂÊ >85%(SC-005)¡¢Æ´½Ó³É¹¦ÂÊ >80%(SC-006)¡¢SSE ÑÓ³Ù <500ms(SC-007)¡¢²ÎÊı³Ö¾Ã»¯»Ö¸´ 100%(SC-008)£»¼ÇÂ¼¶Ô±ÈÊı¾İĞ´Èë `specs/009-frame-forge-stitch/perf-validation.md`
+- [x] T083 [P] è¡¥å…¨ `src/player-enhancer/src/i18n.ts` æ‰€æœ‰ç¼ºå¤± UI æ–‡å­—çš„å¤šè¯­ç¿»è¯‘ï¼ˆzh/ja/enï¼‰ï¼šframeExport å„é¡µé¢æ ‡é¢˜ã€æŒ‰é’®ã€çŠ¶æ€æ–‡å­—ï¼Œè´¨é‡æ ‡ç­¾("é»‘å¸§"/"æ¨¡ç³Šå¸§")ï¼Œå„è¿›åº¦é˜¶æ®µæè¿°
+- [x] T084 [P] å‰ç«¯é”™è¯¯å¤„ç†ä¼˜åŒ–ï¼šç½‘ç»œè¶…æ—¶æ˜¾ç¤ºæç¤ºï¼ŒSSE æ–­è¿åçš„é™é»˜é‡è¯•ï¼Œé”™è¯¯æç¤ºä½¿ç”¨ @alivecss/aliveui ç»„ä»¶å±•ç¤ºï¼Œå« retry é€»è¾‘
+- [x] T085 åœ¨ `src/frame-forge/src/resources.rs` æ·»åŠ èµ„æºæ„ŸçŸ¥ä¼˜å…ˆçº§åˆ° `handle_animate` / `handle_stitch`ï¼š`resource_pressure() > 0.8`ï¼ˆå³ CPU>80% æˆ– å¯ç”¨å†…å­˜ <512MBï¼‰æ—¶ é™æµå­—å…¸æ—¶ Semaphore ç­‰å¾…ï¼Œä¼˜å…ˆä¿è¯ seek-preview å»¶è¿Ÿ<50ms
+- [x] T086 [P] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` å„ç«¯ç‚¹æ·»åŠ  DRM æ£€æŸ¥ï¼ˆåŒ seek-preview ä¸ screenshot æ¨¡å¼ï¼‰ï¼šitem.MediaStreams ä¸­ IsEncrypted è¿”å› 403
+- [x] T087 [P] åœ¨ `src/JellyfinSuite.Plugin/Services/FrameExportTaskManager.cs` å®ç° EntryPoint æ³„æ¼ç›®å½•æ¸…ç†ï¼šæœåŠ¡å¯åŠ¨æ—¶ `Directory.Delete("temp/frame-forge", recursive)` å `Directory.CreateDirectory`
+- [x] T088 [P] è¿è¡Œ `make test`ï¼Œç¡®è®¤ Rust + TypeScript + C# å…¨å¥—æµ‹è¯•é€šè¿‡
+- [ ] T999 `make update` éƒ¨ç½²åˆ° jellyfin-devï¼Œæ‰‹åŠ¨ç«¯åˆ°ç«¯éªŒè¯ï¼š
+  - æ’­æ”¾è§†é¢‘ å æ‰“å¼€å¸§å¯¼å‡º å æŸ¥çœ‹/é€‰æ‹©å¸§
+  - é…ç½®å‚æ•°å¯¼å‡ºåŠ¨å›¾å‚æ•° å å¯¼å‡º å SSE è¿›åº¦ å é¢„è§ˆ å ä¸‹è½½ GIF/WebP æ­£ç¡®
+  - å…¨æ™¯æ‹¼æ¥ï¼šé€‰åŒåœºæ™¯å¸§ å ç”Ÿæˆå…¨æ™¯å›¾ å SSE é˜¶æ®µè¿›åº¦ å é¢„è§ˆ å ä¸‹è½½ PNG/WebP-lossless æ­£ç¡®
+  - å–æ¶ˆå¯¼å‡º å å­è¿›ç¨‹è¢«æ€ + ä¸´æ—¶æ–‡ä»¶æ¸…ç†
+  - å…³é—­ Modal å ä¸´æ—¶æ–‡ä»¶æ¸…ç†
+  - æ— æƒé™è·¯å¾„è§†é¢‘ å æŒ‰é’®ç¦ç”¨/404
+  - CSS éªŒè¯ï¼šç¡®è®¤ UI ä½¿ç”¨ @alivecss/aliveui ç±»ï¼Œæ— è‡ªå®šä¹‰ CSS æ®‹ç•™
+- [ ] T090 [P] æ£€æŸ¥ `README.md` / `README.zh-CN.md` æ˜¯å¦éœ€è¦æ›´æ–°ï¼ˆæ–°åŠŸèƒ½ï¼šå¸§å¯¼å‡ºã€å…¨æ™¯æ‹¼æ¥ï¼‰
+- [x] T091 [P] é”å®š `src/player-enhancer/package.json` ä¸­ `dependencies` @alivecss/aliveui ç‰ˆæœ¬ï¼Œå›ºå®šç²¾ç¡®ç‰ˆæœ¬ï¼Œæ— èŒƒå›´é€šé…ç¬¦
+- [x] T091b [P] åœ¨ `src/JellyfinSuite.Plugin/Controllers/FrameExportController.cs` æš´éœ²è´¨é‡é˜ˆå€¼ç®¡ç†ç«¯ç‚¹ï¼š`GET /FrameExport/QualityThresholds` è¿”å›å½“å‰é˜ˆå€¼ JSONï¼Œ`PUT /FrameExport/QualityThresholds` æ¥æ”¶ `{ blackBrightnessVarMin, whiteBrightnessVarMax, blurLaplacianVarMin }` å æ›´æ–° C# é™æ€å­—æ®µï¼ˆå«é‡ç½®ä¸ºé»˜è®¤å€¼æ–¹æ³•ï¼‰ï¼Œé˜ˆå€¼æ•°æ®åˆ° Rust ç«¯æ¯æ¬¡ SINGLE_FRAME è¯·æ±‚æ—¶ä½œä¸º header ä¼ é€’
+- [x] T091c æ‰‹åŠ¨æ€§èƒ½éªŒæ”¶æµ‹è¯•ï¼šåŠ è½½ç¼©ç•¥å›¾ 11 å¸§ â‰¤2s(SC-002)ï¼ŒåŠ¨å›¾ 10f/480p â‰¤8s(SC-003)ï¼Œå…¨æ™¯ 5f/720p â‰¤15s(SC-004)ï¼Œé»‘/çº¯å¸§è¯†åˆ«ç‡ >95% + æ¨¡ç³Šå¸§è¯†åˆ«ç‡ >85%(SC-005)ï¼Œæ‹¼æ¥æˆåŠŸç‡ >80%(SC-006)ï¼ŒSSE å»¶è¿Ÿ <500ms(SC-007)ï¼Œå‚æ•°æŒä¹…åŒ–æ¢å¤ 100%(SC-008)ï¼›ç»“æœè®°å½•å¹¶å†™å…¥ `specs/009-frame-forge-stitch/perf-validation.md`
 
 ---
 
@@ -370,70 +372,70 @@
 ### Phase Dependencies
 
 ```
-Phase 1 (T001¨CT010): Setup ¡ª ÎŞÒÀÀµ
-  ¡ı
-Phase 2 (T011¨CT022): Foundational ¡ª ÒÀÀµ Phase 1 Íê³É
-  ¡ı
-Phase 3 (T023¨CT029): US1 Ö¡Ñ¡ÔñÆ÷ ¡ª ÒÀÀµ Phase 2
-  ¡ı
-Phase 4 (T030¨CT033): US2 À©Õ¹»ñÈ¡ ¡ª ÒÀÀµ Phase 3 (Íø¸ñÒ³ÒÑ´æÔÚ)
-  ¡ı
-Phase 5 (T034¨CT037): US3 Ö¡Ñ¡Ôñ ¡ª ÒÀÀµ Phase 3
-  ¡ı
-Phase 6 (T038¨CT049): US4 ¶¯»­µ¼³ö ¡ª ÒÀÀµ Phase 2 (Rust daemon + C# Í¨ĞÅ²ã)
-  ¡ı
-Phase 7 (T050¨CT055): US7 SSE+³É¹û¹ÜÀí ¡ª ÒÀÀµ Phase 6 (C# ÈÎÎñ¹ÜÀíÒÑ´æÔÚ)
-  ¡ı
-Phase 8 (T056¨CT060): US6 ²ÎÊıÅäÖÃ ¡ª ÒÀÀµ Phase 3 (¹¤¾ßÀ¸ÒÑ´æÔÚ)
-  ¡ı
-Phase 9 (T061¨CT064): US8 ¶àÒ³ÃæÄ£Ì¬ ¡ª ÒÀÀµ Phase 3+5+7 (ÈıÒ³¾ùÒÑ´æÔÚ)
-  ¡ı
-Phase 10 (T065¨CT082): US5 È«¾°Æ´½Ó ¡ª ÒÀÀµ Phase 2+7 (Rust daemon + SSE ¿ò¼Ü)
-  ¡ı
-Phase 11 (T083¨CT091c): Polish ¡ª ÒÀÀµËùÓĞ story
+Phase 1 (T001â€“T010): Setup â€” æ¡†æ¶åˆå§‹åŒ–
+  â†“
+Phase 2 (T011â€“T022): Foundational â€” ä¾èµ– Phase 1 å®Œæˆ
+  â†“
+Phase 3 (T023â€“T029): US1 å¸§é€‰æ‹©å™¨ â€” ä¾èµ– Phase 2
+  â†“
+Phase 4 (T030â€“T033): US2 æ‰©å±•è·å– â€” ä¾èµ– Phase 3 (å¸§é€‰æ‹©é¡µå·²å­˜åœ¨)
+  â†“
+Phase 5 (T034â€“T037): US3 å¸§é€‰æ‹© â€” ä¾èµ– Phase 3
+  â†“
+Phase 6 (T038â€“T049): US4 åŠ¨å›¾å¯¼å‡º â€” ä¾èµ– Phase 2 (Rust daemon + C# é€šä¿¡å±‚)
+  â†“
+Phase 7 (T050â€“T055): US7 SSE+æˆåŠŸé¡µé¢ â€” ä¾èµ– Phase 6 (C# ä»»åŠ¡ç®¡ç†å·²å­˜åœ¨)
+  â†“
+Phase 8 (T056â€“T060): US6 å‚æ•°é¢æ¿ â€” ä¾èµ– Phase 3 (å¸§é€‰æ‹©é¡µå·²å­˜åœ¨)
+  â†“
+Phase 9 (T061â€“T064): US8 å¤šé¡µæ¨¡æ€ â€” ä¾èµ– Phase 3+5+7 (å¤šé¡µé¢å·²å­˜åœ¨)
+  â†“
+Phase 10 (T065â€“T082): US5 å…¨æ™¯æ‹¼æ¥ â€” ä¾èµ– Phase 2+7 (Rust daemon + SSE å®Œæˆ)
+  â†“
+Phase 11 (T083â€“T091c): Polish â€” è¦†ç›–æ‰€æœ‰ story
   â†“
 Phase 12 (T092â€“T100): US9 è‡ªåŠ¨åŒ–è¯„åˆ† â€” éœ€è¦ Phase 10 (US5 æ‹¼æ¥æ¨¡å—å·²å®ç°)
 ```
 
 ### User Story Dependencies
 
-| Story | ¿É¿ªÊ¼Ê±»ú | ÒÀÀµ¹ÊÊÂ |
+| Story | å¯å¼€å§‹æ—¶é—´ | å‰ç½®ä¾èµ– |
 |-------|----------|---------|
-| US1 (P1) | Phase 2 Íê³Éºó | ÎŞ |
-| US2 (P1) | US1 Íê³Éºó | US1 (Íø¸ñÒ³) |
-| US3 (P1) | US1 Íê³Éºó | US1 (Íø¸ñÒ³) |
-| US4 (P2) | Phase 2 Íê³Éºó | ÎŞ£¨´¿ºó¶Ë+C#£¬¿É²¢ĞĞ US1-3£© |
-| US6 (P2) | US1 Íê³Éºó | US1 (¹¤¾ßÀ¸) |
-| US7 (P2) | US4 Íê³Éºó | US4 (C# ÈÎÎñ¹ÜÀí+¶Ëµã) |
-| US5 (P3) | US4+US7 Íê³Éºó | US4, US7 (SSE ¿ò¼Ü) |
-| US8 (P3) | US1+US3+US7 Íê³Éºó | US1, US3, US7 (ÈıÒ³Ãæ) |
+| US1 (P1) | Phase 2 å®Œæˆå | æ—  |
+| US2 (P1) | US1 å®Œæˆå | US1 (å¸§é€‰æ‹©é¡µ) |
+| US3 (P1) | US1 å®Œæˆå | US1 (å¸§é€‰æ‹©é¡µ) |
+| US4 (P2) | Phase 2 å®Œæˆå | æ— ï¼ˆå®ˆæŠ¤è¿›ç¨‹+C#æ— éœ€ US1-3ï¼‰|
+| US6 (P2) | US1 å®Œæˆå | US1 (å‚æ•°é¢æ¿) |
+| US7 (P2) | US4 å®Œæˆå | US4 (C# ä»»åŠ¡ç®¡ç†+ç«¯ç‚¹) |
+| US5 (P3) | US4+US7 å®Œæˆå | US4, US7 (SSE å®Œæˆ) |
+| US8 (P3) | US1+US3+US7 å®Œæˆå | US1, US3, US7 (å¤šé¡µé¢) |
 | US9 (P4) | Phase 10 (US5) åŒæ—¶å¯å¼€å§‹ | US5 (æ‹¼æ¥æ¨¡å—å·²å®ç°å¯ä¾›æµ‹è¯•) |
 
 ### Parallel Opportunities
 
 ```
-Phase 1 ÄÚ²¿: T003¡¬T004¡¬T005¡¬T006¡¬T008¡¬T009 (È«²¿²»Í¬ÎÄ¼ş)
-Phase 2 ÄÚ²¿: T011b¡¬T012¡¬T013¡¬T014¡¬T016 (Rust ¸÷Ä£¿é¶ÀÁ¢£¬T011b »º´æ½á¹¹Óë T011 socket ¿É²¢ĞĞ)
-              T022 (Ç°¶Ë) ¿ÉÓë Rust ²¢ĞĞ
-Phase 3+4+5 ¿ÉÓë Phase 6 ²¢ĞĞ£¨Ç°¶ËÍø¸ñ vs ºó¶Ë¶¯»­±àÂë£©
-Phase 10 ÄÚ²¿: T065¡¬T066¡¬T067¡¬T069¡¬T071¡¬T072¡¬T074¡¬T075¡¬T078 (Rust ¸÷Ëã·¨Ä£¿é¶ÀÁ¢)
+Phase 1 å†…éƒ¨: T003ã€T004ã€T005ã€T006ã€T008ã€T009 (å…¨éƒ¨ä¸åŒæ–‡ä»¶)
+Phase 2 å†…éƒ¨: T011bã€T012ã€T013ã€T014ã€T016 (Rust å„æ¨¡å—å¹¶è¡Œï¼ŒT011b ä¾èµ–ç»“æ„ä½“ç”± T011 socket å¯å¹¶è¡Œ)
+              T022 (å‰ç«¯) å¹¶è¡Œ Rust å¼€å‘
+Phase 3+4+5 å¹¶è¡Œ Phase 6 è¿›è¡Œï¼ˆå‰ç«¯ç½‘æ ¼ vs åç«¯åŠ¨å›¾ç¼–ç ï¼‰
+Phase 10 å†…éƒ¨: T065ã€T066ã€T067ã€T069ã€T071ã€T072ã€T074ã€T075ã€T078 (Rust å„ç®—æ³•æ¨¡å—å¹¶è¡Œ)
 ```
 
 ---
 
-## Parallel Example: Phase 10 (Rust È«¾°Æ´½Ó)
+## Parallel Example: Phase 10 (Rust å…¨æ™¯æ‹¼æ¥)
 
 ```bash
-# ËùÓĞ³¡¾°Ëã·¨Ä£¿é¿É²¢ĞĞ¿ª·¢£¨²»Í¬ÎÄ¼ş£©£º
-Task: "T065 [P] [US5] ³¡¾°·ÖÀàÆ÷ src/frame-forge/src/scene_classifier.rs"
-Task: "T066 [P] [US5] ¾µÍ·ÔË¶¯Ô¤¼ì src/frame-forge/src/scene_classifier.rs"
-Task: "T067 [P] [US5] Phase Correlation Æ´½Ó src/frame-forge/src/stitch_anime.rs"
-Task: "T069 [P] [US5] ¸ßÎÆÀí ROI ÑÚÂë src/frame-forge/src/stitch_landscape.rs"
-Task: "T071 [P] [US5] ÖùÃæÍ¶Ó° src/frame-forge/src/stitch_landscape.rs"
-Task: "T072 [P] [US5] Ö¡²îÔË¶¯ÑÚÂë src/frame-forge/src/stitch_liveaction.rs"
-Task: "T074 [P] [US5] Ç°¾°Ìî³ä src/frame-forge/src/stitch_liveaction.rs"
-Task: "T075 [P] [US5] ÔöÒæ²¹³¥ src/frame-forge/src/blender.rs"
-Task: "T078 [P] [US5] pHash ½üÖØ¸´Ö¡ src/frame-forge/src/main.rs"
+# å„è·¯ç®—æ³•æ¨¡å—å¯å¹¶è¡Œï¼ˆä¸åŒæ–‡ä»¶ï¼Œäº’ä¸ä¾èµ–ï¼‰
+Task: "T065 [P] [US5] åœºæ™¯åˆ†ç±»å™¨ src/frame-forge/src/scene_classifier.rs"
+Task: "T066 [P] [US5] é•œå¤´è¿åŠ¨é¢„åˆ¤ src/frame-forge/src/scene_classifier.rs"
+Task: "T067 [P] [US5] Phase Correlation æ‹¼æ¥ src/frame-forge/src/stitch_anime.rs"
+Task: "T069 [P] [US5] å‰æ™¯ ROI æå– src/frame-forge/src/stitch_landscape.rs"
+Task: "T071 [P] [US5] ç´¯ç§¯æŠ•å½± src/frame-forge/src/stitch_landscape.rs"
+Task: "T072 [P] [US5] å¸§å·®è¿åŠ¨æ©ç  src/frame-forge/src/stitch_liveaction.rs"
+Task: "T074 [P] [US5] å‰æ™¯å¡«å…… src/frame-forge/src/stitch_liveaction.rs"
+Task: "T075 [P] [US5] çº¿æ€§æ··åˆ src/frame-forge/src/blender.rs"
+Task: "T078 [P] [US5] pHash è¿‘ä¼¼é‡å¸§ src/frame-forge/src/main.rs"
 ```
 
 ---
@@ -452,16 +454,16 @@ Task: "T078 [P] [US5] pHash ½üÖØ¸´Ö¡ src/frame-forge/src/main.rs"
 
 ### Incremental Delivery
 
-1. Setup + Foundational ¡ú Base infra ready
-2. US1¨C3 ¡ú Frame Selector Grid (MVP! Browse & select frames)
-3. US4 + US7 + US6 ¡ú Animation Export (Generate GIF/WebP with SSE progress)
-4. US8 ¡ú Multi-page Modal Navigation (Polish UX)
-5. US5 ¡ú Panorama Stitching (Advanced feature)
+1. Setup + Foundational â€” åŸºç¡€è®¾æ–½å°±ç»ª
+2. US1â€“3 â€” Frame Selector Grid (MVP! Browse & select frames)
+3. US4 + US7 + US6 â€” Animation Export (Generate GIF/WebP with SSE progress)
+4. US8 â€” Multi-page Modal Navigation (Polish UX)
+5. US5 â€” Panorama Stitching (Advanced feature)
 6. Each increment adds value without breaking prior
 
 ### Suggested MVP Scope
 
-**Minimum**: US1 (Open frame selector) ¡ª user can see 11 keyframe thumbnails in a modal.
-**Recommended MVP**: US1 + US2 + US3 ¡ª user can browse, expand, select frames. At this point users get value (visual preview of video frames) even without export.
-**Full MVP**: + US4 + US7 + US6 ¡ª user can select frames and export as animated GIF/WebP.
+**Minimum**: US1 (Open frame selector) â€” user can see 11 keyframe thumbnails in a modal.
+**Recommended MVP**: US1 + US2 + US3 â€” user can browse, expand, select frames. At this point users get value (visual preview of video frames) even without export.
+**Full MVP**: + US4 + US7 + US6 â€” user can select frames and export as animated GIF/WebP.
 7. US9 è‡ªåŠ¨åŒ–æ‹¼æ¥è´¨é‡è¯„åˆ† â†’ Rust `#[cfg(test)]` + Python è¯„åˆ†è„šæœ¬ï¼Œå¯åœ¨ US5 åä»»ä½•æ—¶é—´ç‹¬ç«‹æŒ‡è¡Œ
