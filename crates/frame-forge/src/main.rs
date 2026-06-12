@@ -12,6 +12,7 @@ mod animate;
 mod blender;
 mod protocol;
 mod quality;
+mod resources;
 mod scene_classifier;
 mod server;
 mod stitch_anime;

@@ -462,6 +462,14 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         req.task_id, req.paths.len(), req.format, req.speed
     );
 
+    // Reject under high resource pressure to protect seek-preview latency (T085)
+    let pressure = crate::resources::resource_pressure();
+    if pressure > 0.8 {
+        log::warn!("[frame-forge] ANIMATE: resource pressure {pressure:.2} > 0.8, rejecting task");
+        send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
+        return Ok(());
+    }
+
     let total_input = req.paths.len();
     send_progress(stream, "running", "decoding", 0, total_input as u32, 0.0).await?;
     log::warn!("[frame-forge] ANIMATE progress sent, loading frame index...");
@@ -662,6 +670,14 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     let req = crate::protocol::read_animate_req(stream).await?;
     log::warn!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
 
+    // Reject under high resource pressure to protect seek-preview latency (T085)
+    let pressure = crate::resources::resource_pressure();
+    if pressure > 0.8 {
+        log::warn!("[frame-forge] STITCH: resource pressure {pressure:.2} > 0.8, rejecting task");
+        send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
+        return Ok(());
+    }
+
     // Load frame index (same pattern as animate)
     let fi = {
         let p = req.paths.first().map(|(p, _)| p.clone()).unwrap_or_default();
@@ -697,7 +713,28 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     }
 
     send_progress(stream, "running", "classifying", 0, 1, 30.0).await?;
-    let _hashes: Vec<u64> = images.iter().map(|img| crate::scene_classifier::phash(img)).collect();
+
+    // pHash near-duplicate removal: skip frames with Hamming distance ≤ 6 from predecessor (T078).
+    let orig_len = images.len();
+    let images: Vec<image::DynamicImage> = {
+        let hashes: Vec<u64> = images.iter().map(|img| crate::scene_classifier::phash(img)).collect();
+        let mut out: Vec<image::DynamicImage> = Vec::with_capacity(orig_len);
+        let mut last_hash: Option<u64> = None;
+        for (img, &h) in images.into_iter().zip(hashes.iter()) {
+            let is_dup = last_hash.map_or(false, |prev| (prev ^ h).count_ones() <= 6);
+            if !is_dup {
+                out.push(img);
+                last_hash = Some(h);
+            }
+        }
+        out
+    };
+    if images.len() != orig_len {
+        log::debug!("[frame-forge] pHash dedup: {} → {} unique frames", orig_len, images.len());
+    }
+    if images.len() < 2 {
+        anyhow::bail!("pHash dedup left < 2 unique frames; cannot stitch");
+    }
 
     let crop_rect = crate::quality::detect_border_crop(&images[0], 5.0);
     let images: Vec<image::DynamicImage> = images.iter()

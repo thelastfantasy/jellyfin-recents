@@ -166,7 +166,7 @@ export function FrameGrid() {
     const f = _frames[idx]; if (!f) return
     const title = _itemTitle || cleanItemTitle() || 'frame'
     const stamp = formatTime(f.posMs).replace(/[:.]/g, '-')
-    triggerDownload(frameUrl(_itemId, f.fiIdx, f.posMs, 0), `jellyfin-frame-${title}-${stamp}.jpg`)
+    triggerDownload(frameUrl(_itemId, f.fiIdx, f.posMs, 0), `jellyfin-frame-${title}-${stamp}.webp`)
   }, [])
   const handleRemove    = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], removed: true, selected: false }; setFrames([..._frames]) } }, [])
   const handleRetry     = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], loadError: false }; setFrames([..._frames]) } }, [])

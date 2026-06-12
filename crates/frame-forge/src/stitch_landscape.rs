@@ -67,7 +67,7 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
     Ok(DynamicImage::ImageRgba8(result))
 }
 
-fn image_to_mat(img: &DynamicImage) -> core::Mat {
+pub fn image_to_mat(img: &DynamicImage) -> core::Mat {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let raw = rgba.into_raw();
@@ -155,7 +155,7 @@ fn estimate_homography_akaze(img1: &core::Mat, img2: &core::Mat) -> anyhow::Resu
     Ok(h)
 }
 
-fn warp_image(img: &core::Mat, h: &core::Mat, width: i32, height: i32) -> RgbaImage {
+pub fn warp_image(img: &core::Mat, h: &core::Mat, width: i32, height: i32) -> RgbaImage {
     let mut warped = core::Mat::default();
     if let Err(e) = imgproc::warp_perspective(
         img, &mut warped, h,
@@ -176,7 +176,7 @@ fn warp_image(img: &core::Mat, h: &core::Mat, width: i32, height: i32) -> RgbaIm
     rgba
 }
 
-fn blend_pair(base: &RgbaImage, overlay: &RgbaImage) -> RgbaImage {
+pub fn blend_pair(base: &RgbaImage, overlay: &RgbaImage) -> RgbaImage {
     // Laplacian pyramid multi-band blending (T075-T076)
     pyramid_blend(base, overlay)
 }

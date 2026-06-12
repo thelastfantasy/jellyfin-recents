@@ -62,6 +62,10 @@ public class FrameExportController : ControllerBase
         if (item == null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
             return NotFound(new { error = "Item not found or no file path" });
 
+        // DRM check: reject known DRM-protected container formats (T086)
+        if (IsDrmProtected(item.Path))
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "DRM-protected content" });
+
         var fi = frameIdx ?? -1;
         await _frameExport.EnsureStartedAsync(ct);
 
@@ -218,6 +222,14 @@ public class FrameExportController : ControllerBase
                 {
                     task.Status = Services.TaskStatus.Error;
                     task.Error = "Item not found";
+                    task.ProgressChannel.Writer.TryComplete();
+                    return;
+                }
+
+                if (IsDrmProtected(item.Path))
+                {
+                    task.Status = Services.TaskStatus.Error;
+                    task.Error = "DRM-protected content";
                     task.ProgressChannel.Writer.TryComplete();
                     return;
                 }
@@ -437,5 +449,13 @@ public class FrameExportController : ControllerBase
     {
         _thresholds = t;
         return Ok(_thresholds);
+    }
+
+    /// Returns true if the file path matches a known DRM-protected container format.
+    private static bool IsDrmProtected(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".ncm" or ".kgm" or ".qmc" or ".tm2" or ".mgg" or ".mgg1" or ".kwm";
     }
 }

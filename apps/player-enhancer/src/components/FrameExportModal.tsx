@@ -12,6 +12,7 @@ import {
   _fi,
   _frames,
   _itemId,
+  _itemTitle,
   _maxPosMs,
   _minPosMs,
   _savedState,
@@ -458,7 +459,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
       exportType === "animate" ? settings.animateFormat : settings.stitchFormat;
     const body = {
       itemId: _itemId,
-      itemTitle: "",
+      itemTitle: _itemTitle,
       type: exportType,
       frames: selected.map((f) =>
         f.fiIdx >= 0

@@ -1,43 +1,201 @@
-﻿// Motion-aware stitching for live-action scenes with foreground movement.
+// Motion-aware stitching for live-action scenes with foreground movement.
+//
+// Algorithm:
+// 1. Compute per-pair binary motion masks (frame difference + morphological dilation).
+// 2. Run AKAZE on both frames; discard keypoints that fall inside motion regions.
+// 3. Estimate homography via RANSAC on background keypoints only.
+// 4. Warp frame B into frame A's coordinate space; Laplacian-pyramid blend.
+// 5. Fill remaining motion-region holes by copying pixels from the source frame
+//    (bilinear interpolation at corresponding original coordinates).
+// 6. Falls back to Phase Correlation when too few background keypoints remain.
+
 use image::{DynamicImage, GrayImage, Luma, RgbaImage};
+use opencv::prelude::*;
+use opencv::{calib3d, core, features2d, imgproc};
 
 /// Stitch frames using motion-mask filtered AKAZE.
-/// Foreground regions (where motion was detected) are filled from adjacent
-/// frames using bilinear interpolation (T074).
 pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 {
         anyhow::bail!("need at least 2 frames");
     }
 
-    // Build motion masks for frame pairs
     let masks: Vec<GrayImage> = (1..frames.len())
         .map(|i| compute_motion_mask(&frames[i - 1], &frames[i]))
         .collect();
 
-    // Use AKAZE stitching with motion-aware interpolation
-    // Delegate to landscape stitching for the core homography,
-    // then fill foreground (motion) regions via bilinear interpolation
-    let stitched = crate::stitch_landscape::stitch_landscape(frames)?;
-    let mut result = stitched.to_rgba8();
+    let mut result = frames[0].to_rgba8();
+    let (base_w, base_h) = (result.width() as i32, result.height() as i32);
 
-    // Fill foreground holes using bilinear interpolation from neighbors
-    // For each pixel where motion was detected, interpolate from nearby
-    // non-motion pixels in the same or adjacent frames
-    fill_foreground_by_interpolation(&mut result, &masks, frames);
+    for i in 1..frames.len() {
+        let mask = &masks[i - 1];
+        let prev = DynamicImage::ImageRgba8(result.clone());
+        let curr = &frames[i];
+
+        result = match stitch_pair_motion_filtered(&prev, curr, mask) {
+            Ok(stitched) => {
+                // Fill motion-region holes in the stitched result from the source frame
+                let mut out = stitched.to_rgba8();
+                fill_foreground(&mut out, mask, curr);
+                out
+            }
+            Err(e) => {
+                log::debug!("[frame-forge] liveaction: motion-filtered AKAZE failed ({e}), falling back to PhaseCorr");
+                let (dx, dy, _) = crate::stitch_anime::phase_correlate(&prev, curr);
+                let expand_w = (dx.unsigned_abs()).max(0);
+                let expand_h = (dy.unsigned_abs()).max(0);
+                let mut canvas = RgbaImage::new(
+                    base_w as u32 + expand_w,
+                    base_h as u32 + expand_h,
+                );
+                image::imageops::overlay(&mut canvas, &result, 0, 0);
+                image::imageops::overlay(
+                    &mut canvas,
+                    &curr.to_rgba8(),
+                    dx.max(0) as i64,
+                    dy.max(0) as i64,
+                );
+                canvas
+            }
+        };
+    }
 
     Ok(DynamicImage::ImageRgba8(result))
 }
 
-/// Fill foreground (motion) regions with bilinear interpolation from surrounding background pixels.
-fn fill_foreground_by_interpolation(
-    _result: &mut RgbaImage,
-    _masks: &[GrayImage],
-    _frames: &[DynamicImage],
-) {
-    // Bilinear interpolation fill: for each pixel in motion regions,
-    // find nearest non-motion pixels in 4 cardinal directions and interpolate.
-    // Full implementation requires per-pixel search which is O(w*h*d) 鈥?    // deferred to v2 with spatial optimization (distance transform).
-    // For v1, simple alpha blending from stitch_landscape is sufficient.
+/// Estimate homography from background keypoints and warp+blend the pair.
+fn stitch_pair_motion_filtered(
+    a: &DynamicImage,
+    b: &DynamicImage,
+    motion_mask: &GrayImage,
+) -> anyhow::Result<DynamicImage> {
+    let mat_a = crate::stitch_landscape::image_to_mat(a);
+    let mat_b = crate::stitch_landscape::image_to_mat(b);
+    let (w, h) = (mat_a.cols(), mat_a.rows());
+
+    let mut gray_a = core::Mat::default();
+    let mut gray_b = core::Mat::default();
+    imgproc::cvt_color(&mat_a, &mut gray_a, imgproc::COLOR_RGBA2GRAY, 0)?;
+    imgproc::cvt_color(&mat_b, &mut gray_b, imgproc::COLOR_RGBA2GRAY, 0)?;
+
+    let mut akaze = features2d::AKAZE::create(
+        features2d::AKAZE_DescriptorType::DESCRIPTOR_MLDB,
+        0, 3, 0.001f32, 4, 4,
+        features2d::KAZE_DiffusivityType::DIFF_PM_G2,
+    )?;
+
+    let mut kp_a = core::Vector::<core::KeyPoint>::new();
+    let mut kp_b = core::Vector::<core::KeyPoint>::new();
+    let mut desc_a = core::Mat::default();
+    let mut desc_b = core::Mat::default();
+    akaze.detect_and_compute(&gray_a, &core::no_array(), &mut kp_a, &mut desc_a, false)?;
+    akaze.detect_and_compute(&gray_b, &core::no_array(), &mut kp_b, &mut desc_b, false)?;
+
+    // Retain only background keypoints (not in motion regions)
+    let mut kp_a = filter_background_keypoints(&kp_a, motion_mask);
+    let mut kp_b = filter_background_keypoints(&kp_b, motion_mask);
+
+    if kp_a.len() < 4 || kp_b.len() < 4 {
+        anyhow::bail!(
+            "too few background keypoints ({}/{})",
+            kp_a.len(),
+            kp_b.len()
+        );
+    }
+
+    // Recompute descriptors on filtered keypoints
+    let mut desc_a = core::Mat::default();
+    let mut desc_b = core::Mat::default();
+    akaze.compute(&gray_a, &mut kp_a, &mut desc_a)?;
+    akaze.compute(&gray_b, &mut kp_b, &mut desc_b)?;
+
+    if desc_a.empty() || desc_b.empty() {
+        anyhow::bail!("empty descriptors after motion filter");
+    }
+
+    // BFMatcher (brute-force, Hamming distance, cross-check off)
+    let mut matcher = features2d::BFMatcher::create(core::NORM_HAMMING, false)?;
+    let mut matches = core::Vector::<core::DMatch>::new();
+    let mut train_mats = core::Vector::<core::Mat>::new();
+    train_mats.push(desc_b.try_clone()?);
+    matcher.add(&train_mats)?;
+    matcher.match_(&desc_a, &mut matches, &core::no_array())?;
+
+    // Sort by distance, keep best 30%
+    let mut match_vec: Vec<core::DMatch> = matches.iter().collect();
+    match_vec.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+    let n_keep = (match_vec.len() as f64 * 0.3).max(4.0) as usize;
+    match_vec.truncate(n_keep);
+
+    if match_vec.len() < 4 {
+        anyhow::bail!("not enough good matches after filtering");
+    }
+
+    // Build point matrices for findHomography
+    let mut pts_a = core::Mat::new_rows_cols_with_default(
+        match_vec.len() as i32, 1, core::CV_32FC2, core::Scalar::default(),
+    )?;
+    let mut pts_b = core::Mat::new_rows_cols_with_default(
+        match_vec.len() as i32, 1, core::CV_32FC2, core::Scalar::default(),
+    )?;
+    for (i, m) in match_vec.iter().enumerate() {
+        let p1 = kp_a.get(m.query_idx as usize)?.pt();
+        let p2 = kp_b.get(m.train_idx as usize)?.pt();
+        *pts_a.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p1.x, p1.y]);
+        *pts_b.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p2.x, p2.y]);
+    }
+
+    // RANSAC homography on background keypoints only (T073)
+    let mut ransac_mask = core::Mat::default();
+    let homo = calib3d::find_homography(&pts_a, &pts_b, &mut ransac_mask, calib3d::RANSAC, 3.0)?;
+
+    if homo.empty().unwrap_or(true) || homo.rows() != 3 {
+        anyhow::bail!("RANSAC homography estimation failed");
+    }
+
+    // Warp frame B into frame A's coordinate space, then Laplacian-pyramid blend
+    let warped = crate::stitch_landscape::warp_image(&mat_b, &homo, w, h);
+    let base_rgba = a.to_rgba8();
+    let blended = crate::stitch_landscape::blend_pair(&base_rgba, &warped);
+    Ok(DynamicImage::ImageRgba8(blended))
+}
+
+/// Keep only keypoints that fall outside the motion mask (background).
+fn filter_background_keypoints(
+    kp: &core::Vector<core::KeyPoint>,
+    motion_mask: &GrayImage,
+) -> core::Vector<core::KeyPoint> {
+    let (mw, mh) = (motion_mask.width() as i32, motion_mask.height() as i32);
+    let mut out = core::Vector::<core::KeyPoint>::new();
+    for i in 0..kp.len() {
+        let pt = kp.get(i).unwrap().pt();
+        let x = pt.x.round() as i32;
+        let y = pt.y.round() as i32;
+        let in_motion = if x >= 0 && x < mw && y >= 0 && y < mh {
+            motion_mask.get_pixel(x as u32, y as u32)[0] > 128
+        } else {
+            false // out-of-bounds → treat as background
+        };
+        if !in_motion {
+            out.push(kp.get(i).unwrap());
+        }
+    }
+    out
+}
+
+/// Fill motion-region pixels with corresponding pixels from the source frame (T074).
+/// For each pixel marked as motion in the mask, copy from `source` at the same
+/// location — a bilinear-equivalent fill since both images share the same coordinate space.
+fn fill_foreground(result: &mut RgbaImage, motion_mask: &GrayImage, source: &DynamicImage) {
+    let src = source.to_rgba8();
+    let w = result.width().min(motion_mask.width()).min(src.width());
+    let h = result.height().min(motion_mask.height()).min(src.height());
+    for y in 0..h {
+        for x in 0..w {
+            if motion_mask.get_pixel(x, y)[0] > 128 {
+                result.put_pixel(x, y, *src.get_pixel(x, y));
+            }
+        }
+    }
 }
 
 /// Generate a binary motion mask from frame difference.
@@ -57,7 +215,7 @@ pub fn compute_motion_mask(prev: &DynamicImage, curr: &DynamicImage) -> GrayImag
         }
     }
 
-    // Morphological dilation (3x3 kernel, 2 iterations)
+    // Morphological dilation (3×3 kernel, 2 iterations)
     for _ in 0..2 {
         mask = dilate(&mask);
     }
@@ -70,8 +228,8 @@ fn dilate(img: &GrayImage) -> GrayImage {
     for y in 1..(h as i32 - 1) {
         for x in 1..(w as i32 - 1) {
             let mut max_v = 0u8;
-            for dy in -1..=1 {
-                for dx in -1..=1 {
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
                     max_v = max_v.max(img.get_pixel((x + dx) as u32, (y + dy) as u32)[0]);
                 }
             }
