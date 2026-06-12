@@ -1,0 +1,7 @@
+{
+  "ssim_min": 0.80,
+  "seam_grad_max": 25.0,
+  "color_de_max": 10.0,
+  "ransac_inlier_min": 0.40,
+  "rmse_max": 5.0
+}

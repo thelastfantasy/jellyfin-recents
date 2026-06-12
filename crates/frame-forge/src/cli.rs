@@ -6,6 +6,8 @@
 mod animate;
 mod scene_classifier;
 mod stitch_anime;
+#[cfg(test)]
+mod test_metrics;
 
 use anyhow::Context;
 use image::DynamicImage;

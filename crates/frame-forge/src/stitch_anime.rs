@@ -361,3 +361,37 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
 
     Ok(DynamicImage::ImageRgb8(canvas))
 }
+
+#[cfg(test)]
+mod quality_tests {
+    use super::*;
+    use crate::test_metrics::*;
+
+    #[test]
+    fn ssim_identical_images() {
+        let img = DynamicImage::new_rgb8(64, 64);
+        assert!((ssim(&img, &img) - 1.0).abs() < 0.001, "SSIM of identical images must be ~1.0");
+    }
+
+    #[test]
+    fn ssim_different_images() {
+        let black = DynamicImage::new_rgb8(64, 64);
+        let white = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(64, 64, image::Rgb([255, 255, 255])));
+        assert!(ssim(&black, &white) < 0.5, "SSIM of black vs white must be low");
+    }
+
+    #[test]
+    fn phase_corr_ssim_on_synthetic_fixtures() {
+        let dir = fixtures_scene_a();
+        if !dir.exists() {
+            eprintln!("Skipping: run tests/stitch-eval/gen_synthetic.sh to generate fixtures");
+            return;
+        }
+        let t = load_thresholds();
+        let a = image::open(dir.join("frame_0.png")).expect("frame_0.png missing");
+        let b = image::open(dir.join("frame_1.png")).expect("frame_1.png missing");
+        let stitched = stitch_anime(&[a.clone(), b]).expect("stitch_anime failed");
+        let score = ssim(&stitched, &a);
+        assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
+    }
+}

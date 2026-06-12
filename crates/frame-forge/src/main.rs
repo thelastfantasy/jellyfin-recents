@@ -20,6 +20,8 @@ mod stitch_anime;
 mod stitch_landscape;
 #[cfg(feature = "opencv")]
 mod stitch_liveaction;
+#[cfg(test)]
+mod test_metrics;
 
 use anyhow::{Context, Result};
 use tokio::net::UnixListener;
@@ -42,6 +44,14 @@ async fn run() -> Result<()> {
     let sock_path = args.get(1).context("Usage: frame-forge <socket-path>")?;
 
     jfs_common::init();
+
+    #[cfg(feature = "opencv")]
+    {
+        let has_ocl = opencv::core::ocl::have_open_cl().unwrap_or(false);
+        let n_platforms = opencv::core::ocl::Platform::list()
+            .map(|v| v.len()).unwrap_or(0);
+        log::info!("[frame-forge] OpenCL available={has_ocl}, platforms={n_platforms}");
+    }
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;
@@ -304,5 +314,16 @@ mod tests {
         let gif_data = encode_gif(&images, &delays, 0).expect("encode_gif");
         assert_eq!(count_gif_frames(&gif_data), n,
             "[TAIL] GIF: expected {n} frames, got {}", count_gif_frames(&gif_data));
+    }
+
+    #[test]
+    #[ignore = "requires FRAME_FORGE_TEST_GPU=1 and Arc GPU passthrough + intel-opencl-icd"]
+    fn test_opencl_detected() {
+        if std::env::var_os("FRAME_FORGE_TEST_GPU").is_none() { return; }
+        #[cfg(feature = "opencv")]
+        assert!(
+            opencv::core::ocl::have_open_cl().unwrap_or(false),
+            "Arc A380 OpenCL not detected — check /dev/dri passthrough and intel-opencl-icd"
+        );
     }
 }

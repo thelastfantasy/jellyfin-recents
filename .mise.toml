@@ -95,3 +95,7 @@ run = "make workflow-test"
 [tasks.workflow-test-release]
 description = "本地运行 release workflow（构建步骤可测；GitHub Release/Pages 步骤因无真实 token 会失败）"
 run = "make workflow-test-release"
+
+[tasks.check-gpu]
+description = "验证 Arc A380 OpenCL 在 jellyfin-dev 容器内可见"
+run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"

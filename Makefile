@@ -67,6 +67,8 @@ build-frame-forge:
 		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
 		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
 		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       apt-get install -y -qq intel-opencl-icd clinfo ocl-icd-libopencl1 2>/dev/null || true && \
+		       clinfo --list 2>/dev/null || echo '[build] no OpenCL platforms (CPU fallback)' && \
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
 		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release"

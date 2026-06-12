@@ -284,21 +284,21 @@
 
 ### 测试基础设施
 
-- [ ] T092 [P] [US9] 创建 `tests/stitch-eval/thresholds.json`，内容：`{ "ssim_min": 0.80, "seam_grad_max": 25.0, "color_de_max": 10.0, "ransac_inlier_min": 0.40, "rmse_max": 5.0 }`，Rust 测试和 Python 脚本均从此文件读取阈值
-- [ ] T093 [P] [US9] 创建 `tests/stitch-eval/gen_synthetic.sh`：用 FFmpeg `crop` 滤镜把单张参考图裁切出 4 个水平偏移子图（每次偏移 N px，默认 N=100），用于场景 A Phase Correlation 路径验证；脚本输出到 `tests/stitch-eval/fixtures/scene_a/`
-- [ ] T094 [P] [US9] 在 `src/frame-forge/Cargo.toml` `[dev-dependencies]` 添加：`serde_json = "1"` (读取 thresholds.json)；`image` 已是生产依赖，无需重复添加
+- [x] T092 [P] [US9] 创建 `tests/stitch-eval/thresholds.json`，内容：`{ "ssim_min": 0.80, "seam_grad_max": 25.0, "color_de_max": 10.0, "ransac_inlier_min": 0.40, "rmse_max": 5.0 }`，Rust 测试和 Python 脚本均从此文件读取阈值
+- [x] T093 [P] [US9] 创建 `tests/stitch-eval/gen_synthetic.sh`：用 FFmpeg `crop` 滤镜把单张参考图裁切出 4 个水平偏移子图（每次偏移 N px，默认 N=100），用于场景 A Phase Correlation 路径验证；脚本输出到 `tests/stitch-eval/fixtures/scene_a/`
+- [x] T094 [P] [US9] 在 `src/frame-forge/Cargo.toml` `[dev-dependencies]` 添加：`serde_json = "1"` (读取 thresholds.json)；`image` 已是生产依赖，无需重复添加
 
 ### Rust 拼接质量测试模块
 
-- [ ] T095 [P] [US9] 在 `src/frame-forge/src/stitch_anime.rs` 添加 `#[cfg(test)] mod quality_tests`：实现 `ssim(img_a, img_b) -> f32`（基于像素均值/方差/协方差）、`seam_grad_jump(stitched, seam_x) -> f32`（接缝左右各 5px 梯度均值差）、`color_de_mean(img_a, img_b) -> f32`（L*a*b* 欧氏距离均值）；对 gen_synthetic.sh 生成的合成平移序列验证 SSIM ≥ 0.90
-- [ ] T096 [P] [US9] 在 `src/frame-forge/src/stitch_landscape.rs` 添加 `#[cfg(test)] mod quality_tests`：复用 T095 的 ssim/seam_grad/color_de 函数；额外实现 `ransac_inlier_rate(matches, inliers) -> f32` 和 `reprojection_rmse(pts_src, pts_dst, h) -> f32`；对 SEAGULL fixtures（若存在）验证 SSIM ≥ 0.80、RANSAC 内点率 ≥ 0.40
-- [ ] T097 [P] [US9] 在 `src/frame-forge/src/stitch_liveaction.rs` 添加 `#[cfg(test)] mod quality_tests`：复用上述指标函数；对 Walking Tour fixtures（若存在）验证 SSIM ≥ 0.80、RMSE ≤ 5.0px；测试数据集不存在时用 `#[ignore]` 标记该测试（不阻塞 CI）
+- [x] T095 [P] [US9] 在 `src/frame-forge/src/stitch_anime.rs` 添加 `#[cfg(test)] mod quality_tests`：实现 `ssim(img_a, img_b) -> f32`（基于像素均值/方差/协方差）、`seam_grad_jump(stitched, seam_x) -> f32`（接缝左右各 5px 梯度均值差）、`color_de_mean(img_a, img_b) -> f32`（L*a*b* 欧氏距离均值）；对 gen_synthetic.sh 生成的合成平移序列验证 SSIM ≥ 0.90
+- [x] T096 [P] [US9] 在 `src/frame-forge/src/stitch_landscape.rs` 添加 `#[cfg(test)] mod quality_tests`：复用 T095 的 ssim/seam_grad/color_de 函数；额外实现 `ransac_inlier_rate(matches, inliers) -> f32` 和 `reprojection_rmse(pts_src, pts_dst, h) -> f32`；对 SEAGULL fixtures（若存在）验证 SSIM ≥ 0.80、RANSAC 内点率 ≥ 0.40
+- [x] T097 [P] [US9] 在 `src/frame-forge/src/stitch_liveaction.rs` 添加 `#[cfg(test)] mod quality_tests`：复用上述指标函数；对 Walking Tour fixtures（若存在）验证 SSIM ≥ 0.80、RMSE ≤ 5.0px；测试数据集不存在时用 `#[ignore]` 标记该测试（不阻塞 CI）
 
 ### Python 批量评估脚本
 
-- [ ] T098 [US9] 创建 `tests/stitch-eval/score.py`：接收参数 `<fixtures_dir>`，遍历子目录中的 `(input_a.png, input_b.png, reference.png)` 三元组；对每对计算 SSIM、ΔE、RMSE、接缝梯度跳变（可选 RANSAC 内点率）；输出 JSON 到 stdout：`{ "pairs": [{...per-pair metrics...}], "summary": { "ssim_mean": x, ..., "overall": "pass"|"fail" } }`
-- [ ] T099 [US9] `score.py` 从 `thresholds.json` 读取阈值（与 Rust 测试共享同一配置文件），任一指标低于阈值时在 stderr 打印 `FAIL: ssim=0.72 < 0.80` 格式，退出码为 1；fixtures 目录不存在时退出码为 2 并打印提示
-- [ ] T100 [P] [US9] 创建 `tests/stitch-eval/README.md`（或在 research.md 添加章节）：记录如何用 `gen_synthetic.sh` 生成场景 A fixtures，如何下载 SEAGULL/UDIS-D 数据集图像对，如何运行 `score.py`
+- [x] T098 [US9] 创建 `tests/stitch-eval/score.py`：接收参数 `<fixtures_dir>`，遍历子目录中的 `(input_a.png, input_b.png, reference.png)` 三元组；对每对计算 SSIM、ΔE、RMSE、接缝梯度跳变（可选 RANSAC 内点率）；输出 JSON 到 stdout：`{ "pairs": [{...per-pair metrics...}], "summary": { "ssim_mean": x, ..., "overall": "pass"|"fail" } }`
+- [x] T099 [US9] `score.py` 从 `thresholds.json` 读取阈值（与 Rust 测试共享同一配置文件），任一指标低于阈值时在 stderr 打印 `FAIL: ssim=0.72 < 0.80` 格式，退出码为 1；fixtures 目录不存在时退出码为 2 并打印提示
+- [x] T100 [P] [US9] 创建 `tests/stitch-eval/README.md`（或在 research.md 添加章节）：记录如何用 `gen_synthetic.sh` 生成场景 A fixtures，如何下载 SEAGULL/UDIS-D 数据集图像对，如何运行 `score.py`
 
 **Checkpoint**: `cargo test -p frame-forge` 通过（包含 quality_tests，数据集不存在的用例 `#[ignore]`）；`python tests/stitch-eval/score.py tests/stitch-eval/fixtures/` 在合成 fixtures 上输出 overall=pass
 
@@ -314,7 +314,7 @@
 
 ### Docker 运行命令更新
 
-- [ ] T102 更新 `CLAUDE.md` 和 `memory/` 中的 Docker 启动命令，添加 GPU 透传参数：
+- [x] T102 更新 `CLAUDE.md` 和 `memory/` 中的 Docker 启动命令，添加 GPU 透传参数：
   ```bash
   MSYS_NO_PATHCONV=1 docker run -d --name jellyfin-dev     -p 8600:8096     -v jellyfin-config:/config     -v jellyfin-cache:/cache     -v "d:/Dev/jellyfin-recents/demo:/media/demo"     -e JELLYFIN_WEB_DIR=/jellyfin/jellyfin-web     --device /dev/dri:/dev/dri     --group-add video     --group-add render     jellyfin/jellyfin:latest
   ```
@@ -322,13 +322,13 @@
 
 ### 容器内 OpenCL 运行时安装
 
-- [ ] T103 在 `Makefile` 的 `build-frame-forge` Docker build 步骤添加 OpenCL 运行时安装：
+- [x] T103 在 `Makefile` 的 `build-frame-forge` Docker build 步骤添加 OpenCL 运行时安装：
   ```makefile
   apt-get install -y intel-opencl-icd clinfo ocl-icd-libopencl1
   ```
   并在 build 步骤末尾执行 `clinfo --list` 验证平台可见（若无 GPU 则输出"no platforms"但不报错，保持 CPU fallback 可用）
 
-- [ ] T104 [P] 在 `.mise.toml` 添加 `check-gpu` task：
+- [x] T104 [P] 在 `.mise.toml` 添加 `check-gpu` task：
   ```toml
   [tasks.check-gpu]
   run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"
@@ -337,7 +337,7 @@
 
 ### Rust GPU 路径测试
 
-- [ ] T105 [P] [US9] 在 `src/frame-forge/src/main.rs` daemon 启动日志中添加 OpenCL 可用性检测并输出：
+- [x] T105 [P] [US9] 在 `src/frame-forge/src/main.rs` daemon 启动日志中添加 OpenCL 可用性检测并输出：
   ```rust
   let has_ocl = opencv::core::ocl::have_open_cl().unwrap_or(false);
   let platforms = opencv::core::ocl::Platform::list().unwrap_or_default();
@@ -345,13 +345,13 @@
   ```
   这样生产日志中可直接确认 GPU 是否被激活
 
-- [ ] T106 [P] [US9] 在 `src/frame-forge/src/stitch_landscape.rs` `#[cfg(test)] mod quality_tests` 添加 GPU 路径对比测试：
+- [x] T106 [P] [US9] 在 `src/frame-forge/src/stitch_landscape.rs` `#[cfg(test)] mod quality_tests` 添加 GPU 路径对比测试：
   - 当环境变量 `FRAME_FORGE_TEST_GPU=1` 存在时执行（否则 `#[ignore]`）
   - 用相同输入分别跑 CPU path（`setUseOpenCL(false)`）和 GPU path（`setUseOpenCL(true)`）
   - 断言两者 SSIM ≥ 0.80 且两路结果互相 SSIM ≥ 0.95（GPU 不应产生明显质量差异）
   - 断言 GPU path 耗时 ≤ CPU path × 2.0（允许首次 JIT 编译开销，不要求严格加速）
 
-- [ ] T107 [P] [US9] 在 `src/frame-forge/src/main.rs` `#[cfg(test)]` 添加 `test_opencl_detected`：
+- [x] T107 [P] [US9] 在 `src/frame-forge/src/main.rs` `#[cfg(test)]` 添加 `test_opencl_detected`：
   ```rust
   #[test]
   #[cfg_attr(not(env = "FRAME_FORGE_TEST_GPU"), ignore)]

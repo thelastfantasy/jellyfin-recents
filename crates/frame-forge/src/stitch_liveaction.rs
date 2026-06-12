@@ -238,3 +238,45 @@ fn dilate(img: &GrayImage) -> GrayImage {
     }
     result
 }
+
+#[cfg(test)]
+mod quality_tests {
+    use super::*;
+    use crate::test_metrics::*;
+    use std::path::PathBuf;
+
+    fn walking_tour_fixtures() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/stitch-eval/fixtures/walking_tour")
+    }
+
+    #[test]
+    #[ignore = "requires Walking Tour dataset — see tests/stitch-eval/README.md"]
+    fn liveaction_ssim_and_rmse() {
+        let dir = walking_tour_fixtures();
+        if !dir.exists() {
+            eprintln!("Skipping: Walking Tour fixtures not found at {:?}", dir);
+            return;
+        }
+        let t = load_thresholds();
+        let a = image::open(dir.join("input_a.png")).expect("input_a.png");
+        let b = image::open(dir.join("input_b.png")).expect("input_b.png");
+        let reference = image::open(dir.join("reference.png")).expect("reference.png");
+
+        let stitched = stitch_liveaction(&[a, b]).expect("stitch_liveaction failed");
+        let score = ssim(&stitched, &reference);
+        assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
+    }
+
+    #[test]
+    fn motion_mask_marks_changed_regions() {
+        // Pure white frame vs pure black frame → every pixel should be motion.
+        let white = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            32, 32, image::Rgba([255, 255, 255, 255]),
+        ));
+        let black = DynamicImage::new_rgba8(32, 32);
+        let mask = compute_motion_mask(&white, &black);
+        let hot = mask.pixels().filter(|p| p[0] > 128).count();
+        assert!(hot > 0, "motion mask should have active pixels for black/white pair");
+    }
+}

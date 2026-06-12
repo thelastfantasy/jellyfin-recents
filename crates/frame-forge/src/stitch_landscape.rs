@@ -427,3 +427,50 @@ fn resize_mask(mask: &GrayMask, target_w: u32, target_h: u32) -> GrayMask {
     }
     resized
 }
+
+#[cfg(test)]
+mod quality_tests {
+    use super::*;
+    use crate::test_metrics::*;
+    use std::path::PathBuf;
+
+    fn seagull_fixtures() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/stitch-eval/fixtures/seagull")
+    }
+
+    #[test]
+    fn landscape_ssim_on_seagull_fixtures() {
+        let dir = seagull_fixtures();
+        if !dir.exists() {
+            eprintln!("Skipping: SEAGULL fixtures not found at {:?}", dir);
+            return;
+        }
+        let t = load_thresholds();
+        let a = image::open(dir.join("input_a.png")).expect("input_a.png");
+        let b = image::open(dir.join("input_b.png")).expect("input_b.png");
+        let reference = image::open(dir.join("reference.png")).expect("reference.png");
+        let stitched = stitch_landscape(&[a, b]).expect("stitch_landscape failed");
+        let score = ssim(&stitched, &reference);
+        assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
+    }
+
+    #[test]
+    #[ignore = "requires FRAME_FORGE_TEST_GPU=1 and Arc GPU passthrough"]
+    fn gpu_cpu_consistency() {
+        if std::env::var_os("FRAME_FORGE_TEST_GPU").is_none() { return; }
+        let dir = seagull_fixtures();
+        if !dir.exists() { eprintln!("Skipping: SEAGULL fixtures not found"); return; }
+        let a = image::open(dir.join("input_a.png")).expect("input_a.png");
+        let b = image::open(dir.join("input_b.png")).expect("input_b.png");
+
+        opencv::core::ocl::set_use_open_cl(false).ok();
+        let cpu = stitch_landscape(&[a.clone(), b.clone()]).expect("CPU stitch failed");
+
+        opencv::core::ocl::set_use_open_cl(true).ok();
+        let gpu = stitch_landscape(&[a, b]).expect("GPU stitch failed");
+
+        let score = ssim(&cpu, &gpu);
+        assert!(score >= 0.95, "CPU/GPU consistency SSIM {:.3} < 0.95", score);
+    }
+}
