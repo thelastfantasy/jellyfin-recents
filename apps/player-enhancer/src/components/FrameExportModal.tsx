@@ -394,6 +394,17 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     return () => { prefetchAbortRef.current?.abort(); };
   }, []);
 
+  // 轮询视频当前位置，自然播放超出显示范围时清空帧格
+  useEffect(() => {
+    const id = setInterval(() => {
+      const curMs = Math.round(videoEl.currentTime * 1000)
+      if (_frames.length > 0 && (curMs < _minPosMs || curMs > _maxPosMs)) {
+        setFrames([])
+      }
+    }, 500)
+    return () => clearInterval(id)
+  }, [videoEl])
+
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
   const expandBack = useCallback(() => {

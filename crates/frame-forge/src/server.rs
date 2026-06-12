@@ -1374,10 +1374,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         let fps_den_c = *fps_den;
         log::debug!("[bench][prefetch] +{}ms [priority_adjust] skipped — index cached frames={}", bench_now_ms() - t0, frames.len());
 
+        // current_frame_idx is a sequential DTS-order index (from queue_b fi = all_frames.len()).
+        // Using compute_frame_idx() to convert ms→frame_number causes a constant offset on
+        // videos whose first packet PTS is non-zero (e.g. PTS≈4.7 s → 138-frame bias at 29fps).
+        // Just use it as a direct index into the cache.
         let anchor_ms = if req.current_frame_idx >= 0 {
-            let pos = frames.partition_point(|(ms, _)| {
-                compute_frame_idx(*ms, fps_num_c, fps_den_c) < req.current_frame_idx
-            });
+            let pos = (req.current_frame_idx as usize).min(frames.len().saturating_sub(1));
             frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
         } else {
             current_time_ms
