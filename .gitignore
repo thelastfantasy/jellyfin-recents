@@ -100,3 +100,11 @@ apps/frontend/.vite/
 # 拼接测试
 stitch-source/
 
+# stitch-eval：下载的第三方素材（可能有版权）和生成产物，不入库
+tests/stitch-eval/downloads/
+tests/stitch-eval/fixtures/
+tests/stitch-eval/seagull-src/
+tests/stitch-eval/demo-output/
+tests/stitch-eval/demo-output-py/
+tests/stitch-eval/report.html
+

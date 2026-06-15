@@ -76,11 +76,35 @@ fn cmd_stitch(args: &[String]) -> anyhow::Result<()> {
     eprintln!("Scene: {:?}  Edge: {:.3}  Entropy: {:.1}",
         class.category, class.edge_density, class.color_entropy);
 
-    eprintln!("Stitching with Phase Correlation...");
-    let result = stitch_anime::stitch_anime(&images)?;
+    let result = stitch_routed(&class, &images)?;
     result.save(output)?;
     eprintln!("Saved: {output} ({}x{})", result.width(), result.height());
     Ok(())
+}
+
+#[cfg(feature = "opencv")]
+fn stitch_routed(class: &scene_classifier::SceneClass, images: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
+    use scene_classifier::SceneCategory;
+    match class.category {
+        SceneCategory::LiveAction => {
+            eprintln!("Auto-routing: liveaction (OpenCV Stitcher)");
+            stitch_liveaction::stitch_liveaction(images)
+        }
+        SceneCategory::Landscape => {
+            eprintln!("Auto-routing: landscape (SIFT + Laplacian)");
+            stitch_landscape::stitch_landscape(images)
+        }
+        SceneCategory::Anime => {
+            eprintln!("Auto-routing: anime (Phase Correlation)");
+            stitch_anime::stitch_anime(images)
+        }
+    }
+}
+
+#[cfg(not(feature = "opencv"))]
+fn stitch_routed(_class: &scene_classifier::SceneClass, images: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
+    eprintln!("Auto-routing: Phase Correlation (opencv unavailable)");
+    stitch_anime::stitch_anime(images)
 }
 
 fn cmd_animate(args: &[String]) -> anyhow::Result<()> {

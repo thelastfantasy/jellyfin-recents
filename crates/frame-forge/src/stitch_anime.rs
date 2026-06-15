@@ -9,12 +9,12 @@ const QUALITY_THRESHOLD: f64 = 0.02;
 pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32, f64) {
     let ga = a.to_luma8();
     let gb = b.to_luma8();
-    let (w, h) = ga.dimensions();
-    let w = w as usize;
-    let h = h as usize;
+    // Use min of both dimensions: handles slight size differences between frames.
+    let w = (ga.width().min(gb.width())) as usize;
+    let h = (ga.height().min(gb.height())) as usize;
 
-    let ham_a = apply_hamming(&ga);
-    let ham_b = apply_hamming(&gb);
+    let ham_a = apply_hamming_region(&ga, w, h);
+    let ham_b = apply_hamming_region(&gb, w, h);
 
     let mut fa: Vec<Complex<f64>> = ham_a.iter().map(|&v| Complex { re: v, im: 0.0 }).collect();
     let mut fb: Vec<Complex<f64>> = ham_b.iter().map(|&v| Complex { re: v, im: 0.0 }).collect();
@@ -70,10 +70,7 @@ fn parabola_refine(left: f64, center: f64, right: f64) -> f64 {
     (right - left) / denom
 }
 
-fn apply_hamming(gray: &image::GrayImage) -> Vec<f64> {
-    let (w, h) = gray.dimensions();
-    let w = w as usize;
-    let h = h as usize;
+fn apply_hamming_region(gray: &image::GrayImage, w: usize, h: usize) -> Vec<f64> {
     let mut result = vec![0.0; w * h];
     for y in 0..h {
         for x in 0..w {

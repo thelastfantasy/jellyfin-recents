@@ -76,29 +76,83 @@ if [ -f "$SRC_LA" ] && [ -f "$SRC_LB" ]; then
   cp "$FIXTURES/walking_tour/input_a.png" "$FIXTURES/walking_tour/reference.png"
 fi
 
+# ── Scene 4: Flower macro (repeating flower patterns, bokeh bg) ───────────────
+mkdir -p "$FIXTURES/flower_landscape"
+SRC_F1="$DOWNLOADS/flower/1.jpg"
+SRC_F2="$DOWNLOADS/flower/2.jpg"
+if [ -f "$SRC_F1" ] && [ -f "$SRC_F2" ]; then
+  echo "[demo] Preparing flower fixtures (1+2)..."
+  ffmpeg -y -i "$SRC_F1" "$FIXTURES/flower_landscape/input_a.png" 2>/dev/null
+  ffmpeg -y -i "$SRC_F2" "$FIXTURES/flower_landscape/input_b.png" 2>/dev/null
+  cp "$FIXTURES/flower_landscape/input_a.png" "$FIXTURES/flower_landscape/reference.png"
+fi
+
+# ── Scene 5: CMU1 (different CMU building exterior) ──────────────────────────
+mkdir -p "$FIXTURES/cmu1"
+SRC_CMU1A="$DOWNLOADS/CMU1/medium00.jpg"
+SRC_CMU1B="$DOWNLOADS/CMU1/medium01.jpg"
+if [ -f "$SRC_CMU1A" ] && [ -f "$SRC_CMU1B" ]; then
+  echo "[demo] Preparing CMU1 fixtures (medium00+01)..."
+  ffmpeg -y -i "$SRC_CMU1A" "$FIXTURES/cmu1/input_a.png" 2>/dev/null
+  ffmpeg -y -i "$SRC_CMU1B" "$FIXTURES/cmu1/input_b.png" 2>/dev/null
+  cp "$FIXTURES/cmu1/input_a.png" "$FIXTURES/cmu1/reference.png"
+fi
+
+# ── Scene 6: UAV aerial footage (top-down drone shots) ───────────────────────
+mkdir -p "$FIXTURES/uav"
+SRC_UAVA="$DOWNLOADS/uav/medium01.jpg"
+SRC_UAVB="$DOWNLOADS/uav/medium02.jpg"
+if [ -f "$SRC_UAVA" ] && [ -f "$SRC_UAVB" ]; then
+  echo "[demo] Preparing UAV fixtures (medium01+02)..."
+  ffmpeg -y -i "$SRC_UAVA" "$FIXTURES/uav/input_a.png" 2>/dev/null
+  ffmpeg -y -i "$SRC_UAVB" "$FIXTURES/uav/input_b.png" 2>/dev/null
+  cp "$FIXTURES/uav/input_a.png" "$FIXTURES/uav/reference.png"
+fi
+
+# ── Scene 7: Zijing campus garden ────────────────────────────────────────────
+mkdir -p "$FIXTURES/zijing"
+SRC_ZJA="$DOWNLOADS/zijing/medium01.jpg"
+SRC_ZJB="$DOWNLOADS/zijing/medium02.jpg"
+if [ -f "$SRC_ZJA" ] && [ -f "$SRC_ZJB" ]; then
+  echo "[demo] Preparing Zijing fixtures (medium01+02)..."
+  ffmpeg -y -i "$SRC_ZJA" "$FIXTURES/zijing/input_a.png" 2>/dev/null
+  ffmpeg -y -i "$SRC_ZJB" "$FIXTURES/zijing/input_b.png" 2>/dev/null
+  cp "$FIXTURES/zijing/input_a.png" "$FIXTURES/zijing/reference.png"
+fi
+
 # ── Build forge with opencv ───────────────────────────────────────────────────
+# cargo clean -p frame-forge is required: Windows NTFS mtime is unreliable
+# inside Docker mounts, preventing incremental rebuild from detecting source changes.
+echo "[demo] Cleaning frame-forge cache (Windows NTFS mtime workaround)..."
+/root/.cargo/bin/cargo clean -p frame-forge 2>/dev/null || true
 echo "[demo] Building forge (cli + opencv features)..."
 LIBCLANG_PATH=/usr/lib/llvm-18/lib \
-  /root/.cargo/bin/cargo build -p frame-forge --features "cli,opencv" --release 2>&1 | grep -E "^error|Compiling frame-forge|Finished"
+  /root/.cargo/bin/cargo build -p frame-forge --features "cli,opencv" --release
 FORGE=/workspace/target/release/forge
+FORGE_MD5=$(md5sum "$FORGE" | awk '{print $1}')
+echo "[demo] forge binary MD5: $FORGE_MD5"
 
 # ── Run stitches ─────────────────────────────────────────────────────────────
-for SCENE in landscape_cmu synthetic_landscape walking_tour; do
+for SCENE in landscape_cmu synthetic_landscape walking_tour flower_landscape cmu1 uav zijing; do
   DIR="$FIXTURES/$SCENE"
   [ -f "$DIR/input_a.png" ] || continue
-  MODE="landscape"
-  [ "$SCENE" = "walking_tour" ] && MODE="liveaction"
   echo ""
-  echo "[demo] === $SCENE ($MODE) ==="
+  echo "[demo] === $SCENE (auto-detect) ==="
   OUT="$OUTPUT/${SCENE}_stitched.png"
-  $FORGE stitch-${MODE} --input "$DIR/input_a.png" "$DIR/input_b.png" --output "$OUT" 2>&1
+  # Pass all frame_*.png if present (multi-frame scenes), else the two-frame pair.
+  FRAMES=$(ls "$DIR"/frame_*.png 2>/dev/null | sort | tr '\n' ' ')
+  if [ -n "$FRAMES" ]; then
+    $FORGE stitch --input $FRAMES --output "$OUT" 2>&1
+  else
+    $FORGE stitch --input "$DIR/input_a.png" "$DIR/input_b.png" --output "$OUT" 2>&1
+  fi
   echo "[demo] Output: $OUT"
 done
 
 # ── Python reference stitches ─────────────────────────────────────────────────
 echo ""
 echo "[demo] === Python reference stitches (AKAZE+RANSAC+canvas expansion) ==="
-for SCENE in landscape_cmu synthetic_landscape walking_tour; do
+for SCENE in landscape_cmu synthetic_landscape walking_tour flower_landscape cmu1 uav zijing; do
   DIR="$FIXTURES/$SCENE"
   [ -f "$DIR/input_a.png" ] || continue
   OUT_PY="$OUTPUT_PY/${SCENE}_stitched.png"
@@ -120,3 +174,13 @@ echo "  Rust PNGs:   $OUTPUT/"
 ls -lh "$OUTPUT/"
 echo "  Python PNGs: $OUTPUT_PY/"
 ls -lh "$OUTPUT_PY/"
+
+# ── Auto-generate HTML report ────────────────────────────────────────────────
+GEN_REPORT=/workspace/tests/stitch-eval/gen_report.py
+REPORT_HTML=/workspace/tests/stitch-eval/report.html
+if [ -f "$GEN_REPORT" ]; then
+  echo ""
+  echo "[demo] Generating HTML report..."
+  python3 "$GEN_REPORT" "$FIXTURES" "$OUTPUT" "$OUTPUT_PY" "$REPORT_HTML" 2>&1 || true
+  echo "[demo] Report: $REPORT_HTML"
+fi

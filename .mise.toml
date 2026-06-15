@@ -28,6 +28,10 @@ run = "make check-seek-preview"
 description = "在 Docker 中类型检查 frame-forge（快速，不产出二进制）"
 run = "make check-frame-forge"
 
+[tasks.check-frame-forge-opencv]
+description = "在 Docker 中类型检查 frame-forge（含 opencv 特性，覆盖 stitch_liveaction 等 opencv 代码路径）"
+run = "make check-frame-forge-opencv"
+
 [tasks.check-seek-preview-ps1]
 description = "pwsh: Docker 内 check seek-preview"
 run = "pwsh -NoProfile -File scripts/check-seek-preview.ps1"
@@ -101,5 +105,5 @@ description = "验证 Arc A380 OpenCL 在 jellyfin-dev 容器内可见"
 run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"
 
 [tasks.demo-stitch]
-description = "拼接质量演示：构建 forge(cli+opencv)，生成 fixtures，拼接，score.py 评分"
+description = "拼接质量演示：cargo clean(修复Windows NTFS mtime) → 构建 forge(cli+opencv) → 生成 fixtures → 拼接 → score.py 评分 → 结果写 tests/stitch-eval/demo-output/"
 run = "make demo-stitch"
