@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl build-essential pkg-config ca-certificates \
   software-properties-common clang libclang-dev ffmpeg \
-  libopencv-dev python3-pip python3-pil 2>/dev/null
+  libopencv-dev python3-pip python3-pil libssl-dev 2>/dev/null
 add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq
 apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 apt-get install -y -qq python3-numpy python3-opencv 2>/dev/null || true

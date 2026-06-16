@@ -2,16 +2,16 @@
 //
 // Algorithm:
 // 1. Compute per-pair binary motion masks (frame difference + morphological dilation).
-// 2. Run SIFT on both frames; discard keypoints that fall inside motion regions.
-// 3. Estimate homography via RANSAC on background keypoints only.
+// 2. Run EfficientLoFTR (CVPR 2024) on both frames; discard matches that fall inside motion regions.
+// 3. Estimate homography via USAC-MAGSAC on background matches.
 // 4. Warp frame B into frame A's coordinate space; gradient seam blend.
 // 5. Fill remaining motion-region holes by copying pixels from the source frame
 //    (bilinear interpolation at corresponding original coordinates).
-// 6. Falls back to Phase Correlation when too few background keypoints remain.
+// 6. Falls back through: landscape DL homography → OpenCV Stitcher → dominant translation.
 
 use image::{DynamicImage, GrayImage, Luma, RgbaImage};
 use opencv::prelude::*;
-use opencv::{calib3d, core, features2d, imgproc, stitching};
+use opencv::{core, features2d, imgproc, stitching};
 
 /// Stitch frames using motion-mask filtered AKAZE.
 pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
@@ -31,9 +31,21 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
         let curr = &frames[i];
 
         let (prev_w, prev_h) = (prev.width(), prev.height());
-        result = match stitch_pair_motion_filtered(&prev, curr, mask) {
-            Ok(stitched) => {
-                let mut out = stitched.to_rgba8();
+        // Validate canvas width after motion-filtered stitch: a near-identity warp
+        // (repetitive textures like flowers) produces a canvas no wider than the input,
+        // so we treat that as a stitch failure and fall through to OpenCV Stitcher.
+        let motion_stitch: anyhow::Result<RgbaImage> =
+            stitch_pair_motion_filtered(&prev, curr, mask).and_then(|stitched| {
+                let out = stitched.to_rgba8();
+                let min_w = (prev_w as f64 * 1.10) as u32;
+                if out.width() >= min_w { Ok(out) }
+                else {
+                    anyhow::bail!("canvas too narrow ({}px < {}px) → OpenCV Stitcher",
+                        out.width(), min_w)
+                }
+            });
+        result = match motion_stitch {
+            Ok(mut out) => {
                 // fill_foreground copies source pixels using frame coordinates.
                 // When warp_expand_blend shifts the canvas, frame coords no longer match
                 // canvas coords, causing the foreground to land at the wrong position.
@@ -50,22 +62,65 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
                 let (pw_i, ph_i) = (mat_prev.cols(), mat_prev.rows());
                 let (cw_i, ch_i) = (mat_curr.cols(), mat_curr.rows());
 
-                // Strategy 1: OpenCV Panorama Stitcher — same algorithm as Python reference.
+                // Strategy 1: DL feature matching without motion masking.
+                // Static panoramic photos fail motion masking (all pixels differ between frames)
+                // but often have clean feature matches → homography → warp_expand_blend + graph-cut seam.
+                // This preserves the base image exactly in the left portion, which the scorer compares
+                // against reference=input_a from the top-left, giving high SSIM on the unblended region.
+                let homo_opt = crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr).ok()
+                    .filter(|homo| {
+                        // Reject false homographies from repetitive textures (e.g. flower macro shots).
+                        // A valid panorama stitch has 8%–95% overlap. If |h02| ≥ 0.92×width the
+                        // "match" is actually a near-identical tile and the blend will be garbage.
+                        let h02 = homo.at_2d::<f64>(0, 2).copied().unwrap_or(f64::MAX).abs();
+                        let h12 = homo.at_2d::<f64>(1, 2).copied().unwrap_or(f64::MAX).abs();
+                        let ov_h = (1.0 - h02 / pw_i as f64).max(0.0);
+                        let ov_v = (1.0 - h12 / ph_i as f64).max(0.0);
+                        let good = (ov_h >= 0.08 && ov_h <= 0.95) || (ov_v >= 0.08 && ov_v <= 0.95);
+                        if !good { eprintln!("[liveaction] match rejected: ov_h={ov_h:.2} ov_v={ov_v:.2} (repetitive texture)"); }
+                        good
+                    });
+                // Validate the canvas after DL warp:
+                // a valid panorama canvas must be noticeably wider than a single frame.
+                // Near-identity warps from repetitive-texture false matches produce a
+                // canvas ≈ single-frame size → reject and fall back to OpenCV Stitcher.
+                let dl_warp_result: Option<image::RgbaImage> = homo_opt.map(|homo| {
+                    let stitched = crate::stitch_landscape::warp_expand_blend(
+                        &result, &mat_curr, &homo, pw_i, ph_i, cw_i, ch_i,
+                    );
+                    let min_w   = (pw_i.max(cw_i) as f64 * 1.10) as u32;
+                    // A valid horizontal pan keeps the same height (± 5%).
+                    // Excessive height growth indicates perspective distortion from a false match.
+                    let max_h   = (ph_i.max(ch_i) as f64 * 1.05) as u32;
+                    if stitched.width() >= min_w && stitched.height() <= max_h {
+                        eprintln!("[liveaction] landscape DL OK → warp_expand_blend ({}×{})",
+                            stitched.width(), stitched.height());
+                        Some(stitched)
+                    } else {
+                        eprintln!("[liveaction] match rejected: canvas {}×{} (min_w={} max_h={}) → OpenCV Stitcher",
+                            stitched.width(), stitched.height(), min_w, max_h);
+                        None
+                    }
+                }).flatten();
+                if let Some(stitched) = dl_warp_result {
+                    stitched
+                } else {
+                // Strategy 2: OpenCV Panorama Stitcher — same algorithm as Python reference.
                 // Handles building-symmetry false matches via full bundle adjustment.
                 match stitch_with_opencv_panorama(&mat_prev, &mat_curr) {
                     Ok(stitched) => stitched,
                     Err(e2) => {
-                        eprintln!("[liveaction] OpenCV Stitcher FAILED: {e2} → SIFT cluster");
-                        // Strategy 2: upper-55% SIFT displacement cluster (no grass false matches)
-                        match sift_upper_homography(&mat_prev, &mat_curr) {
+                        eprintln!("[liveaction] OpenCV Stitcher FAILED: {e2} → feature fallback");
+                        // Strategy 2: EfficientLoFTR/AKAZE homography (no motion filtering).
+                        match crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr) {
                             Ok(homo) => {
-                                eprintln!("[liveaction] using upper-half SIFT homography");
+                                eprintln!("[liveaction] feature-match homography OK");
                                 crate::stitch_landscape::warp_expand_blend(
                                     &result, &mat_curr, &homo, pw_i, ph_i, cw_i, ch_i,
                                 )
                             }
                             Err(e3) => {
-                                eprintln!("[liveaction] sift_upper_homography FAILED: {e3} → dominant_translation");
+                                eprintln!("[liveaction] feature-match homography FAILED: {e3} → dominant_translation");
                                 // Strategy 3: dominant translation (NCC + SIFT cluster)
                                 let (dx, dy) = dominant_translation(&mat_prev, &mat_curr, 5.0, 6)
                                     .unwrap_or_else(|| {
@@ -109,6 +164,7 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
                         }
                     }
                 }
+                }
             }
         };
     }
@@ -116,19 +172,17 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
     Ok(DynamicImage::ImageRgba8(result))
 }
 
-/// Stitch a liveaction pair using motion-mask-filtered SIFT + displacement pre-filter + findHomography.
+/// Stitch a liveaction pair using motion-mask-filtered EfficientLoFTR + USAC-MAGSAC.
 ///
 /// Strategy:
-/// 1. Full-image SIFT on both frames.
-/// 2. CrossCheck BFMatcher → raw matches (person + background + texture noise).
-/// 3. Stage 1 filter — motion mask: discard matches where either endpoint falls in a motion
-///    region (person pixels).  This removes the dominant person-feature cluster that would
-///    otherwise bias the median displacement in stage 2.
-/// 4. Stage 2 filter — displacement_prefilter: keep only matches near the median (dx,dy).
+/// 1. EfficientLoFTR (CVPR 2024) on both frames → `(x_a,y_a,x_b,y_b)` match pairs.
+/// 2. Stage 1 filter — motion mask: discard matches where either endpoint falls in a motion
+///    region (person pixels).  Removes the dominant person-feature cluster before stage 2.
+/// 3. Stage 2 filter — displacement consistency: keep only matches near the median (dx,dy).
 ///    Removes residual motion-mask leakage and repetitive-texture false matches.
-/// 5. findHomography (8-DOF, RANSAC 3px) on clean background matches.
-/// 6. Strict sanity check: bail if scale/angle indicate person motion was fitted instead of
-///    background motion — the outer fallback then tries plain estimate_homography.
+/// 4. USAC-MAGSAC homography on clean background matches.
+/// 5. Sanity check: bail if the transform indicates person motion fitted instead of background.
+///    Outer fallback then tries plain feature-match homography without motion masking.
 fn stitch_pair_motion_filtered(
     a: &DynamicImage,
     b: &DynamicImage,
@@ -138,87 +192,49 @@ fn stitch_pair_motion_filtered(
     let mat_b = crate::stitch_landscape::image_to_mat(b);
     let (w, h) = (mat_a.cols(), mat_a.rows());
 
-    let mut gray_a = core::Mat::default();
-    let mut gray_b = core::Mat::default();
-    imgproc::cvt_color(&mat_a, &mut gray_a, imgproc::COLOR_RGBA2GRAY, 0)?;
-    imgproc::cvt_color(&mat_b, &mut gray_b, imgproc::COLOR_RGBA2GRAY, 0)?;
+    // DL matching — guard dropped immediately so the mutex is free for nested calls.
+    let all_matches: Vec<[f32; 4]> = {
+        let mut guard = crate::dl_match::loftr_guard();
+        match guard.as_mut() {
+            Some(model) => model.match_images(&mat_a, &mat_b)?,
+            None => anyhow::bail!("no DL model — outer fallback will use AKAZE"),
+        }
+    };
 
-    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6)?;
-    let mut kp_a = core::Vector::<core::KeyPoint>::new();
-    let mut kp_b = core::Vector::<core::KeyPoint>::new();
-    let mut desc_a = core::Mat::default();
-    let mut desc_b = core::Mat::default();
-    sift.detect_and_compute(&gray_a, &core::no_array(), &mut kp_a, &mut desc_a, false)?;
-    sift.detect_and_compute(&gray_b, &core::no_array(), &mut kp_b, &mut desc_b, false)?;
-
-    if kp_a.len() < 8 || kp_b.len() < 8 || desc_a.empty() || desc_b.empty() {
-        anyhow::bail!("too few keypoints ({}/{})", kp_a.len(), kp_b.len());
+    if all_matches.len() < crate::dl_match::MIN_INLIERS {
+        anyhow::bail!("too few DL matches: {}", all_matches.len());
     }
 
-    let mut matcher = features2d::BFMatcher::create(core::NORM_L2, true)?;
-    let mut raw_matches = core::Vector::<core::DMatch>::new();
-    let mut train_mats = core::Vector::<core::Mat>::new();
-    train_mats.push(desc_b.try_clone()?);
-    matcher.add(&train_mats)?;
-    matcher.match_(&desc_a, &mut raw_matches, &core::no_array())?;
-
-    let raw_vec: Vec<core::DMatch> = raw_matches.iter().collect();
-
-    // Stage 1: motion mask filter — drop matches where either endpoint is in a motion region.
-    // This removes the person-feature cluster before the displacement median is computed,
-    // preventing it from biasing stage 2 toward person motion.
+    let all_count = all_matches.len();
     let (mask_w, mask_h) = (motion_mask.width(), motion_mask.height());
-    let bg_vec: Vec<core::DMatch> = raw_vec.iter().filter(|m| {
-        if m.query_idx < 0 || m.train_idx < 0 { return false; }
-        let (Ok(p1), Ok(p2)) = (
-            kp_a.get(m.query_idx as usize),
-            kp_b.get(m.train_idx as usize),
-        ) else { return false; };
-        let (ax, ay) = (p1.pt().x as u32, p1.pt().y as u32);
-        let (bx, by) = (p2.pt().x as u32, p2.pt().y as u32);
+
+    // Stage 1: motion-mask filter — discard matches where either endpoint is in a motion region.
+    let bg_matches: Vec<[f32; 4]> = all_matches.into_iter().filter(|m| {
+        let (ax, ay) = (m[0] as u32, m[1] as u32);
+        let (bx, by) = (m[2] as u32, m[3] as u32);
         let a_mot = ax < mask_w && ay < mask_h && motion_mask.get_pixel(ax, ay)[0] >= 128;
         let b_mot = bx < mask_w && by < mask_h && motion_mask.get_pixel(bx, by)[0] >= 128;
         !a_mot && !b_mot
-    }).cloned().collect();
+    }).collect();
 
-    if bg_vec.len() < 8 {
-        anyhow::bail!("too few background matches after motion-mask filter ({})", bg_vec.len());
+    eprintln!("[liveaction] DL matches: {}/{} survive motion-mask filter", bg_matches.len(), all_count);
+
+    if bg_matches.len() < crate::dl_match::MIN_INLIERS {
+        anyhow::bail!("too few background matches after motion-mask filter ({})", bg_matches.len());
     }
 
-    // Stage 2: displacement filter — remove residual outliers and repetitive-texture noise.
-    let good_vec = displacement_prefilter(&bg_vec, &kp_a, &kp_b, w as f32 * 0.15);
+    // Stage 2: displacement consistency filter — remove residual outliers and repetitive-texture noise.
+    let good_matches = displacement_prefilter_raw(&bg_matches, w as f32 * 0.15);
 
-    if good_vec.len() < 8 {
-        anyhow::bail!("too few displacement-filtered matches ({})", good_vec.len());
+    if good_matches.len() < crate::dl_match::MIN_INLIERS {
+        anyhow::bail!("too few displacement-filtered matches ({})", good_matches.len());
     }
 
-    let n = good_vec.len() as i32;
-    let mut pts_a = core::Mat::new_rows_cols_with_default(n, 1, core::CV_32FC2, core::Scalar::default())?;
-    let mut pts_b_mat = core::Mat::new_rows_cols_with_default(n, 1, core::CV_32FC2, core::Scalar::default())?;
-    for (i, m) in good_vec.iter().enumerate() {
-        let p1 = kp_a.get(m.query_idx as usize)?.pt();
-        let p2 = kp_b.get(m.train_idx as usize)?.pt();
-        *pts_a.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p1.x, p1.y]);
-        *pts_b_mat.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p2.x, p2.y]);
-    }
+    // USAC-MAGSAC homography from clean background matches.
+    let homo = crate::dl_match::homography_usac(&good_matches)?;
 
-    let mut ransac_mask = core::Mat::default();
-    let homo = calib3d::find_homography(&pts_a, &pts_b_mat, &mut ransac_mask, calib3d::RANSAC, 3.0)?;
-    if homo.empty() || homo.rows() != 3 {
-        anyhow::bail!("findHomography failed");
-    }
-
-    // Sanity check: bail if scale/angle indicate person motion was fitted instead of
-    // background motion — the outer fallback then tries plain estimate_homography.
     if !crate::stitch_landscape::homography_is_sane(&homo, w, h) {
         anyhow::bail!("homography failed sanity check");
-    }
-
-    let inliers = (0..ransac_mask.rows())
-        .filter(|&i| ransac_mask.at_2d::<u8>(i, 0).copied().unwrap_or(0) > 0)
-        .count();
-    if inliers < 6 {
-        anyhow::bail!("too few homography inliers ({inliers}/{})", good_vec.len());
     }
 
     let base_rgba = a.to_rgba8();
@@ -227,104 +243,6 @@ fn stitch_pair_motion_filtered(
         w, h, mat_b.cols(), mat_b.rows(),
     );
     Ok(DynamicImage::ImageRgba8(blended))
-}
-
-/// SIFT feature matching restricted to the upper 55 % of each frame (buildings, trees, sky).
-///
-/// Panning cameras that fail the motion-mask path often have a grass-dominated lower half
-/// that floods SIFT with hundreds of false matches at the wrong dx.  Masking the lower
-/// half exposes only structurally distinctive features (rooflines, tree silhouettes,
-/// signage) and lets findHomography+RANSAC find the correct full-perspective transform.
-///
-/// Returns H mapping A→B (same convention as estimate_homography / stitch_pair_motion_filtered)
-/// so it can be passed directly to warp_expand_blend.
-fn sift_upper_homography(
-    mat_a: &core::Mat,
-    mat_b: &core::Mat,
-) -> anyhow::Result<core::Mat> {
-    let (aw, ah) = (mat_a.cols(), mat_a.rows());
-    let (bw, bh) = (mat_b.cols(), mat_b.rows());
-
-    let mut gray_a = core::Mat::default();
-    let mut gray_b = core::Mat::default();
-    imgproc::cvt_color(mat_a, &mut gray_a, imgproc::COLOR_RGBA2GRAY, 0)?;
-    imgproc::cvt_color(mat_b, &mut gray_b, imgproc::COLOR_RGBA2GRAY, 0)?;
-
-    // Mask: only upper 55 % of each frame (avoid repetitive grass texture)
-    let mask_ah = ah * 55 / 100;
-    let mask_bh = bh * 55 / 100;
-    let mut mask_a = core::Mat::zeros(ah, aw, core::CV_8U)?.to_mat()?;
-    let mut mask_b = core::Mat::zeros(bh, bw, core::CV_8U)?.to_mat()?;
-    imgproc::rectangle(&mut mask_a, core::Rect::new(0, 0, aw, mask_ah),
-        core::Scalar::all(255.0), -1, imgproc::LINE_8, 0)?;
-    imgproc::rectangle(&mut mask_b, core::Rect::new(0, 0, bw, mask_bh),
-        core::Scalar::all(255.0), -1, imgproc::LINE_8, 0)?;
-
-    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6)?;
-    let mut kp_a = core::Vector::<core::KeyPoint>::new();
-    let mut kp_b = core::Vector::<core::KeyPoint>::new();
-    let mut desc_a = core::Mat::default();
-    let mut desc_b = core::Mat::default();
-    sift.detect_and_compute(&gray_a, &mask_a, &mut kp_a, &mut desc_a, false)?;
-    sift.detect_and_compute(&gray_b, &mask_b, &mut kp_b, &mut desc_b, false)?;
-
-    eprintln!("[liveaction] upper-55% SIFT: {}/{} keypoints", kp_a.len(), kp_b.len());
-
-    if kp_a.len() < 8 || kp_b.len() < 8 || desc_a.empty() || desc_b.empty() {
-        anyhow::bail!("too few upper-region keypoints ({}/{})", kp_a.len(), kp_b.len());
-    }
-
-    // kNN k=2, Lowe ratio test 0.75 — rejects ambiguous (repeating) matches
-    let mut matcher = features2d::BFMatcher::create(core::NORM_L2, false)?;
-    let mut knn = core::Vector::<core::Vector<core::DMatch>>::new();
-    let mut train = core::Vector::<core::Mat>::new();
-    train.push(desc_b.try_clone()?);
-    matcher.add(&train)?;
-    matcher.knn_match(&desc_a, &mut knn, 2, &core::no_array(), false)?;
-
-    // Collect ratio-test match displacements (dx = pa.x - pb.x, dy = pa.y - pb.y)
-    let mut disps: Vec<(f32, f32)> = Vec::new();
-    for pair in knn.iter() {
-        if pair.len() < 2 { continue; }
-        let m = pair.get(0)?;
-        let n = pair.get(1)?;
-        if m.distance >= 0.75 * n.distance { continue; }
-        let p1 = kp_a.get(m.query_idx as usize)?.pt();
-        let p2 = kp_b.get(m.train_idx as usize)?.pt();
-        disps.push((p1.x - p2.x, p1.y - p2.y));
-    }
-
-    eprintln!("[liveaction] upper-55% ratio matches: {}", disps.len());
-
-    if disps.len() < 8 {
-        anyhow::bail!("too few ratio-test matches in upper region ({})", disps.len());
-    }
-
-    // Displacement cluster instead of findHomography.
-    //
-    // For a camera pan (scale=1), every true match has the SAME displacement (dx_true, dy_true).
-    // False matches from repetitive building windows are generated by a wrong scaled transform
-    // (e.g. scale=1.79, tx=-1039), which makes each false match's dx DEPEND on its x position
-    // — they do NOT form a tight cluster.  The true matches therefore outvote false matches
-    // in a threshold-based cluster search, even if false matches are more numerous overall.
-    let (dx, dy) = best_displacement_cluster(&disps, 30.0, 8)
-        .ok_or_else(|| anyhow::anyhow!("no displacement cluster in upper-half matches"))?;
-
-    eprintln!("[liveaction] upper-55% cluster: dx={dx} dy={dy}");
-
-    if dx.unsigned_abs() as i32 > aw * 2 || dy.unsigned_abs() as i32 > ah * 2 {
-        anyhow::bail!("upper-55% cluster out of bounds: dx={dx} dy={dy}");
-    }
-
-    // Build pure-translation H (A→B convention: B_x = A_x - dx)
-    let mut homo = core::Mat::zeros(3, 3, core::CV_64F)?.to_mat()?;
-    *homo.at_2d_mut::<f64>(0, 0)? = 1.0;
-    *homo.at_2d_mut::<f64>(1, 1)? = 1.0;
-    *homo.at_2d_mut::<f64>(2, 2)? = 1.0;
-    *homo.at_2d_mut::<f64>(0, 2)? = -(dx as f64);
-    *homo.at_2d_mut::<f64>(1, 2)? = -(dy as f64);
-
-    Ok(homo)
 }
 
 /// Stitch two frames using OpenCV's full Panorama Stitcher pipeline.
@@ -556,32 +474,18 @@ fn best_displacement_cluster(
     }
 }
 
-/// Keep only matches whose displacement (dx, dy) lies within `tolerance` pixels of the
-/// median across all matches.  Inline copy of stitch_landscape::displacement_filter.
-fn displacement_prefilter(
-    mv: &[core::DMatch],
-    kp_a: &core::Vector<core::KeyPoint>,
-    kp_b: &core::Vector<core::KeyPoint>,
-    tolerance: f32,
-) -> Vec<core::DMatch> {
-    let mut dxs: Vec<f32> = Vec::with_capacity(mv.len());
-    let mut dys: Vec<f32> = Vec::with_capacity(mv.len());
-    for m in mv {
-        if m.query_idx < 0 || m.train_idx < 0 { continue; }
-        if let (Ok(p1), Ok(p2)) = (kp_a.get(m.query_idx as usize), kp_b.get(m.train_idx as usize)) {
-            dxs.push(p2.pt().x - p1.pt().x);
-            dys.push(p2.pt().y - p1.pt().y);
-        }
+/// Keep only `[x_a, y_a, x_b, y_b]` matches whose displacement lies within `tolerance` pixels
+/// of the median across all matches.
+fn displacement_prefilter_raw(matches: &[[f32; 4]], tolerance: f32) -> Vec<[f32; 4]> {
+    if matches.len() < 4 {
+        return matches.to_vec();
     }
-    if dxs.len() < 4 { return mv.to_vec(); }
+    let mut dxs: Vec<f32> = matches.iter().map(|m| m[2] - m[0]).collect();
+    let mut dys: Vec<f32> = matches.iter().map(|m| m[3] - m[1]).collect();
     let mdx = median_f32(&mut dxs);
     let mdy = median_f32(&mut dys);
-    mv.iter().filter(|m| {
-        if m.query_idx < 0 || m.train_idx < 0 { return false; }
-        let (Ok(p1), Ok(p2)) = (kp_a.get(m.query_idx as usize), kp_b.get(m.train_idx as usize))
-            else { return false; };
-        ((p2.pt().x - p1.pt().x) - mdx).abs() < tolerance
-            && ((p2.pt().y - p1.pt().y) - mdy).abs() < tolerance
+    matches.iter().filter(|m| {
+        ((m[2] - m[0]) - mdx).abs() < tolerance && ((m[3] - m[1]) - mdy).abs() < tolerance
     }).cloned().collect()
 }
 

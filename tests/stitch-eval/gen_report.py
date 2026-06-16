@@ -8,6 +8,7 @@ Usage (called from run_demo.sh):
 Calls score.py internally to collect metrics, then writes a self-contained HTML report.
 """
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -241,6 +242,13 @@ def build_scene_section(scene: str, fixtures_dir: Path, rust_dir: Path, py_dir: 
       <div class="caption"><strong>Reference</strong> <span class="badge ref">{'ground truth' if is_gt else 'ref'}</span><br><span class="path">{rel(rr)}</span><br>{gt_label}</div>
     </div>"""
 
+    def file_gen_time(p: Path) -> str:
+        try:
+            ts = os.path.getmtime(p)
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+        except OSError:
+            return "—"
+
     # Rust output
     rs = rust_r.get("ssim"); rd = rust_r.get("color_de"); rm = rust_r.get("rmse")
     win_tag = ' <span class="delta-win">▲ 胜 Python</span>' if (
@@ -257,6 +265,7 @@ def build_scene_section(scene: str, fixtures_dir: Path, rust_dir: Path, py_dir: 
           RMSE <span class="v {rmse_class(rm)}">{fmt(rm,2)}</span>
           {win_tag}
         </div>
+        <div class="metric-inline" style="color:#666">生成时间：{file_gen_time(ro)}</div>
       </div>
     </div>"""
 
@@ -272,6 +281,7 @@ def build_scene_section(scene: str, fixtures_dir: Path, rust_dir: Path, py_dir: 
           ΔE <span class="v {de_class(pd)}">{fmt(pd,2)}</span> ·
           RMSE <span class="v {rmse_class(pm)}">{fmt(pm,2)}</span>
         </div>
+        <div class="metric-inline" style="color:#666">生成时间：{file_gen_time(po)}</div>
       </div>
     </div>"""
 

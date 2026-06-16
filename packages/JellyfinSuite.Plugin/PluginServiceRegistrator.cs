@@ -76,6 +76,16 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<FontAcquisitionService>());
 
+        // ModelAcquisitionService: 同上模式，启动后台下载 EfficientLoFTR ONNX
+        // 写入 /config/plugins/JellyfinSuite/models/，与 frame-forge find_model() 路径一致
+        serviceCollection.AddSingleton<ModelAcquisitionService>(sp =>
+        {
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var logger = sp.GetRequiredService<ILogger<ModelAcquisitionService>>();
+            return new ModelAcquisitionService(appPaths, logger);
+        });
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<ModelAcquisitionService>());
+
         // PosterSheetJobService: 同上模式
         serviceCollection.AddSingleton<PosterSheetJobService>(sp =>
         {

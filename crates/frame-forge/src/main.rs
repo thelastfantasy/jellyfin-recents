@@ -17,6 +17,8 @@ mod scene_classifier;
 mod server;
 mod stitch_anime;
 #[cfg(feature = "opencv")]
+mod dl_match;
+#[cfg(feature = "opencv")]
 mod stitch_landscape;
 #[cfg(feature = "opencv")]
 mod stitch_liveaction;

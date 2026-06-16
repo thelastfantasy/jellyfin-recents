@@ -18,6 +18,9 @@ jfs-common = { path = "../jfs-common" }
 tokio = { version = "1", features = ["full"], optional = true }
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
 opencv = { version = "0.93", optional = true, features = ["clang-runtime"] }
+# DL inference (enabled with opencv feature — same Docker image provides both)
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"], optional = true }
+ndarray = { version = "0.17", optional = true }
 
 # Shared deps (cross-platform)
 image = "0.25"
@@ -35,6 +38,6 @@ env_logger = "0.11"
 [features]
 default = ["daemon"]
 daemon = ["tokio", "ffmpeg-next"]
-opencv = ["dep:opencv"]
+opencv = ["dep:opencv", "dep:ort", "dep:ndarray"]
 opencl = ["opencv"]   # OpenCV build with OpenCL/OCL support (not all distro packages)
 cli = []

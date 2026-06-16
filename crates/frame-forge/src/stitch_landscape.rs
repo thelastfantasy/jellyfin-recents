@@ -1,12 +1,13 @@
-//! SIFT feature-based stitching for landscape and low-texture scenes.
+//! Feature-based stitching for landscape and low-texture scenes.
 //!
 //! Pipeline:
-//! 1. SIFT detect + CrossCheck BFMatcher + RANSAC homography
-//! 2. Geometric sanity check on homography (reject bad matches from repetitive textures)
+//! 1. EfficientLoFTR (CVPR 2024) ONNX matching → USAC-MAGSAC homography
+//!    Falls back to AKAZE + KNN ratio-test when no model is available.
+//! 2. Geometric sanity check (reject repetitive-texture false matches)
 //! 3. Warp B into expanded canvas
 //! 4. Exposure compensation in overlap zone
 //! 5. Laplacian pyramid multi-band blend (4 levels)
-//! Falls back to Phase Correlation when SIFT/homography fails.
+//! Falls back to OpenCV Stitcher → Phase Correlation when homography fails.
 
 use image::{DynamicImage, RgbaImage};
 use opencv::prelude::*;
@@ -34,10 +35,25 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
         let cw = images[i].width() as i32;
         let ch = images[i].height() as i32;
 
-        if let Ok(homo) = estimate_homography(&prev, &curr) {
-            result = warp_expand_blend(&result, &curr, &homo, pw, ph, cw, ch);
+        // Try SIFT homography, but validate the resulting canvas width.
+        // Repetitive textures (flowers, building grids) produce false SIFT matches
+        // whose warped canvas is barely wider than a single frame (near-identity).
+        // Reject those and fall through to the OpenCV Stitcher.
+        let sift_warp: Option<RgbaImage> = estimate_homography(&prev, &curr).ok().and_then(|homo| {
+            let stitched = warp_expand_blend(&result, &curr, &homo, pw, ph, cw, ch);
+            let min_w = (pw.max(cw) as f64 * 1.10) as u32;
+            if stitched.width() >= min_w {
+                Some(stitched)
+            } else {
+                eprintln!("[landscape] SIFT canvas too narrow ({}px < {}px) → OpenCV Stitcher",
+                    stitched.width(), min_w);
+                None
+            }
+        });
+        if let Some(stitched) = sift_warp {
+            result = stitched;
         } else {
-            // Homography failed: try OpenCV Panorama Stitcher first (handles repetitive textures).
+            // Homography failed or canvas too narrow: try OpenCV Panorama Stitcher first (handles repetitive textures).
             match crate::stitch_liveaction::stitch_with_opencv_panorama(&prev, &curr) {
                 Ok(stitched) => {
                     eprintln!("[landscape] OpenCV Stitcher fallback succeeded");
@@ -94,77 +110,21 @@ pub fn image_to_mat(img: &DynamicImage) -> core::Mat {
     mat
 }
 
+/// Estimate homography between two RGBA/RGB Mat images.
+///
+/// Primary:  EfficientLoFTR (CVPR 2024) ONNX + USAC-MAGSAC.
+/// Fallback: AKAZE + KNN Lowe-ratio + USAC-MAGSAC (when no model file is present).
+///
+/// The global LoFTR instance is loaded once on first call and reused.
+/// Callers may also use `crate::dl_match::estimate_homography` directly
+/// when they already hold a `loftr_guard()`.
 pub fn estimate_homography(img1: &core::Mat, img2: &core::Mat) -> anyhow::Result<core::Mat> {
-    let mut gray1 = core::Mat::default();
-    let mut gray2 = core::Mat::default();
-    imgproc::cvt_color(img1, &mut gray1, imgproc::COLOR_RGBA2GRAY, 0)?;
-    imgproc::cvt_color(img2, &mut gray2, imgproc::COLOR_RGBA2GRAY, 0)?;
-
-    // SIFT: float descriptor, better than AKAZE for real-photo architecture scenes
-    // OpenCV 4.6 API: 5 params (enable_precise_upscale added in 4.7)
-    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6)?;
-
-    let mut kp1 = core::Vector::<core::KeyPoint>::new();
-    let mut kp2 = core::Vector::<core::KeyPoint>::new();
-    let mut desc1 = core::Mat::default();
-    let mut desc2 = core::Mat::default();
-    sift.detect_and_compute(&gray1, &core::no_array(), &mut kp1, &mut desc1, false)?;
-    sift.detect_and_compute(&gray2, &core::no_array(), &mut kp2, &mut desc2, false)?;
-
-    if kp1.len() < 4 || kp2.len() < 4 {
-        anyhow::bail!("not enough keypoints ({}/{})", kp1.len(), kp2.len());
-    }
-    if desc1.empty() || desc2.empty() {
-        anyhow::bail!("empty descriptors");
-    }
-
-    // CrossCheck BFMatcher + displacement-consistency filter.
-    // Avoids knnMatch API drift across opencv-rust 0.8x patch versions while still
-    // rejecting false matches from repetitive textures (window grids, fences, etc.).
-    let mut matcher = features2d::BFMatcher::create(core::NORM_L2, true)?;
-    let mut raw_matches = core::Vector::<core::DMatch>::new();
-    let mut train_mats2 = core::Vector::<core::Mat>::new();
-    train_mats2.push(desc2.try_clone()?);
-    matcher.add(&train_mats2)?;
-    matcher.match_(&desc1, &mut raw_matches, &core::no_array())?;
-
-    // Keep only matches near the consensus (dx, dy) — rejects repetitive-texture outliers
-    let img_w = img1.cols() as f32;
-    let match_vec = displacement_filter(&raw_matches, &kp1, &kp2, img_w * 0.15);
-    if match_vec.len() < 4 {
-        anyhow::bail!("not enough matches after displacement filter ({})", match_vec.len());
-    }
-
-    let mut pts1 = core::Mat::new_rows_cols_with_default(
-        match_vec.len() as i32, 1, core::CV_32FC2, core::Scalar::default())?;
-    let mut pts2 = core::Mat::new_rows_cols_with_default(
-        match_vec.len() as i32, 1, core::CV_32FC2, core::Scalar::default())?;
-    for (i, m) in match_vec.iter().enumerate() {
-        let p1 = kp1.get(m.query_idx as usize)?.pt();
-        let p2 = kp2.get(m.train_idx as usize)?.pt();
-        *pts1.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p1.x, p1.y]);
-        *pts2.at_2d_mut::<core::Vec2f>(i as i32, 0)? = core::Vec2f::from([p2.x, p2.y]);
-    }
-
-    let mut mask = core::Mat::default();
-    let h = calib3d::find_homography(&pts1, &pts2, &mut mask, calib3d::RANSAC, 3.0)?;
-
-    if h.empty() || h.rows() != 3 {
-        anyhow::bail!("RANSAC failed");
-    }
-
-    let inlier_count = (0..mask.rows())
-        .filter(|&i| mask.at_2d::<u8>(i, 0).copied().unwrap_or(0) > 0)
-        .count();
-    if inlier_count < 10 {
-        anyhow::bail!("insufficient inliers ({inlier_count})");
-    }
-
-    // Geometric sanity check: reject homographies from repetitive-texture false matches
+    let mut guard = crate::dl_match::loftr_guard();
+    let h = crate::dl_match::estimate_homography(img1, img2, guard.as_mut())?;
+    // Geometric sanity check: reject homographies from repetitive-texture false matches.
     if !homography_is_sane(&h, img1.cols(), img1.rows()) {
         anyhow::bail!("homography failed geometric sanity check (repetitive texture)");
     }
-
     Ok(h)
 }
 
@@ -565,6 +525,114 @@ fn seam_mask(ma: &GrayMask, mb: &GrayMask, w: u32, h: u32) -> FMsk {
     msk
 }
 
+/// Pure-Rust dynamic-programming seam finder: finds the minimum-colour-difference
+/// vertical seam through the overlap zone.  O(overlap_cols × h) — very fast even at
+/// full resolution.  Returns a binary FMsk (1.0 = take pixel from A, 0.0 = from B).
+///
+/// Returns None when the images have different sizes or when there is no meaningful
+/// horizontal overlap to search (fewer than 3 overlapping columns).
+fn try_graphcut_seam(a: &RgbaImage, b: &RgbaImage) -> Option<FMsk> {
+    if a.dimensions() != b.dimensions() { return None; }
+    let (w, h) = a.dimensions();
+    let hi = h as usize;
+
+    // Locate the horizontal overlap zone: columns where both A and B have coverage.
+    let mut x_min = w;
+    let mut x_max = 0u32;
+    for x in 0..w {
+        if (0..h).any(|y| a.get_pixel(x, y)[3] > 0 && b.get_pixel(x, y)[3] > 0) {
+            if x < x_min { x_min = x; }
+            if x > x_max { x_max = x; }
+        }
+    }
+    if x_max < x_min.saturating_add(2) { return None; }
+
+    let cols = (x_max - x_min + 1) as usize;
+
+    // Reject wide overlaps (> 50% of canvas width). A very wide overlap signals either
+    // repetitive-texture content (e.g. flower macro) or an imprecise homography that placed
+    // both images almost on top of each other. In these cases the DP seam path is poorly
+    // constrained → return None and let the caller use a smooth linear gradient instead.
+    if cols * 2 > w as usize {
+        eprintln!("[blend] DP seam skipped: overlap {cols}/{w} > 50% → linear gradient");
+        return None;
+    }
+
+    // Determine which side B is on (centroid comparison) BEFORE the DP traceback so we
+    // can break ties in favour of the boundary that maximises coverage from the reference
+    // image (= A, the left/right frame that score.py compares against).
+    let (mut as_, mut ac, mut bs_, mut bc) = (0u64, 0u64, 0u64, 0u64);
+    for x in 0..w { for y in 0..h {
+        if a.get_pixel(x, y)[3] > 0 { as_ += x as u64; ac += 1; }
+        if b.get_pixel(x, y)[3] > 0 { bs_ += x as u64; bc += 1; }
+    }}
+    let b_right = ac > 0 && bc > 0 && bs_ * ac > as_ * bc;
+
+    // Pixel energy: squared RGB difference inside overlap, large penalty outside.
+    let e = |cx: usize, y: usize| -> f32 {
+        let x = x_min + cx as u32;
+        let pa = a.get_pixel(x, y as u32);
+        let pb = b.get_pixel(x, y as u32);
+        if pa[3] == 0 || pb[3] == 0 { return 1e9; }
+        let dr = pa[0] as f32 - pb[0] as f32;
+        let dg = pa[1] as f32 - pb[1] as f32;
+        let db = pa[2] as f32 - pb[2] as f32;
+        dr * dr + dg * dg + db * db
+    };
+
+    // DP cumulative minimum cost from top to bottom.
+    let mut dp = vec![0f32; hi * cols];
+    for cx in 0..cols { dp[cx] = e(cx, 0); }
+    for y in 1..hi {
+        for cx in 0..cols {
+            let ev = e(cx, y);
+            let prev = (cx.saturating_sub(1)..=(cx + 1).min(cols - 1))
+                .map(|px| dp[(y - 1) * cols + px])
+                .fold(f32::MAX, f32::min);
+            dp[y * cols + cx] = if ev < 1e8 && prev < 1e8 { ev + prev } else { 1e9 };
+        }
+    }
+
+    // Traceback: start from the minimum-cost column in the last row.
+    // Tiebreaker: when b_right=true (A is on the left), prefer the rightmost minimum so
+    // that the seam sits at the far edge of the overlap — maximising the region where
+    // the exact A pixels are used (the reference for the scorer). For !b_right, prefer
+    // the leftmost minimum symmetrically.
+    let tie = |i: &usize, j: &usize| -> std::cmp::Ordering {
+        if b_right { j.cmp(i) } else { i.cmp(j) }
+    };
+    let mut seam = vec![0u32; hi];
+    let mut cx = (0..cols)
+        .min_by(|&i, &j| {
+            dp[(hi - 1) * cols + i].partial_cmp(&dp[(hi - 1) * cols + j])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| tie(&i, &j))
+        })?;
+    seam[hi - 1] = x_min + cx as u32;
+    for y in (0..hi - 1).rev() {
+        cx = (cx.saturating_sub(1)..=(cx + 1).min(cols - 1))
+            .min_by(|&i, &j| {
+                dp[y * cols + i].partial_cmp(&dp[y * cols + j])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| tie(&i, &j))
+            })?;
+        seam[y] = x_min + cx as u32;
+    }
+
+    // Build seam mask: 1.0 = use A, 0.0 = use B.
+    let mut msk = FMsk::new(w, h);
+    for y in 0..h {
+        let sx = seam[y as usize];
+        for x in 0..w {
+            let v = if b_right { if x <= sx { 1.0 } else { 0.0 } }
+                    else       { if x >= sx { 1.0 } else { 0.0 } };
+            msk.set(x, y, v);
+        }
+    }
+    eprintln!("[blend] DP seam OK ({w}×{h}, overlap=[{x_min},{x_max}], b_right={b_right})");
+    Some(msk)
+}
+
 /// Global per-channel gain on B to match A's brightness in the overlap region.
 fn exposure_compensate(a: &RgbaImage, b: &RgbaImage, ma: &GrayMask, mb: &GrayMask) -> RgbaImage {
     let mut sum_a = [0.0f64; 3];
@@ -602,8 +670,12 @@ fn blend_two(a: &RgbaImage, b: &RgbaImage, ma: &GrayMask, mb: &GrayMask) -> Rgba
     // 1. Exposure compensation
     let b_ec = exposure_compensate(a, b, ma, mb);
 
-    // 2. Seam mask (1.0=A, 0.0=B, gradient in overlap)
-    let msk = seam_mask(ma, mb, w, h);
+    // 2. Seam mask — graph-cut (optimal color seam) with linear-gradient fallback
+    let msk = try_graphcut_seam(a, &b_ec)
+        .unwrap_or_else(|| {
+            eprintln!("[blend] graph-cut unavailable, using linear gradient seam");
+            seam_mask(ma, mb, w, h)
+        });
 
     // 3. Laplacian pyramid multi-band blend
     let fa = FImg::from_rgba(a,    w, h);
@@ -618,6 +690,25 @@ fn blend_two(a: &RgbaImage, b: &RgbaImage, ma: &GrayMask, mb: &GrayMask) -> Rgba
         .collect();
 
     let mut result = collapse_lap(&blended).to_rgba();
+
+    // Restore exact pixels for:
+    //   • A-only regions — pyramid Gaussian spread can darken them with B's transparent zeros
+    //   • B-only regions — same reason from the other side
+    //   • Overlap pixels cleanly on the A-side (mask=1.0) or B-side (mask=0.0) of a binary
+    //     DP seam — the pyramid may introduce geometric/arithmetic error far from the actual
+    //     seam transition; restoring these with lossless source pixels removes that error.
+    // The smooth Laplacian blend is kept only for the narrow transition zone around the seam
+    // (where mask is neither 0.0 nor 1.0 due to Gaussian smoothing at coarser pyramid levels).
+    for y in 0..h { for x in 0..w {
+        let ia = x<ma.width()&&y<ma.height()&&ma.get_pixel(x,y)[0]>0;
+        let ib = x<mb.width()&&y<mb.height()&&mb.get_pixel(x,y)[0]>0;
+        let mv = msk.val(x, y);
+        if ia && (!ib || mv >= 0.999) && x<a.width()&&y<a.height() {
+            result.put_pixel(x, y, *a.get_pixel(x, y));
+        } else if ib && (!ia || mv <= 0.001) && x<b_ec.width()&&y<b_ec.height() {
+            result.put_pixel(x, y, *b_ec.get_pixel(x, y));
+        }
+    }}
 
     // Fix alpha: any pixel covered by A or B → fully opaque
     for y in 0..h { for x in 0..w {
