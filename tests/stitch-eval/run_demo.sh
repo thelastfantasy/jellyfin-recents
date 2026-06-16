@@ -32,92 +32,119 @@ pip3 install --quiet Pillow numpy opencv-python-headless 2>/dev/null || true
 /root/.cargo/bin/rustup default stable 2>/dev/null || true
 
 # ── Scene 1: Landscape (CMU0 consecutive frames) ─────────────────────────────
-mkdir -p "$FIXTURES/landscape_cmu"
-SRC_A="$DOWNLOADS/CMU0/medium14.JPG"
-SRC_B="$DOWNLOADS/CMU0/medium15.JPG"
-SRC_REF="$DOWNLOADS/CMU0/medium14.JPG"   # proxy reference (same as A for SSIM baseline)
-
-if [ -f "$SRC_A" ] && [ -f "$SRC_B" ]; then
-  echo "[demo] Preparing landscape fixtures (CMU0 frames 14+15)..."
-  # Convert to PNG (forge expects PNG/WebP for reliability)
-  ffmpeg -y -i "$SRC_A" "$FIXTURES/landscape_cmu/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_B" "$FIXTURES/landscape_cmu/input_b.png" 2>/dev/null
-  cp "$FIXTURES/landscape_cmu/input_a.png" "$FIXTURES/landscape_cmu/reference.png"
-  # Also copy to seagull dir for Rust test compatibility
-  mkdir -p "$FIXTURES/seagull"
-  cp "$FIXTURES/landscape_cmu/input_a.png" "$FIXTURES/seagull/input_a.png"
-  cp "$FIXTURES/landscape_cmu/input_b.png" "$FIXTURES/seagull/input_b.png"
-  cp "$FIXTURES/landscape_cmu/reference.png" "$FIXTURES/seagull/reference.png"
+mkdir -p "$FIXTURES/landscape_cmu" "$FIXTURES/seagull"
+if [ ! -f "$FIXTURES/landscape_cmu/input_a.png" ]; then
+  SRC_A="$DOWNLOADS/CMU0/medium14.JPG"
+  SRC_B="$DOWNLOADS/CMU0/medium15.JPG"
+  if [ -f "$SRC_A" ] && [ -f "$SRC_B" ]; then
+    echo "[demo] Preparing landscape fixtures (CMU0 frames 14+15)..."
+    ffmpeg -y -i "$SRC_A" "$FIXTURES/landscape_cmu/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_B" "$FIXTURES/landscape_cmu/input_b.png" 2>/dev/null
+    cp "$FIXTURES/landscape_cmu/input_a.png" "$FIXTURES/landscape_cmu/reference.png"
+    cp "$FIXTURES/landscape_cmu/input_a.png" "$FIXTURES/seagull/input_a.png"
+    cp "$FIXTURES/landscape_cmu/input_b.png" "$FIXTURES/seagull/input_b.png"
+    cp "$FIXTURES/landscape_cmu/reference.png" "$FIXTURES/seagull/reference.png"
+  fi
+else
+  echo "[demo] landscape_cmu fixtures already present, skipping download."
+  [ ! -f "$FIXTURES/seagull/input_a.png" ] && \
+    cp "$FIXTURES/landscape_cmu/input_a.png" "$FIXTURES/seagull/input_a.png" && \
+    cp "$FIXTURES/landscape_cmu/input_b.png" "$FIXTURES/seagull/input_b.png" && \
+    cp "$FIXTURES/landscape_cmu/reference.png" "$FIXTURES/seagull/reference.png"
 fi
 
 # ── Scene 2: Synthetic (wide crop → two overlapping halves → reference=original) ─
 mkdir -p "$FIXTURES/synthetic_landscape"
-SRC_WIDE="$DOWNLOADS/CMU0/medium00.JPG"
-if [ -f "$SRC_WIDE" ]; then
-  echo "[demo] Preparing synthetic landscape fixtures (CMU0 frame 0, crop overlap)..."
-  W=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=width -of csv=p=0 "$SRC_WIDE")
-  H=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=height -of csv=p=0 "$SRC_WIDE")
-  OV=$((W * 60 / 100))   # left 60% as input_a
-  OFF=$((W * 40 / 100))   # start input_b at 40% offset
-  B_W=$((W - OFF))        # input_b covers remaining 60%
-  ffmpeg -y -i "$SRC_WIDE" -vf "crop=${OV}:${H}:0:0" "$FIXTURES/synthetic_landscape/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_WIDE" -vf "crop=${B_W}:${H}:${OFF}:0" "$FIXTURES/synthetic_landscape/input_b.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_WIDE" "$FIXTURES/synthetic_landscape/reference.png" 2>/dev/null
+if [ ! -f "$FIXTURES/synthetic_landscape/input_a.png" ]; then
+  SRC_WIDE="$DOWNLOADS/CMU0/medium00.JPG"
+  if [ -f "$SRC_WIDE" ]; then
+    echo "[demo] Preparing synthetic landscape fixtures (CMU0 frame 0, crop overlap)..."
+    W=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=width -of csv=p=0 "$SRC_WIDE")
+    H=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=height -of csv=p=0 "$SRC_WIDE")
+    OV=$((W * 60 / 100))
+    OFF=$((W * 40 / 100))
+    B_W=$((W - OFF))
+    ffmpeg -y -i "$SRC_WIDE" -vf "crop=${OV}:${H}:0:0" "$FIXTURES/synthetic_landscape/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_WIDE" -vf "crop=${B_W}:${H}:${OFF}:0" "$FIXTURES/synthetic_landscape/input_b.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_WIDE" "$FIXTURES/synthetic_landscape/reference.png" 2>/dev/null
+  fi
+else
+  echo "[demo] synthetic_landscape fixtures already present, skipping download."
 fi
 
 # ── Scene 3: Live-action (myself — real-world overlapping shots) ──────────────
 mkdir -p "$FIXTURES/walking_tour"
-SRC_LA="$DOWNLOADS/myself/medium05.jpg"
-SRC_LB="$DOWNLOADS/myself/medium06.jpg"
-if [ -f "$SRC_LA" ] && [ -f "$SRC_LB" ]; then
-  echo "[demo] Preparing live-action fixtures (myself 05+06)..."
-  ffmpeg -y -i "$SRC_LA" "$FIXTURES/walking_tour/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_LB" "$FIXTURES/walking_tour/input_b.png" 2>/dev/null
-  cp "$FIXTURES/walking_tour/input_a.png" "$FIXTURES/walking_tour/reference.png"
+if [ ! -f "$FIXTURES/walking_tour/input_a.png" ]; then
+  SRC_LA="$DOWNLOADS/myself/medium05.jpg"
+  SRC_LB="$DOWNLOADS/myself/medium06.jpg"
+  if [ -f "$SRC_LA" ] && [ -f "$SRC_LB" ]; then
+    echo "[demo] Preparing live-action fixtures (myself 05+06)..."
+    ffmpeg -y -i "$SRC_LA" "$FIXTURES/walking_tour/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_LB" "$FIXTURES/walking_tour/input_b.png" 2>/dev/null
+    cp "$FIXTURES/walking_tour/input_a.png" "$FIXTURES/walking_tour/reference.png"
+  fi
+else
+  echo "[demo] walking_tour fixtures already present, skipping download."
 fi
 
 # ── Scene 4: Flower macro (repeating flower patterns, bokeh bg) ───────────────
 mkdir -p "$FIXTURES/flower_landscape"
-SRC_F1="$DOWNLOADS/flower/1.jpg"
-SRC_F2="$DOWNLOADS/flower/2.jpg"
-if [ -f "$SRC_F1" ] && [ -f "$SRC_F2" ]; then
-  echo "[demo] Preparing flower fixtures (1+2)..."
-  ffmpeg -y -i "$SRC_F1" "$FIXTURES/flower_landscape/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_F2" "$FIXTURES/flower_landscape/input_b.png" 2>/dev/null
-  cp "$FIXTURES/flower_landscape/input_a.png" "$FIXTURES/flower_landscape/reference.png"
+if [ ! -f "$FIXTURES/flower_landscape/input_a.png" ]; then
+  SRC_F1="$DOWNLOADS/flower/1.jpg"
+  SRC_F2="$DOWNLOADS/flower/2.jpg"
+  if [ -f "$SRC_F1" ] && [ -f "$SRC_F2" ]; then
+    echo "[demo] Preparing flower fixtures (1+2)..."
+    ffmpeg -y -i "$SRC_F1" "$FIXTURES/flower_landscape/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_F2" "$FIXTURES/flower_landscape/input_b.png" 2>/dev/null
+    cp "$FIXTURES/flower_landscape/input_a.png" "$FIXTURES/flower_landscape/reference.png"
+  fi
+else
+  echo "[demo] flower_landscape fixtures already present, skipping download."
 fi
 
 # ── Scene 5: CMU1 (different CMU building exterior) ──────────────────────────
 mkdir -p "$FIXTURES/cmu1"
-SRC_CMU1A="$DOWNLOADS/CMU1/medium00.jpg"
-SRC_CMU1B="$DOWNLOADS/CMU1/medium01.jpg"
-if [ -f "$SRC_CMU1A" ] && [ -f "$SRC_CMU1B" ]; then
-  echo "[demo] Preparing CMU1 fixtures (medium00+01)..."
-  ffmpeg -y -i "$SRC_CMU1A" "$FIXTURES/cmu1/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_CMU1B" "$FIXTURES/cmu1/input_b.png" 2>/dev/null
-  cp "$FIXTURES/cmu1/input_a.png" "$FIXTURES/cmu1/reference.png"
+if [ ! -f "$FIXTURES/cmu1/input_a.png" ]; then
+  SRC_CMU1A="$DOWNLOADS/CMU1/medium00.jpg"
+  SRC_CMU1B="$DOWNLOADS/CMU1/medium01.jpg"
+  if [ -f "$SRC_CMU1A" ] && [ -f "$SRC_CMU1B" ]; then
+    echo "[demo] Preparing CMU1 fixtures (medium00+01)..."
+    ffmpeg -y -i "$SRC_CMU1A" "$FIXTURES/cmu1/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_CMU1B" "$FIXTURES/cmu1/input_b.png" 2>/dev/null
+    cp "$FIXTURES/cmu1/input_a.png" "$FIXTURES/cmu1/reference.png"
+  fi
+else
+  echo "[demo] cmu1 fixtures already present, skipping download."
 fi
 
 # ── Scene 6: UAV aerial footage (top-down drone shots) ───────────────────────
 mkdir -p "$FIXTURES/uav"
-SRC_UAVA="$DOWNLOADS/uav/medium01.jpg"
-SRC_UAVB="$DOWNLOADS/uav/medium02.jpg"
-if [ -f "$SRC_UAVA" ] && [ -f "$SRC_UAVB" ]; then
-  echo "[demo] Preparing UAV fixtures (medium01+02)..."
-  ffmpeg -y -i "$SRC_UAVA" "$FIXTURES/uav/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_UAVB" "$FIXTURES/uav/input_b.png" 2>/dev/null
-  cp "$FIXTURES/uav/input_a.png" "$FIXTURES/uav/reference.png"
+if [ ! -f "$FIXTURES/uav/input_a.png" ]; then
+  SRC_UAVA="$DOWNLOADS/uav/medium01.jpg"
+  SRC_UAVB="$DOWNLOADS/uav/medium02.jpg"
+  if [ -f "$SRC_UAVA" ] && [ -f "$SRC_UAVB" ]; then
+    echo "[demo] Preparing UAV fixtures (medium01+02)..."
+    ffmpeg -y -i "$SRC_UAVA" "$FIXTURES/uav/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_UAVB" "$FIXTURES/uav/input_b.png" 2>/dev/null
+    cp "$FIXTURES/uav/input_a.png" "$FIXTURES/uav/reference.png"
+  fi
+else
+  echo "[demo] uav fixtures already present, skipping download."
 fi
 
 # ── Scene 7: Zijing campus garden ────────────────────────────────────────────
 mkdir -p "$FIXTURES/zijing"
-SRC_ZJA="$DOWNLOADS/zijing/medium01.jpg"
-SRC_ZJB="$DOWNLOADS/zijing/medium02.jpg"
-if [ -f "$SRC_ZJA" ] && [ -f "$SRC_ZJB" ]; then
-  echo "[demo] Preparing Zijing fixtures (medium01+02)..."
-  ffmpeg -y -i "$SRC_ZJA" "$FIXTURES/zijing/input_a.png" 2>/dev/null
-  ffmpeg -y -i "$SRC_ZJB" "$FIXTURES/zijing/input_b.png" 2>/dev/null
-  cp "$FIXTURES/zijing/input_a.png" "$FIXTURES/zijing/reference.png"
+if [ ! -f "$FIXTURES/zijing/input_a.png" ]; then
+  SRC_ZJA="$DOWNLOADS/zijing/medium01.jpg"
+  SRC_ZJB="$DOWNLOADS/zijing/medium02.jpg"
+  if [ -f "$SRC_ZJA" ] && [ -f "$SRC_ZJB" ]; then
+    echo "[demo] Preparing Zijing fixtures (medium01+02)..."
+    ffmpeg -y -i "$SRC_ZJA" "$FIXTURES/zijing/input_a.png" 2>/dev/null
+    ffmpeg -y -i "$SRC_ZJB" "$FIXTURES/zijing/input_b.png" 2>/dev/null
+    cp "$FIXTURES/zijing/input_a.png" "$FIXTURES/zijing/reference.png"
+  fi
+else
+  echo "[demo] zijing fixtures already present, skipping download."
 fi
 
 # ── Build forge with opencv ───────────────────────────────────────────────────
