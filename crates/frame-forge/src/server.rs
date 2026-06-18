@@ -552,7 +552,8 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     let n = images.len();
     let speed = req.speed.max(0.01);
     let default_interval = if actual_pts_vec.len() >= 2 {
-        let total_ms = actual_pts_vec.last().unwrap() - actual_pts_vec.first().unwrap();
+        let total_ms = actual_pts_vec.last().expect("non-empty: len >= 2 checked above")
+            - actual_pts_vec.first().expect("non-empty: len >= 2 checked above");
         let total_ms = total_ms.max(1) as f64;
         (total_ms / (n - 1) as f64).max(10.0)
     } else {
@@ -667,8 +668,8 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    let req = crate::protocol::read_animate_req(stream).await?;
-    log::warn!("[frame-forge] STITCH task={} frames={}", req.task_id, req.paths.len());
+    let req = crate::protocol::read_stitch_req(stream).await?;
+    log::warn!("[frame-forge] STITCH task={} frames={} device={:?}", req.task_id, req.paths.len(), req.device_id);
 
     // Reject under high resource pressure to protect seek-preview latency (T085)
     let pressure = crate::resources::resource_pressure();
@@ -745,17 +746,58 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     send_progress(stream, "running", &format!("{:?}", class.category).to_lowercase(), 0, 1, 35.0).await?;
     send_progress(stream, "running", "matching", 0, 1, 40.0).await?;
 
+    #[cfg(feature = "opencv")]
+    let (per_req_matcher, ep_fallbacks) = crate::dl_match::load_matcher_for_request(
+        &req.device_id,
+        crate::dl_match::ModelChoice::Auto,
+    );
+
+    // Capture algorithm label before moving class into the closure
+    let scene_label = format!("{:?}", class.category).to_lowercase();
+    let stitch_start = std::time::Instant::now();
+
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<image::DynamicImage> {
         match class.category {
             crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images),
+            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images),
+            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher),
             #[cfg(not(feature = "opencv"))]
             _ => crate::stitch_anime::stitch_anime(&images),
         }
     }).await??;
+
+    let total_ms = stitch_start.elapsed().as_millis() as u64;
+
+    // Write GenerationLog if log_path was requested (opencv/DL path only).
+    #[cfg(feature = "opencv")]
+    if !req.log_path.is_empty() {
+        let device_id = &req.device_id;
+        let (device_type, device_name) = if device_id.starts_with("cuda") {
+            ("GPU".to_string(), format!("CUDA device ({})", device_id))
+        } else if device_id.starts_with("directml") {
+            ("GPU".to_string(), format!("DirectML device ({})", device_id))
+        } else {
+            ("CPU".to_string(), "CPU".to_string())
+        };
+        let gen_log = crate::generation_log::GenerationLog {
+            algorithm: scene_label + " → warp_expand_blend",
+            model_file_name: String::new(),
+            model_version: String::new(),
+            ort_version: std::env::var("ORT_DYLIB_PATH").unwrap_or_default(),
+            device_name,
+            device_type,
+            device_id: device_id.clone(),
+            keypoint_match_count: 0,
+            inference_duration_ms: 0,
+            total_duration_ms: total_ms,
+            fallbacks: ep_fallbacks,
+        };
+        if let Err(e) = gen_log.write_to_file(std::path::Path::new(&req.log_path)) {
+            log::warn!("[frame-forge] Failed to write generation log to {}: {e}", req.log_path);
+        }
+    }
 
     send_progress(stream, "running", "encoding", 0, 1, 85.0).await?;
 

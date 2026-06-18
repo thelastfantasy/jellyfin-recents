@@ -19,7 +19,7 @@ tokio = { version = "1", features = ["full"], optional = true }
 ffmpeg-next = { version = "7", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
 opencv = { version = "0.93", optional = true, features = ["clang-runtime"] }
 # DL inference (enabled with opencv feature — same Docker image provides both)
-ort = { version = "2.0.0-rc.12", features = ["download-binaries"], optional = true }
+ort = { version = "2.0.0-rc.12", features = ["load-dynamic", "cuda", "directml", "openvino"], optional = true }
 ndarray = { version = "0.17", optional = true }
 
 # Shared deps (cross-platform)

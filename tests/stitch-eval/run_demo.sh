@@ -10,10 +10,12 @@ FIXTURES=/workspace/tests/stitch-eval/fixtures
 DOWNLOADS=/workspace/tests/stitch-eval/downloads/example-data
 SCORE_PY=/workspace/tests/stitch-eval/score.py
 STITCH_PY=/workspace/tests/stitch-eval/stitch_py.py
-OUTPUT=/workspace/tests/stitch-eval/demo-output
+OUTPUT=/workspace/tests/stitch-eval/demo-output           # LightGlue (new)
+OUTPUT_LEGACY=/workspace/tests/stitch-eval/demo-output-legacy  # AKAZE-only (old)
+OUTPUT_LOFTR=/workspace/tests/stitch-eval/demo-output-loftr    # EfficientLoFTR
 OUTPUT_PY=/workspace/tests/stitch-eval/demo-output-py
 
-mkdir -p "$OUTPUT" "$OUTPUT_PY"
+mkdir -p "$OUTPUT" "$OUTPUT_LEGACY" "$OUTPUT_LOFTR" "$OUTPUT_PY"
 
 # ── Install deps ─────────────────────────────────────────────────────────────
 export DEBIAN_FRONTEND=noninteractive
@@ -30,6 +32,50 @@ pip3 install --quiet Pillow numpy opencv-python-headless 2>/dev/null || true
 [ -f /root/.cargo/bin/rustup ] || \
   (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null)
 /root/.cargo/bin/rustup default stable 2>/dev/null || true
+
+# ── Download DL models (LightGlue + EfficientLoFTR) ──────────────────────────
+# frame-forge find_model() searches /workspace/models/ as last candidate.
+# Models are cached across runs via the forge-cargo-home volume mount.
+MODELS_DIR=/workspace/models
+mkdir -p "$MODELS_DIR"
+# v2.0 pipeline model (preferred Tier 1a)
+LIGHTGLUE_V2_MODEL="$MODELS_DIR/superpoint_lightglue_pipeline.onnx"
+# v1.0.0 fused model (legacy Tier 1b, kept for back-compat if user placed it manually)
+LIGHTGLUE_V1_MODEL="$MODELS_DIR/superpoint_lightglue.onnx"
+LOFTR_MODEL="$MODELS_DIR/eloftr_640x480.onnx"
+
+if [ ! -f "$LIGHTGLUE_V2_MODEL" ]; then
+  echo "[demo] Downloading LightGlue v2 model (~100 MB, v2.0 pipeline)..."
+  curl -fL --retry 3 --connect-timeout 30 \
+    "https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v2.0/superpoint_lightglue_pipeline.onnx" \
+    -o "$LIGHTGLUE_V2_MODEL" \
+    && echo "[demo] LightGlue v2 OK: $LIGHTGLUE_V2_MODEL" \
+    || {
+      echo "[demo] LightGlue v2 download failed — trying v1.0.0 fused fallback..."
+      rm -f "$LIGHTGLUE_V2_MODEL"
+      if [ ! -f "$LIGHTGLUE_V1_MODEL" ]; then
+        curl -fL --retry 3 --connect-timeout 30 \
+          "https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint_lightglue_fused.onnx" \
+          -o "$LIGHTGLUE_V1_MODEL" \
+          && echo "[demo] LightGlue v1 OK: $LIGHTGLUE_V1_MODEL" \
+          || { echo "[demo] LightGlue download failed — will use AKAZE fallback"; rm -f "$LIGHTGLUE_V1_MODEL"; }
+      fi
+    }
+else
+  echo "[demo] LightGlue v2 already cached: $LIGHTGLUE_V2_MODEL"
+fi
+
+# EfficientLoFTR Tier 2 fallback (zahilaty/EfficientLoFTR-ONNX, public).
+if [ ! -f "$LOFTR_MODEL" ]; then
+  echo "[demo] Downloading EfficientLoFTR model (~50 MB)..."
+  curl -fL --retry 3 --connect-timeout 30 \
+    "https://huggingface.co/zahilaty/EfficientLoFTR-ONNX/resolve/main/eloftr_640x480.onnx" \
+    -o "$LOFTR_MODEL" \
+    && echo "[demo] EfficientLoFTR OK: $LOFTR_MODEL" \
+    || { echo "[demo] EfficientLoFTR download failed — will skip LoFTR fallback"; rm -f "$LOFTR_MODEL"; }
+else
+  echo "[demo] EfficientLoFTR already cached: $LOFTR_MODEL"
+fi
 
 # ── Scene 1: Landscape (CMU0 consecutive frames) ─────────────────────────────
 mkdir -p "$FIXTURES/landscape_cmu" "$FIXTURES/seagull"
@@ -159,22 +205,74 @@ FORGE=/workspace/target/release/forge
 FORGE_MD5=$(md5sum "$FORGE" | awk '{print $1}')
 echo "[demo] forge binary MD5: $FORGE_MD5"
 
-# ── Run stitches ─────────────────────────────────────────────────────────────
-for SCENE in landscape_cmu synthetic_landscape walking_tour flower_landscape cmu1 uav zijing; do
-  DIR="$FIXTURES/$SCENE"
-  [ -f "$DIR/input_a.png" ] || continue
-  echo ""
-  echo "[demo] === $SCENE (auto-detect) ==="
-  OUT="$OUTPUT/${SCENE}_stitched.png"
-  # Pass all frame_*.png if present (multi-frame scenes), else the two-frame pair.
-  FRAMES=$(ls "$DIR"/frame_*.png 2>/dev/null | sort | tr '\n' ' ')
-  if [ -n "$FRAMES" ]; then
-    $FORGE stitch --input $FRAMES --output "$OUT" 2>&1
-  else
-    $FORGE stitch --input "$DIR/input_a.png" "$DIR/input_b.png" --output "$OUT" 2>&1
-  fi
-  echo "[demo] Output: $OUT"
-done
+# Helper: run all scenes, write results to $1 (output dir), log algo to $2 (manifest),
+# optionally set FRAME_FORGE_MATCHER=$3 to force a specific matcher.
+_run_scenes() {
+  local out_dir="$1" manifest="$2" matcher="${3:-}"
+  printf '{\n' > "$manifest"
+  local _first=1
+  for SCENE in landscape_cmu synthetic_landscape walking_tour flower_landscape cmu1 uav zijing; do
+    DIR="$FIXTURES/$SCENE"
+    [ -f "$DIR/input_a.png" ] || continue
+    echo ""
+    echo "[demo] === $SCENE ==="
+    local OUT="$out_dir/${SCENE}_stitched.png"
+    local TMPLOG; TMPLOG=$(mktemp)
+    local FRAMES; FRAMES=$(ls "$DIR"/frame_*.png 2>/dev/null | sort | tr '\n' ' ')
+    if [ -n "$FRAMES" ]; then
+      # shellcheck disable=SC2086
+      RUST_LOG=info FRAME_FORGE_MATCHER="$matcher" $FORGE stitch --input $FRAMES --output "$OUT" 2>&1 | tee "$TMPLOG"
+    else
+      RUST_LOG=info FRAME_FORGE_MATCHER="$matcher" $FORGE stitch --input "$DIR/input_a.png" "$DIR/input_b.png" --output "$OUT" 2>&1 | tee "$TMPLOG"
+    fi
+    # Extract final algorithm from forge log.
+    # DL model name is inferred from the $matcher argument (empty = auto → LightGlue).
+    local DL_MODEL_NAME=""
+    case "$matcher" in
+      "disabled") DL_MODEL_NAME="" ;;
+      "efficient-loftr"|"loftr") DL_MODEL_NAME="EfficientLoFTR" ;;
+      *) DL_MODEL_NAME="LightGlue v2" ;;
+    esac
+    # Match count from "[dl_match] N raw matches" log line.
+    local DL_COUNT; DL_COUNT=$(grep -oP "\[dl_match\] \K\d+(?= raw matches)" "$TMPLOG" | head -1)
+
+    local ALGO
+    if grep -q "OpenCV Stitcher\|SIFT canvas too narrow" "$TMPLOG"; then
+      # DL or AKAZE ran but final result used OpenCV Stitcher.
+      if [ -n "$DL_MODEL_NAME" ] && [ -n "$DL_COUNT" ]; then
+        ALGO="OpenCV Stitcher (${DL_MODEL_NAME}: ${DL_COUNT} kp)"
+      else
+        ALGO="OpenCV Stitcher"
+      fi
+    elif grep -q "\[landscape\] DL homography OK" "$TMPLOG"; then
+      ALGO="${DL_MODEL_NAME} → warp_expand_blend"
+    elif grep -q "\[landscape\] AKAZE homography OK" "$TMPLOG"; then
+      ALGO="AKAZE → warp_expand_blend"
+    else
+      ALGO="AKAZE + USAC-MAGSAC"
+    fi
+    rm -f "$TMPLOG"
+    [ "$_first" -eq 1 ] && _first=0 || printf ',\n' >> "$manifest"
+    printf '  "%s": "%s"' "$SCENE" "$ALGO" >> "$manifest"
+    echo "[demo] Output: $OUT  [algo: $ALGO]"
+  done
+  printf '\n}\n' >> "$manifest"
+}
+
+# ── Pass 1: Legacy (AKAZE-only, no DL model) ─────────────────────────────────
+echo ""
+echo "[demo] ====== Pass 1: Legacy AKAZE-only (FRAME_FORGE_MATCHER=disabled) ======"
+_run_scenes "$OUTPUT_LEGACY" "$OUTPUT_LEGACY/rust_algo_manifest.json" "disabled"
+
+# ── Pass 2: New (LightGlue v2 + fallback cascade) ────────────────────────────
+echo ""
+echo "[demo] ====== Pass 2: LightGlue v2 (new algorithm) ======"
+_run_scenes "$OUTPUT" "$OUTPUT/rust_algo_manifest.json" ""
+
+# ── Pass 3: EfficientLoFTR (explicit --model efficient-loftr) ────────────────
+echo ""
+echo "[demo] ====== Pass 3: EfficientLoFTR (FRAME_FORGE_MATCHER=efficient-loftr) ======"
+_run_scenes "$OUTPUT_LOFTR" "$OUTPUT_LOFTR/rust_algo_manifest.json" "efficient-loftr"
 
 # ── Python reference stitches ─────────────────────────────────────────────────
 echo ""
@@ -188,18 +286,30 @@ done
 
 # ── Score ─────────────────────────────────────────────────────────────────────
 echo ""
-echo "[demo] === score.py — Rust stitches ==="
-python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT" 2>&1 || true
+echo "[demo] === score.py — Rust LightGlue stitches ==="
+python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT" 2>&1 | tee "$OUTPUT/scores.json" || true
+
+echo ""
+echo "[demo] === score.py — Rust AKAZE-legacy stitches ==="
+python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT_LEGACY" 2>&1 | tee "$OUTPUT_LEGACY/scores.json" || true
+
+echo ""
+echo "[demo] === score.py — Rust EfficientLoFTR stitches ==="
+python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT_LOFTR" 2>&1 | tee "$OUTPUT_LOFTR/scores.json" || true
 
 echo ""
 echo "[demo] === score.py — Python stitches ==="
-python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT_PY" 2>&1 || true
+python3 "$SCORE_PY" "$FIXTURES" "$OUTPUT_PY" 2>&1 | tee "$OUTPUT_PY/scores.json" || true
 
 echo ""
 echo "[demo] Done."
-echo "  Rust PNGs:   $OUTPUT/"
+echo "  Rust LightGlue PNGs:   $OUTPUT/"
 ls -lh "$OUTPUT/"
-echo "  Python PNGs: $OUTPUT_PY/"
+echo "  Rust AKAZE-legacy:     $OUTPUT_LEGACY/"
+ls -lh "$OUTPUT_LEGACY/"
+echo "  Rust EfficientLoFTR:   $OUTPUT_LOFTR/"
+ls -lh "$OUTPUT_LOFTR/"
+echo "  Python PNGs:           $OUTPUT_PY/"
 ls -lh "$OUTPUT_PY/"
 
 # ── Auto-generate HTML report ────────────────────────────────────────────────
@@ -208,6 +318,6 @@ REPORT_HTML=/workspace/tests/stitch-eval/report.html
 if [ -f "$GEN_REPORT" ]; then
   echo ""
   echo "[demo] Generating HTML report..."
-  python3 "$GEN_REPORT" "$FIXTURES" "$OUTPUT" "$OUTPUT_PY" "$REPORT_HTML" 2>&1 || true
+  python3 "$GEN_REPORT" "$FIXTURES" "$OUTPUT" "$OUTPUT_LEGACY" "$OUTPUT_LOFTR" "$OUTPUT_PY" "$REPORT_HTML" 2>&1 || true
   echo "[demo] Report: $REPORT_HTML"
 fi

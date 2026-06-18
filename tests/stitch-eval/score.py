@@ -3,10 +3,15 @@
 Batch stitch quality evaluator.
 
 Usage:
-  python score.py <fixtures_dir>
+  python score.py <fixtures_dir> [output_dir]
 
 Each subdirectory under fixtures_dir must contain:
   input_a.png, input_b.png, reference.png
+
+reference.png may be either:
+  - A copy of input_a (proxy mode): evaluator crops the matching region from
+    the stitched panorama using alpha-channel offset detection, then compares.
+  - A ground-truth panorama wider than input_a: evaluator compares directly.
 
 Exits 0 if all metrics pass, 1 if any fail, 2 if fixtures_dir missing.
 """
@@ -20,7 +25,11 @@ def load_thresholds() -> dict:
     here = Path(__file__).parent
     path = here / "thresholds.json"
     with open(path) as f:
-        return json.load(f)
+        data = json.load(f)
+    # Support both new {gt:{...}, proxy:{...}} and legacy flat format.
+    if "gt" in data and "proxy" in data:
+        return data
+    return {"gt": data, "proxy": data}
 
 
 def to_lab(r: int, g: int, b: int):
@@ -40,12 +49,69 @@ def to_lab(r: int, g: int, b: int):
     return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
 
 
+def find_content_offset(img):
+    """Return (off_x, off_y): top-left corner of non-transparent content in an RGBA image.
+
+    The stitched panorama canvas may be expanded to the left/top when input_b
+    lies to the left of input_a. In that case input_a is placed at (off_x, off_y)
+    and the border pixels have alpha=0. We detect this offset so we can crop the
+    input_a-sized region for a meaningful pixel comparison.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return 0, 0
+
+    if img.mode != "RGBA":
+        return 0, 0
+
+    alpha = np.array(img)[:, :, 3]
+    rows = np.any(alpha > 0, axis=1)
+    cols = np.any(alpha > 0, axis=0)
+    off_y = int(np.argmax(rows)) if rows.any() else 0
+    off_x = int(np.argmax(cols)) if cols.any() else 0
+    return off_x, off_y
+
+
+def align_for_comparison(ref_img, stitched_img, input_a_img):
+    """Return (ref_crop, stitched_crop) aligned for pixel comparison.
+
+    Two modes:
+    - Proxy mode (reference ≈ input_a): crop the input_a-sized region from
+      the stitched canvas using alpha-offset detection.
+    - GT mode (reference is a wider panorama): compare stitched to reference
+      directly using the min-size overlap, same as before.
+    """
+    rw, rh = ref_img.size
+    aw, ah = input_a_img.size
+
+    is_proxy = abs(rw - aw) <= 8 and abs(rh - ah) <= 8
+
+    if is_proxy:
+        off_x, off_y = find_content_offset(stitched_img)
+        sw, sh = stitched_img.size
+        x2 = min(off_x + rw, sw)
+        y2 = min(off_y + rh, sh)
+        crop_w = x2 - off_x
+        crop_h = y2 - off_y
+        stitched_crop = stitched_img.crop((off_x, off_y, x2, y2)).convert("RGB")
+        ref_crop      = ref_img.crop((0, 0, crop_w, crop_h)).convert("RGB")
+        return ref_crop, stitched_crop
+    else:
+        # GT panorama: compare directly at minimum overlapping size
+        sw, sh = stitched_img.size
+        w = min(rw, sw)
+        h = min(rh, sh)
+        return ref_img.crop((0, 0, w, h)).convert("RGB"), \
+               stitched_img.crop((0, 0, w, h)).convert("RGB")
+
+
 def compute_ssim(img_a, img_b):
     """Simplified global-window SSIM on luminance."""
     try:
         import numpy as np
     except ImportError:
-        return None  # skip if numpy unavailable
+        return None
 
     a = np.array(img_a.convert("L"), dtype=np.float64)
     b = np.array(img_b.convert("L"), dtype=np.float64)
@@ -75,7 +141,7 @@ def compute_color_de(img_a, img_b):
     a, b = a[:h, :w], b[:h, :w]
 
     total = 0.0
-    for y in range(0, h, 4):       # subsample for speed
+    for y in range(0, h, 4):
         for x in range(0, w, 4):
             l1, aa1, bb1 = to_lab(int(a[y, x, 0]), int(a[y, x, 1]), int(a[y, x, 2]))
             l2, aa2, bb2 = to_lab(int(b[y, x, 0]), int(b[y, x, 1]), int(b[y, x, 2]))
@@ -104,7 +170,17 @@ def evaluate_pair(subdir: Path, thresholds: dict, output_dir: Path | None = None
         print("ERROR: Pillow not installed. Run: pip install Pillow", file=sys.stderr)
         sys.exit(1)
 
-    ref = Image.open(subdir / "reference.png")
+    ref_path     = subdir / "reference.png"
+    input_a_path = subdir / "input_a.png"
+    ref     = Image.open(ref_path)
+    input_a = Image.open(input_a_path)
+
+    # Detect mode: proxy (reference ≈ input_a) vs gt (reference is a real panorama).
+    rw, rh = ref.size
+    aw, ah = input_a.size
+    is_proxy = abs(rw - aw) <= 8 and abs(rh - ah) <= 8
+    mode = "proxy" if is_proxy else "gt"
+    t = thresholds.get(mode, thresholds)
 
     stitched_path = None
     if output_dir is not None:
@@ -113,34 +189,36 @@ def evaluate_pair(subdir: Path, thresholds: dict, output_dir: Path | None = None
             stitched_path = candidate
 
     if stitched_path is not None:
-        stitched = Image.open(stitched_path)
+        stitched_raw = Image.open(stitched_path)
+        ref_cmp, stitched_cmp = align_for_comparison(ref, stitched_raw, input_a)
     else:
-        # fall back to input_a as a baseline proxy (no stitched output found)
-        stitched = Image.open(subdir / "input_a.png")
+        # No stitched output: compare ref to input_a (proxy baseline = perfect score).
+        ref_cmp      = ref.convert("RGB")
+        stitched_cmp = input_a.convert("RGB")
 
-    ssim   = compute_ssim(ref, stitched)
-    de     = compute_color_de(ref, stitched)
-    rmse   = compute_rmse(ref, stitched)
+    ssim = compute_ssim(ref_cmp, stitched_cmp)
+    de   = compute_color_de(ref_cmp, stitched_cmp)
+    rmse = compute_rmse(ref_cmp, stitched_cmp)
 
-    metrics: dict = {"pair": subdir.name}
+    metrics: dict = {"pair": subdir.name, "mode": mode}
     failures = []
 
     if ssim is not None:
         metrics["ssim"] = round(ssim, 4)
-        if ssim < thresholds["ssim_min"]:
-            failures.append(f"ssim={ssim:.4f} < {thresholds['ssim_min']}")
+        if ssim < t["ssim_min"]:
+            failures.append(f"ssim={ssim:.4f} < {t['ssim_min']}")
     if de is not None:
         metrics["color_de"] = round(de, 4)
-        if de > thresholds["color_de_max"]:
-            failures.append(f"color_de={de:.4f} > {thresholds['color_de_max']}")
+        if de > t["color_de_max"]:
+            failures.append(f"color_de={de:.4f} > {t['color_de_max']}")
     if rmse is not None:
         metrics["rmse"] = round(rmse, 4)
-        if rmse > thresholds["rmse_max"]:
-            failures.append(f"rmse={rmse:.4f} > {thresholds['rmse_max']}")
+        if rmse > t["rmse_max"]:
+            failures.append(f"rmse={rmse:.4f} > {t['rmse_max']}")
 
     metrics["status"] = "fail" if failures else "pass"
     for msg in failures:
-        print(f"FAIL [{subdir.name}]: {msg}", file=sys.stderr)
+        print(f"FAIL [{subdir.name}] ({mode}): {msg}", file=sys.stderr)
 
     return metrics
 
@@ -170,7 +248,6 @@ def main():
 
     results = [evaluate_pair(p, thresholds, output_dir) for p in pairs]
 
-    # Summary
     ssim_vals = [r["ssim"] for r in results if "ssim" in r]
     de_vals   = [r["color_de"] for r in results if "color_de" in r]
     rmse_vals = [r["rmse"] for r in results if "rmse" in r]

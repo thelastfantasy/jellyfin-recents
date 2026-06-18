@@ -257,7 +257,9 @@ public class FrameExportController : ControllerBase
                         req.Params.Quality, resolutionPreset, task.Cts.Token),
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
                         task, req.ItemId, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
-                        task.Cts.Token),
+                        deviceId: req.Params.DeviceId,
+                        logPath: Path.Combine(task.TempDir, "generation-log.json"),
+                        ct: task.Cts.Token),
                     _ => null
                 };
 

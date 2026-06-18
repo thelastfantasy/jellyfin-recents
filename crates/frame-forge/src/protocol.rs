@@ -247,6 +247,63 @@ pub(crate) async fn read_animate_req(
     Ok(AnimateReq { item_id, task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
 }
 
+// ── STITCH request (0x12) ─────────────────────────────────────────────────────
+// Wire: same as AnimateReq, then two trailing length-prefixed UTF-8 fields:
+//   [device_id_len(4LE)][device_id(UTF-8)]   -- e.g. "cuda:0"; empty = default EP
+//   [log_path_len(4LE)] [log_path(UTF-8)]    -- absolute path for GenerationLog JSON; empty = skip
+
+pub(crate) struct StitchReq {
+    pub item_id: String,
+    pub task_id: String,
+    pub paths: Vec<(std::path::PathBuf, i64)>,
+    pub format: AnimFormat,
+    pub quality: f32,
+    pub device_id: String,
+    pub log_path: String,
+}
+
+pub(crate) async fn read_stitch_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<StitchReq> {
+    use tokio::io::AsyncReadExt;
+
+    // Reuse the animate wire format for the base fields
+    let base = read_animate_req(stream).await?;
+
+    // Trailing: device_id
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let device_id_len = u32::from_le_bytes(len_buf) as usize;
+    let device_id = if device_id_len > 0 {
+        let mut bytes = vec![0u8; device_id_len];
+        stream.read_exact(&mut bytes).await?;
+        String::from_utf8(bytes)?
+    } else {
+        String::new()
+    };
+
+    // Trailing: log_path
+    stream.read_exact(&mut len_buf).await?;
+    let log_path_len = u32::from_le_bytes(len_buf) as usize;
+    let log_path = if log_path_len > 0 {
+        let mut bytes = vec![0u8; log_path_len];
+        stream.read_exact(&mut bytes).await?;
+        String::from_utf8(bytes)?
+    } else {
+        String::new()
+    };
+
+    Ok(StitchReq {
+        item_id: base.item_id,
+        task_id: base.task_id,
+        paths: base.paths,
+        format: base.format,
+        quality: base.quality,
+        device_id,
+        log_path,
+    })
+}
+
 // ── MSG_PREFETCH_RANGE (0x16) ───────────────────────────────────────
 // Wire: [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before_seconds(8)] [after_seconds(8)] [include_start(1)] [width(4)]
 

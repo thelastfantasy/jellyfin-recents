@@ -105,5 +105,15 @@ tests/stitch-eval/downloads/
 tests/stitch-eval/seagull-src/
 tests/stitch-eval/demo-output/
 tests/stitch-eval/demo-output-py/
+tests/stitch-eval/demo-output-legacy/
+tests/stitch-eval/demo-output-loftr/
+tests/stitch-eval/__pycache__/
 tests/stitch-eval/report.html
+
+# Python 字节码（通用）
+__pycache__/
+*.pyc
+
+# ONNX 模型文件（运行时下载，二进制大文件，不入库）
+models/
 

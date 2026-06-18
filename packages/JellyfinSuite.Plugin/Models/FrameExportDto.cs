@@ -64,11 +64,16 @@ public class ExportParams
     [JsonPropertyName("resolutionPreset")] public string ResolutionPreset { get; set; } = "original";
     [JsonPropertyName("speed")]            public float Speed { get; set; } = 1.0f;
     [JsonPropertyName("loopCount")]        public int LoopCount { get; set; }
-    [JsonPropertyName("cropX")]   public float? CropX    { get; set; }
-    [JsonPropertyName("cropY")]   public float? CropY    { get; set; }
-    [JsonPropertyName("cropW")]   public float? CropW    { get; set; }
-    [JsonPropertyName("cropH")]   public float? CropH    { get; set; }
-    [JsonPropertyName("quality")] public float  Quality  { get; set; } = 0.75f;
+    [JsonPropertyName("cropX")]       public float?  CropX        { get; set; }
+    [JsonPropertyName("cropY")]       public float?  CropY        { get; set; }
+    [JsonPropertyName("cropW")]       public float?  CropW        { get; set; }
+    [JsonPropertyName("cropH")]       public float?  CropH        { get; set; }
+    [JsonPropertyName("quality")]     public float   Quality      { get; set; } = 0.75f;
+    // Stitch-specific: GPU/model selection (null = server default)
+    [JsonPropertyName("deviceId")]    public string? DeviceId     { get; set; }
+    [JsonPropertyName("modelFamily")] public string? ModelFamily  { get; set; }
+    [JsonPropertyName("modelVersion")] public string? ModelVersion { get; set; }
+    [JsonPropertyName("ortVersion")] public string? OrtVersion   { get; set; }
 }
 
 public class GenerateResponse

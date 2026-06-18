@@ -22,6 +22,7 @@ public class TaskState
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
     public int? ProcessId { get; set; }
+    public Jellyfin.Plugin.JellyfinSuite.Models.GenerationLogDto? GenerationLog { get; set; }
     public CancellationTokenSource Cts { get; } = new CancellationTokenSource();
     public Channel<TaskProgress> ProgressChannel { get; } =
         Channel.CreateUnbounded<TaskProgress>();

@@ -3,33 +3,36 @@
 "aqua:nektos/act" = "latest"
 bun = "latest"
 lefthook = "latest"
+rust = "stable"
+node = "lts"
+pnpm = "latest"
 
 [tasks.build]
 description = "构建前端和插件"
 run = "make build"
 
 [tasks.build-poster-gen]
-description = "在 Docker 中构建 Rust Linux 二进制"
+description = "在容器中构建 Rust Linux 二进制（Podman/Docker 自动检测）"
 run = "make build-poster-gen"
 
 [tasks.build-seek-preview]
-description = "在 Docker 中编译 seek-preview Linux 二进制（含 FFmpeg 7 dev 库）"
+description = "在容器中编译 seek-preview Linux 二进制（含 FFmpeg 7 dev 库）"
 run = "make build-seek-preview"
 
 [tasks.build-frame-forge]
-description = "在 Docker 中编译 frame-forge Linux 二进制（含 OpenCV + FFmpeg 7 dev 库）"
+description = "在容器中编译 frame-forge Linux 二进制（含 OpenCV + FFmpeg 7 dev 库）"
 run = "make build-frame-forge"
 
 [tasks.check-seek-preview]
-description = "在 Docker 中类型检查 seek-preview（快速，不产出二进制）"
+description = "在容器中类型检查 seek-preview（快速，不产出二进制）"
 run = "make check-seek-preview"
 
 [tasks.check-frame-forge]
-description = "在 Docker 中类型检查 frame-forge（快速，不产出二进制）"
+description = "在容器中类型检查 frame-forge（快速，不产出二进制）"
 run = "make check-frame-forge"
 
 [tasks.check-frame-forge-opencv]
-description = "在 Docker 中类型检查 frame-forge（含 opencv 特性，覆盖 stitch_liveaction 等 opencv 代码路径）"
+description = "在容器中类型检查 frame-forge（含 opencv 特性，覆盖 stitch_liveaction 等 opencv 代码路径）"
 run = "make check-frame-forge-opencv"
 
 [tasks.check-seek-preview-ps1]
@@ -107,3 +110,34 @@ run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"
 [tasks.demo-stitch]
 description = "拼接质量演示：cargo clean(修复Windows NTFS mtime) → 构建 forge(cli+opencv) → 生成 fixtures → 拼接 → score.py 评分 → 结果写 tests/stitch-eval/demo-output/"
 run = "make demo-stitch"
+
+# ── Linux-native tasks (Podman/Docker, no cygpath) ────────────────────────────
+# 专供 Linux 开发机使用；Windows 开发机继续使用上面不带 -linux 后缀的原始 task。
+
+[tasks.build-poster-gen-linux]
+description = "Linux: 在 Podman/Docker 容器中构建 poster-gen Rust 二进制"
+run = "make build-poster-gen-linux"
+
+[tasks.build-seek-preview-linux]
+description = "Linux: 在 Podman/Docker 容器中编译 seek-preview（含 FFmpeg 7 dev 库）"
+run = "make build-seek-preview-linux"
+
+[tasks.build-frame-forge-linux]
+description = "Linux: 在 Podman/Docker 容器中编译 frame-forge（含 OpenCV + FFmpeg 7 dev 库）"
+run = "make build-frame-forge-linux"
+
+[tasks.check-seek-preview-linux]
+description = "Linux: 在容器中类型检查 seek-preview（快速，不产出二进制）"
+run = "make check-seek-preview-linux"
+
+[tasks.check-frame-forge-linux]
+description = "Linux: 在容器中类型检查 frame-forge（快速，不产出二进制）"
+run = "make check-frame-forge-linux"
+
+[tasks.check-frame-forge-opencv-linux]
+description = "Linux: 在容器中类型检查 frame-forge（含 opencv 特性）"
+run = "make check-frame-forge-opencv-linux"
+
+[tasks.demo-stitch-linux]
+description = "Linux: 拼接质量演示（Podman/Docker，无 cygpath）→ 结果写 tests/stitch-eval/demo-output/"
+run = "make demo-stitch-linux"

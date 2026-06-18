@@ -13,8 +13,11 @@ use image::{DynamicImage, GrayImage, Luma, RgbaImage};
 use opencv::prelude::*;
 use opencv::{core, features2d, imgproc, stitching};
 
-/// Stitch frames using motion-mask filtered AKAZE.
-pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
+/// Stitch frames using motion-mask filtered DL matching.
+pub fn stitch_liveaction(
+    frames: &[DynamicImage],
+    mut per_req_matcher: Option<crate::dl_match::AnyMatcher>,
+) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 {
         anyhow::bail!("need at least 2 frames");
     }
@@ -35,7 +38,7 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
         // (repetitive textures like flowers) produces a canvas no wider than the input,
         // so we treat that as a stitch failure and fall through to OpenCV Stitcher.
         let motion_stitch: anyhow::Result<RgbaImage> =
-            stitch_pair_motion_filtered(&prev, curr, mask).and_then(|stitched| {
+            stitch_pair_motion_filtered(&prev, curr, mask, per_req_matcher.as_mut()).and_then(|stitched| {
                 let out = stitched.to_rgba8();
                 let min_w = (prev_w as f64 * 1.10) as u32;
                 if out.width() >= min_w { Ok(out) }
@@ -67,7 +70,7 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
                 // but often have clean feature matches → homography → warp_expand_blend + graph-cut seam.
                 // This preserves the base image exactly in the left portion, which the scorer compares
                 // against reference=input_a from the top-left, giving high SSIM on the unblended region.
-                let homo_opt = crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr).ok()
+                let homo_opt = crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr, per_req_matcher.as_mut()).ok()
                     .filter(|homo| {
                         // Reject false homographies from repetitive textures (e.g. flower macro shots).
                         // A valid panorama stitch has 8%–95% overlap. If |h02| ≥ 0.92×width the
@@ -93,7 +96,7 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
                     // Excessive height growth indicates perspective distortion from a false match.
                     let max_h   = (ph_i.max(ch_i) as f64 * 1.05) as u32;
                     if stitched.width() >= min_w && stitched.height() <= max_h {
-                        eprintln!("[liveaction] landscape DL OK → warp_expand_blend ({}×{})",
+                        eprintln!("[liveaction] landscape feature-match OK → warp_expand_blend ({}×{})",
                             stitched.width(), stitched.height());
                         Some(stitched)
                     } else {
@@ -112,7 +115,7 @@ pub fn stitch_liveaction(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage
                     Err(e2) => {
                         eprintln!("[liveaction] OpenCV Stitcher FAILED: {e2} → feature fallback");
                         // Strategy 2: EfficientLoFTR/AKAZE homography (no motion filtering).
-                        match crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr) {
+                        match crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr, None) {
                             Ok(homo) => {
                                 eprintln!("[liveaction] feature-match homography OK");
                                 crate::stitch_landscape::warp_expand_blend(
@@ -187,17 +190,21 @@ fn stitch_pair_motion_filtered(
     a: &DynamicImage,
     b: &DynamicImage,
     motion_mask: &GrayImage,
+    per_req: Option<&mut crate::dl_match::AnyMatcher>,
 ) -> anyhow::Result<DynamicImage> {
     let mat_a = crate::stitch_landscape::image_to_mat(a);
     let mat_b = crate::stitch_landscape::image_to_mat(b);
     let (w, h) = (mat_a.cols(), mat_a.rows());
 
-    // DL matching — guard dropped immediately so the mutex is free for nested calls.
-    let all_matches: Vec<[f32; 4]> = {
-        let mut guard = crate::dl_match::loftr_guard();
-        match guard.as_mut() {
-            Some(model) => model.match_images(&mat_a, &mat_b)?,
-            None => anyhow::bail!("no DL model — outer fallback will use AKAZE"),
+    // DL matching — use per-request matcher or fall back to global singleton.
+    let all_matches: Vec<[f32; 4]> = match per_req {
+        Some(model) => model.match_images(&mat_a, &mat_b)?,
+        None => {
+            let mut guard = crate::dl_match::loftr_guard();
+            match guard.as_mut() {
+                Some(model) => model.match_images(&mat_a, &mat_b)?,
+                None => anyhow::bail!("no DL model — outer fallback will use AKAZE"),
+            }
         }
     };
 

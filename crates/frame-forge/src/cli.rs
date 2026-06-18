@@ -11,6 +11,8 @@ mod stitch_anime;
 #[cfg(feature = "opencv")]
 mod dl_match;
 #[cfg(feature = "opencv")]
+mod generation_log;
+#[cfg(feature = "opencv")]
 mod stitch_landscape;
 #[cfg(feature = "opencv")]
 mod stitch_liveaction;
@@ -22,6 +24,9 @@ use image::DynamicImage;
 use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("forge=info,frame_forge=info"),
+    ).init();
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("stitch") => cmd_stitch(&args[2..]),
@@ -30,7 +35,7 @@ fn main() -> anyhow::Result<()> {
         Some("animate") => cmd_animate(&args[2..]),
         _ => {
             eprintln!("Usage:");
-            eprintln!("  forge stitch --input file1.png file2.png ... --output out.png");
+            eprintln!("  forge stitch --input file1.png file2.png ... --output out.png [--model auto|lightglue|efficient-loftr|disabled] [--no-model]");
             eprintln!("  forge stitch-landscape --input a.png b.png --output out.png  (opencv feature required)");
             eprintln!("  forge stitch-liveaction --input a.png b.png --output out.png (opencv feature required)");
             eprintln!("  forge animate --json frames.json");
@@ -72,6 +77,33 @@ fn cmd_stitch(args: &[String]) -> anyhow::Result<()> {
     let input: Vec<&str> = kv.iter().find(|(k,_)| *k == "input").map(|(_,v)| v.as_slice()).unwrap_or(&[]).to_vec();
     let output = kv.iter().find(|(k,_)| *k == "output").and_then(|(_,v)| v.first()).map(|s| *s).unwrap_or("stitched.png");
 
+    // --model <name> (preferred) or --matcher <name> (compat) or --no-model.
+    // --no-model and --model are mutually exclusive; --model wins if both supplied.
+    #[cfg(feature = "opencv")]
+    {
+        use dl_match::ModelChoice;
+        let choice = if args.iter().any(|a| a == "--no-model") {
+            ModelChoice::Disabled
+        } else if let Some(m) = kv.iter()
+            .find(|(k, _)| *k == "model" || *k == "matcher")
+            .and_then(|(_, v)| v.first())
+        {
+            ModelChoice::from_str(m)
+        } else {
+            ModelChoice::Auto
+        };
+        if let Some(val) = choice.as_env_str() {
+            // SAFETY: single-threaded at this point (before tokio runtime spawns workers);
+            // no other thread reads FRAME_FORGE_MATCHER during this assignment.
+            unsafe { std::env::set_var("FRAME_FORGE_MATCHER", val); }
+        }
+    }
+    #[cfg(not(feature = "opencv"))]
+    if args.iter().any(|a| a == "--no-model") {
+        // SAFETY: same as above — called before the async runtime starts.
+        unsafe { std::env::set_var("FRAME_FORGE_MATCHER", "disabled"); }
+    }
+
     let images = load_images(&input)?;
     eprintln!("Classifying scene...");
     let class = scene_classifier::classify(&images);
@@ -90,11 +122,11 @@ fn stitch_routed(class: &scene_classifier::SceneClass, images: &[DynamicImage]) 
     match class.category {
         SceneCategory::LiveAction => {
             eprintln!("Auto-routing: liveaction (OpenCV Stitcher)");
-            stitch_liveaction::stitch_liveaction(images)
+            stitch_liveaction::stitch_liveaction(images, None)
         }
         SceneCategory::Landscape => {
             eprintln!("Auto-routing: landscape (SIFT + Laplacian)");
-            stitch_landscape::stitch_landscape(images)
+            stitch_landscape::stitch_landscape(images, None)
         }
         SceneCategory::Anime => {
             eprintln!("Auto-routing: anime (Phase Correlation)");
@@ -185,8 +217,8 @@ fn cmd_stitch_opencv(args: &[String], mode: &str) -> anyhow::Result<()> {
         let images = load_images(&input)?;
         eprintln!("Stitching {} frames with {mode} algorithm...", images.len());
         let result = match mode {
-            "liveaction" => stitch_liveaction::stitch_liveaction(&images)?,
-            _ => stitch_landscape::stitch_landscape(&images)?,
+            "liveaction" => stitch_liveaction::stitch_liveaction(&images, None)?,
+            _ => stitch_landscape::stitch_landscape(&images, None)?,
         };
         result.save(output)?;
         eprintln!("Saved: {output} ({}x{})", result.width(), result.height());

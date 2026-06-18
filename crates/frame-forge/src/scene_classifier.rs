@@ -39,6 +39,22 @@ pub fn classify(frames: &[DynamicImage]) -> SceneClass {
         SceneCategory::Anime
     } else if edge_density < 0.08 {
         SceneCategory::Landscape
+    } else if frames.len() >= 2 {
+        // For high-edge scenes, use phase correlation coherence to distinguish
+        // panoramic panning (globally coherent shift) from live-action (chaotic motion).
+        // Down-sample to 128×128 for speed; phase_correlate handles arbitrary sizes.
+        let a = frames[0].resize(128, 128, image::imageops::FilterType::Triangle);
+        let b = frames[1].resize(128, 128, image::imageops::FilterType::Triangle);
+        let (_, _, pc_quality) = crate::stitch_anime::phase_correlate(&a, &b);
+        eprintln!("[classify] edge={edge_density:.3} entropy={color_entropy:.1} \
+            motion={motion_score:.3} pc_quality={pc_quality:.4}");
+        // High pc_quality → one dominant translation peak → panoramic panning → Landscape.
+        // Low pc_quality → diffuse / multi-modal motion → LiveAction.
+        if pc_quality > 0.04 {
+            SceneCategory::Landscape
+        } else {
+            SceneCategory::LiveAction
+        }
     } else {
         SceneCategory::LiveAction
     };

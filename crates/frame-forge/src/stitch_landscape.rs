@@ -13,7 +13,10 @@ use image::{DynamicImage, RgbaImage};
 use opencv::prelude::*;
 use opencv::{calib3d, core, features2d, imgproc};
 
-pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
+pub fn stitch_landscape(
+    frames: &[DynamicImage],
+    mut per_req_matcher: Option<crate::dl_match::AnyMatcher>,
+) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 {
         anyhow::bail!("need at least 2 frames");
     }
@@ -39,7 +42,7 @@ pub fn stitch_landscape(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage>
         // Repetitive textures (flowers, building grids) produce false SIFT matches
         // whose warped canvas is barely wider than a single frame (near-identity).
         // Reject those and fall through to the OpenCV Stitcher.
-        let sift_warp: Option<RgbaImage> = estimate_homography(&prev, &curr).ok().and_then(|homo| {
+        let sift_warp: Option<RgbaImage> = estimate_homography(&prev, &curr, per_req_matcher.as_mut()).ok().and_then(|homo| {
             let stitched = warp_expand_blend(&result, &curr, &homo, pw, ph, cw, ch);
             let min_w = (pw.max(cw) as f64 * 1.10) as u32;
             if stitched.width() >= min_w {
@@ -112,20 +115,78 @@ pub fn image_to_mat(img: &DynamicImage) -> core::Mat {
 
 /// Estimate homography between two RGBA/RGB Mat images.
 ///
-/// Primary:  EfficientLoFTR (CVPR 2024) ONNX + USAC-MAGSAC.
+/// Primary:  DL model (LightGlue v2 / EfficientLoFTR) ONNX + USAC-MAGSAC.
 /// Fallback: AKAZE + KNN Lowe-ratio + USAC-MAGSAC (when no model file is present).
 ///
-/// The global LoFTR instance is loaded once on first call and reused.
-/// Callers may also use `crate::dl_match::estimate_homography` directly
-/// when they already hold a `loftr_guard()`.
-pub fn estimate_homography(img1: &core::Mat, img2: &core::Mat) -> anyhow::Result<core::Mat> {
-    let mut guard = crate::dl_match::loftr_guard();
-    let h = crate::dl_match::estimate_homography(img1, img2, guard.as_mut())?;
-    // Geometric sanity check: reject homographies from repetitive-texture false matches.
-    if !homography_is_sane(&h, img1.cols(), img1.rows()) {
+/// DL model (LightGlue v2 / EfficientLoFTR) ONNX + USAC-MAGSAC.
+/// AKAZE + KNN Lowe-ratio + USAC-MAGSAC (when no model file is present).
+///
+/// Both DL and AKAZE results pass a geometric sanity check to guard against
+/// false matches on repetitive textures (building grids, flower patterns).
+/// `per_req` overrides the global singleton matcher (used for per-request EP selection).
+/// When `per_req` is None, falls through to the global `loftr_guard()` singleton.
+pub fn estimate_homography(
+    img1: &core::Mat,
+    img2: &core::Mat,
+    per_req: Option<&mut crate::dl_match::AnyMatcher>,
+) -> anyhow::Result<core::Mat> {
+    match per_req {
+        Some(m) => estimate_homography_inner(img1, img2, Some(m)),
+        None => {
+            let mut guard = crate::dl_match::loftr_guard();
+            estimate_homography_inner(img1, img2, guard.as_mut())
+        }
+    }
+}
+
+fn estimate_homography_inner(
+    img1: &core::Mat,
+    img2: &core::Mat,
+    matcher: Option<&mut crate::dl_match::AnyMatcher>,
+) -> anyhow::Result<core::Mat> {
+    // Try DL first.
+    if let Some(m) = matcher {
+        match m.match_images(img1, img2).and_then(|pts| {
+            let n = pts.len();
+            eprintln!("[dl_match] {} raw matches (need ≥{})", n, crate::dl_match::MIN_INLIERS);
+            if n >= crate::dl_match::MIN_INLIERS {
+                crate::dl_match::homography_usac(&pts)
+            } else {
+                anyhow::bail!("too few DL matches: {n}")
+            }
+        }) {
+            Ok(h) => {
+                if homography_is_sane_logged(&h, img1.cols(), img1.rows(), "DL") {
+                    eprintln!("[landscape] DL homography OK → warp_expand_blend");
+                    return Ok(h);
+                }
+                eprintln!("[landscape] DL homography rejected by sanity check, trying AKAZE");
+            }
+            Err(e) => eprintln!("[dl_match] DL failed ({e}), trying AKAZE"),
+        }
+    }
+
+    // AKAZE fallback.
+    let h = crate::dl_match::estimate_homography_akaze(img1, img2)?;
+    if !homography_is_sane_logged(&h, img1.cols(), img1.rows(), "AKAZE") {
         anyhow::bail!("homography failed geometric sanity check (repetitive texture)");
     }
+    eprintln!("[landscape] AKAZE homography OK → warp_expand_blend");
     Ok(h)
+}
+
+fn homography_is_sane_logged(h: &core::Mat, img_w: i32, img_h: i32, tag: &str) -> bool {
+    let g = |r: i32, c: i32| h.at_2d::<f64>(r, c).copied()
+        .unwrap_or(if r == c { 1.0 } else { 0.0 });
+    let (h00, h01, h02) = (g(0,0), g(0,1), g(0,2));
+    let (h10, h11, h12) = (g(1,0), g(1,1), g(1,2));
+    let (h20, h21)      = (g(2,0), g(2,1));
+    let scale_x = (h00*h00 + h10*h10).sqrt();
+    let scale_y = (h01*h01 + h11*h11).sqrt();
+    let angle   = h10.atan2(h00).to_degrees().abs();
+    let persp   = (h20*h20 + h21*h21).sqrt();
+    eprintln!("[sanity/{tag}] scale=({scale_x:.3},{scale_y:.3}) angle={angle:.2}° tx={h02:.1} ty={h12:.1} persp={persp:.2e}");
+    homography_is_sane(h, img_w, img_h)
 }
 
 /// Reject homographies with excessive rotation, anisotropic scale, or large perspective.

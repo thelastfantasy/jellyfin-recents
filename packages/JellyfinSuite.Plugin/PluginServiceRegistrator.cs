@@ -86,6 +86,35 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<ModelAcquisitionService>());
 
+        // DeviceEnumerationService: enumerates GPU/CPU via sysfs (Linux) or DXGI (Windows)
+        serviceCollection.AddSingleton<DeviceEnumerationService>(sp =>
+        {
+            var logger = sp.GetRequiredService<ILogger<DeviceEnumerationService>>();
+            return new DeviceEnumerationService(logger);
+        });
+
+        // OrtVersionService: manages ORT runtime dylib versions, bootstraps download on startup
+        serviceCollection.AddSingleton<OrtVersionService>(sp =>
+        {
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var logger = sp.GetRequiredService<ILogger<OrtVersionService>>();
+            return new OrtVersionService(appPaths, logger);
+        });
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<OrtVersionService>());
+
+        // ModelCatalogService: manages ONNX model catalog, downloads, and LRU eviction
+        serviceCollection.AddSingleton<ModelCatalogService>(sp =>
+        {
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var logger = sp.GetRequiredService<ILogger<ModelCatalogService>>();
+            return new ModelCatalogService(appPaths, logger);
+        });
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<ModelCatalogService>());
+
+        // Wire OrtVersionService + DeviceEnumerationService into FrameExportService after all singletons are created.
+        // Uses a hosted startup filter to run after DI graph is built.
+        serviceCollection.AddSingleton<IStartupFilter, FrameExportAuxServicesWirer>();
+
         // PosterSheetJobService: 同上模式
         serviceCollection.AddSingleton<PosterSheetJobService>(sp =>
         {
@@ -120,6 +149,33 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHttpContextAccessor();
         serviceCollection.AddSingleton<IStartupFilter, TaskStringsInitializer>();
     }
+}
+
+/// <summary>
+/// Wires OrtVersionService and DeviceEnumerationService into FrameExportService
+/// after the DI container is fully built (avoids constructor-time circular dependency).
+/// </summary>
+internal class FrameExportAuxServicesWirer : IStartupFilter
+{
+    private readonly FrameExportService _frameExport;
+    private readonly OrtVersionService _ortVersion;
+    private readonly DeviceEnumerationService _deviceEnum;
+
+    public FrameExportAuxServicesWirer(
+        FrameExportService frameExport,
+        OrtVersionService ortVersion,
+        DeviceEnumerationService deviceEnum)
+    {
+        _frameExport = frameExport;
+        _ortVersion = ortVersion;
+        _deviceEnum = deviceEnum;
+    }
+
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        _frameExport.SetAuxServices(_ortVersion, _deviceEnum);
+        next(app);
+    };
 }
 
 /// <summary>

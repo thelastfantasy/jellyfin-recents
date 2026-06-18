@@ -25,6 +25,8 @@ public sealed class FrameExportService : IDisposable
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
     private readonly string _binaryPath;
+    private OrtVersionService? _ortVersion;
+    private DeviceEnumerationService? _deviceEnum;
 
     private Process? _process;
     private readonly SemaphoreSlim _startLock = new(1, 1);
@@ -54,6 +56,16 @@ public sealed class FrameExportService : IDisposable
         _binaryPath = Path.Combine(appPaths.PluginsPath, "JellyfinSuite", BinaryName);
     }
 
+    /// <summary>
+    /// Wire in optional services after construction (avoids circular DI).
+    /// Called from <see cref="PluginServiceRegistrator"/> after both services are registered.
+    /// </summary>
+    public void SetAuxServices(OrtVersionService ortVersion, DeviceEnumerationService deviceEnum)
+    {
+        _ortVersion = ortVersion;
+        _deviceEnum = deviceEnum;
+    }
+
     public async Task EnsureStartedAsync(CancellationToken ct = default)
     {
         if (!IsAvailable) return;
@@ -80,9 +92,12 @@ public sealed class FrameExportService : IDisposable
                 CreateNoWindow = true,
             };
             psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
-            // RUST_LOG controls frame-forge log verbosity (log crate).
-            // Inherit from host if set; fall back to debug so bench logs appear by default.
             psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug";
+            // ORT_DYLIB_PATH tells the `load-dynamic` ort build which ORT shared library to load.
+            // OrtVersionService sets this after scanning/downloading the active ORT version.
+            var ortLibPath = _ortVersion?.ActiveOrtLibPath;
+            if (!string.IsNullOrEmpty(ortLibPath))
+                psi.Environment["ORT_DYLIB_PATH"] = ortLibPath;
 
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.Start();
@@ -622,6 +637,8 @@ public sealed class FrameExportService : IDisposable
         List<long> positionsMs,
         string format,   // "png" or "webp"
         float quality = 0.75f,
+        string? deviceId = null,
+        string? logPath = null,
         CancellationToken ct = default)
     {
         if (!IsAvailable) return null;
@@ -659,6 +676,17 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_h = 0
         ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
         ms.Write(BitConverter.GetBytes((uint)0), 0, 4);         // preset_len = 0 (stitch always uses original resolution)
+
+        // MSG_STITCH trailing extension fields (spec 012):
+        // [device_id_len(4 LE)][device_id(UTF-8)]  -- empty string = use default EP chain
+        // [log_path_len (4 LE)][log_path (UTF-8)]  -- empty string = skip generation log
+        var deviceIdBytes = Encoding.UTF8.GetBytes(deviceId ?? "");
+        ms.Write(BitConverter.GetBytes((uint)deviceIdBytes.Length), 0, 4);
+        if (deviceIdBytes.Length > 0) ms.Write(deviceIdBytes, 0, deviceIdBytes.Length);
+
+        var logPathBytes = Encoding.UTF8.GetBytes(logPath ?? "");
+        ms.Write(BitConverter.GetBytes((uint)logPathBytes.Length), 0, 4);
+        if (logPathBytes.Length > 0) ms.Write(logPathBytes, 0, logPathBytes.Length);
 
         var reqBuf = ms.ToArray();
         try
@@ -706,6 +734,26 @@ public sealed class FrameExportService : IDisposable
                     var dataBuf = new byte[dataLen];
                     await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
                     done = true;
+
+                    // Read GenerationLog JSON from logPath written atomically by the daemon
+                    if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
+                    {
+                        try
+                        {
+                            var logJson = await File.ReadAllTextAsync(logPath, ct).ConfigureAwait(false);
+                            task.GenerationLog = System.Text.Json.JsonSerializer.Deserialize<
+                                Jellyfin.Plugin.JellyfinSuite.Models.GenerationLogDto>(logJson);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("[FrameExport] Failed to read generation log: {Ex}", ex.Message);
+                        }
+                        finally
+                        {
+                            try { File.Delete(logPath); } catch { }
+                        }
+                    }
+
                     return dataBuf;
                 }
             }

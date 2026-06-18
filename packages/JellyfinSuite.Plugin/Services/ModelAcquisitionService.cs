@@ -19,7 +19,7 @@ namespace Jellyfin.Plugin.JellyfinSuite.Services;
 ///
 /// Model selection (FRAME_FORGE_MATCHER env var in frame-forge):
 ///   "lightglue"       → superpoint_lightglue.onnx  (SuperPoint + LightGlue fused)
-///   "efficient-loftr" → efficient_loftr.onnx        (EfficientLoFTR CVPR 2024)
+///   "efficient-loftr" → eloftr_640x480.onnx           (EfficientLoFTR CVPR 2024, zahilaty export)
 ///   (default)         → auto: LightGlue first, then EfficientLoFTR
 ///
 /// Override URLs:
@@ -28,16 +28,19 @@ namespace Jellyfin.Plugin.JellyfinSuite.Services;
 /// </summary>
 public class ModelAcquisitionService : IHostedService
 {
-    // LightGlue: SuperPoint + LightGlue fused ONNX (fabio-sim/LightGlue-ONNX releases).
+    // LightGlue v2.0 pipeline model (fabio-sim/LightGlue-ONNX v2.0).
+    // dl_match.rs prefers superpoint_lightglue_pipeline.onnx (v2) over the legacy fused name.
     private const string LightGlueUrl =
-        "https://github.com/fabio-sim/LightGlue-ONNX/releases/latest/download/superpoint_lightglue_fused.onnx";
-    private const string LightGlueFileName   = "superpoint_lightglue.onnx";
+        "https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v2.0/superpoint_lightglue_pipeline.onnx";
+    private const string LightGlueFileName   = "superpoint_lightglue_pipeline.onnx";
     private const string LightGlueCustomFile = "custom-model-lightglue.onnx";
 
-    // EfficientLoFTR: resolve/main always points to HEAD of the main branch.
+    // EfficientLoFTR: zahilaty/EfficientLoFTR-ONNX (public, no auth required).
+    // Fixed 640×480 resolution export validated against the original PyTorch weights.
+    // Outputs: mkpts0 (N,2), mkpts1 (N,2), mconf (N,) f32.
     private const string LoFTRUrl =
-        "https://huggingface.co/zju3dv/EfficientLoFTR/resolve/main/weights/efficient_loftr_opt.onnx";
-    private const string LoFTRFileName   = "efficient_loftr.onnx";
+        "https://huggingface.co/zahilaty/EfficientLoFTR-ONNX/resolve/main/eloftr_640x480.onnx";
+    private const string LoFTRFileName   = "eloftr_640x480.onnx";
     private const string LoFTRCustomFile = "custom-model-loftr.onnx";
 
     private readonly IApplicationPaths _appPaths;

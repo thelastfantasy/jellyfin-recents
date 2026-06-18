@@ -11,8 +11,11 @@ else
 endif
 
 .PHONY: build-frontend build-plugin build-poster-gen build-poster-gen-win build-seek-preview build-frame-forge \
-        check-seek-preview check-frame-forge demo-stitch \
-        build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release
+        check-seek-preview check-frame-forge check-frame-forge-opencv demo-stitch \
+        build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release \
+        build-poster-gen-linux build-seek-preview-linux build-frame-forge-linux \
+        check-seek-preview-linux check-frame-forge-linux check-frame-forge-opencv-linux \
+        demo-stitch-linux
 
 build-frontend:
 	cd apps/frontend && DEPLOY_MAP=1 pnpm run build
@@ -236,3 +239,117 @@ clean:
 	rm -rf build/
 	cd apps/frontend && rm -rf dist/
 	cd crates/poster-gen && cargo clean
+
+# ── Linux-native targets (Podman/Docker, no cygpath) ─────────────────────────
+# 专供 Linux 开发机使用，自动检测 podman/docker，无需 cygpath。
+# Windows 开发机继续使用上面不带 -linux 后缀的原始 target。
+
+_CRUN := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo docker)
+
+build-poster-gen-linux:
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-w /workspace \
+		rust:1.88-slim-bookworm \
+		cargo build -p poster-gen --release
+	cp target/release/poster-gen \
+		packages/JellyfinSuite.Plugin/poster-gen-linux-x64
+
+build-seek-preview-linux:
+	$(_CRUN) volume create seek-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) volume create seek-rustup-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v seek-cargo-home:/root/.cargo \
+		-v seek-rustup-home:/root/.rustup \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		       /root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		       /root/.cargo/bin/cargo build -p seek-preview --release"
+	cp target/release/seek-preview \
+		packages/JellyfinSuite.Plugin/seek-preview-linux-x64
+
+build-frame-forge-linux:
+	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       apt-get install -y -qq intel-opencl-icd clinfo ocl-icd-libopencl1 2>/dev/null || true && \
+		       clinfo --list 2>/dev/null || echo '[build] no OpenCL platforms (CPU fallback)' && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release"
+	cp target/release/frame-forge \
+		packages/JellyfinSuite.Plugin/frame-forge-linux-x64
+
+check-seek-preview-linux:
+	$(_CRUN) volume create seek-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) volume create seek-rustup-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v seek-cargo-home:/root/.cargo \
+		-v seek-rustup-home:/root/.rustup \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		       /root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		       /root/.cargo/bin/cargo check -p seek-preview"
+
+check-frame-forge-linux:
+	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check -p frame-forge --all-targets --features cli"
+
+check-frame-forge-opencv-linux:
+	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		sh -c "DEBIAN_FRONTEND=noninteractive && \
+		       apt-get update -qq && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev libopencv-dev libssl-dev && \
+		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
+		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
+		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
+		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check -p frame-forge --features 'cli,opencv'"
+
+demo-stitch-linux:
+	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		ubuntu:24.04 \
+		bash tests/stitch-eval/run_demo.sh
