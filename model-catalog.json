@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "family": "realesrgan",
+      "displayName": "Real-ESRGAN x2plus (Photo)",
+      "version": "photo-x2",
+      "fileName": "realesrgan-photo-x2.onnx",
+      "downloadUrl": "https://github.com/thelastfantasy/jellyfin-suite/releases/download/models-v1/realesrgan-photo-x2.onnx",
+      "sha256": "5be2d62ab3b0357986efb20a19638334c0e7a2a055ccbc52c77063da0482b3bb",
+      "fileSizeBytes": 69552244,
+      "releaseDate": "2026-06-20T03:41:39.0000000Z"
+    },
+    {
+      "family": "realesrgan",
+      "displayName": "Real-ESRGAN x4plus (Photo)",
+      "version": "photo-x4",
+      "fileName": "realesrgan-photo-x4.onnx",
+      "downloadUrl": "https://github.com/thelastfantasy/jellyfin-suite/releases/download/models-v1/realesrgan-photo-x4.onnx",
+      "sha256": "da8f300d2199427a57821ac34762b4f3fbab8f6df1c6d189422f885b59ff5d23",
+      "fileSizeBytes": 67051997,
+      "releaseDate": "2026-06-20T03:41:39.0000000Z"
+    },
+    {
+      "family": "realesrgan",
+      "displayName": "Real-ESRGAN x4plus Anime 6B",
+      "version": "anime-x4",
+      "fileName": "realesrgan-anime-x4.onnx",
+      "downloadUrl": "https://github.com/thelastfantasy/jellyfin-suite/releases/download/models-v1/realesrgan-anime-x4.onnx",
+      "sha256": "02dd2b6bf200f50ac95dfd4c2e03210a66c912001fb9639d8081d23519a10f13",
+      "fileSizeBytes": 17940340,
+      "releaseDate": "2026-06-20T03:41:39.0000000Z"
+    },
+    {
+      "family": "gfpgan",
+      "displayName": "GFPGAN v1.4",
+      "version": "v1.4",
+      "fileName": "gfpgan-v1.4.onnx",
+      "downloadUrl": "https://github.com/thelastfantasy/jellyfin-suite/releases/download/models-v1/gfpgan-v1.4.onnx",
+      "sha256": "15c36ba1a8304e077a9d99954427eac3fb604bb790636dd5e34e72cdeb0830d8",
+      "fileSizeBytes": 340357025,
+      "releaseDate": "2026-06-20T03:41:39.0000000Z"
+    }
+  ]
+}
