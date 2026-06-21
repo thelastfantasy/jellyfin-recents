@@ -43,10 +43,30 @@ fn memory_pressure() -> f64 {
     if total_kb == 0 {
         return 0.0;
     }
+    // MemAvailable doesn't know ZFS ARC is reclaimable (ARC is a separate SPL/ZFS kernel
+    // module, not part of the page cache the kernel's MemAvailable estimate accounts for) —
+    // on a ZFS host (e.g. TrueNAS SCALE) this makes a perfectly healthy box with tens of GB
+    // of ARC-cached disk reads look like it's almost out of memory. Add ARC's reported size
+    // back in since the kernel will reclaim it on demand just like ordinary page cache.
+    avail_kb += zfs_arc_reclaimable_kb();
     if avail_kb < 512 * 1024 {
         return 1.0; // < 512 MB available
     }
     1.0 - (avail_kb as f64 / total_kb as f64)
+}
+
+/// ZFS ARC size in KB, or 0 if not running on a ZFS host (file absent — most Linux systems).
+#[cfg(target_os = "linux")]
+fn zfs_arc_reclaimable_kb() -> u64 {
+    let raw = match std::fs::read_to_string("/proc/spl/kstat/zfs/arcstats") {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    raw.lines()
+        .find_map(|l| l.strip_prefix("size "))
+        .and_then(|rest| rest.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|bytes| bytes / 1024)
+        .unwrap_or(0)
 }
 
 #[cfg(target_os = "linux")]
