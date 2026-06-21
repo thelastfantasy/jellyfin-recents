@@ -5,7 +5,14 @@ members = [
   "crates/seek-preview",
   "crates/frame-forge",
   "crates/poster-gen",
+  "crates/webpx-patched",
 ]
+
+# Vendored fork of webpx 0.3.4 — adds preprocessing()/sharp_yuv() setters to AnimationEncoder
+# (upstream only exposes them on the single-image EncoderConfig, not the animation encoder
+# frame-forge actually uses). See crates/webpx-patched for the diff against upstream.
+[patch.crates-io]
+webpx = { path = "crates/webpx-patched" }
 
 [profile.release]
 strip = true

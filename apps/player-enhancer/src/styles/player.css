@@ -357,7 +357,15 @@ body.jfs-seeking .upNextContainer {
 .jfs-fe-card.sel { border-color: #00a4dc; }
 .jfs-fe-card.junk { opacity: 0.45; border-color: rgba(239,68,68,0.6); }
 .jfs-fe-card.jfs-pressing { transform: scale(0.93); transition: transform 0.35s; }
-.jfs-fe-card img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+.jfs-fe-card img {
+  display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover;
+  /* long-press on an <img> triggers the browser's native "copy/save/share image" menu,
+     which races with FrameGrid's own long-press-to-drag-select gesture (see FrameGrid.tsx) */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
 .jfs-fe-card-foot {
   display: flex;
   align-items: center;

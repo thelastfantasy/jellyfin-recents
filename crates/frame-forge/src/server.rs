@@ -626,6 +626,16 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                 encoder.set_lossless(true);
             } else {
                 encoder.set_quality((quality.clamp(0.01, 1.0) * 100.0) as f32);
+                // Lossy WebP always 4:2:0-subsamples chroma (no way to disable in the
+                // bitstream); these two only soften the resulting artifacts rather than
+                // raising bitrate the way a quality bump or lossless would:
+                //   - preprocessing bit 0 = pseudo-random dithering, targets the visible
+                //     gradient banding/blocking this was added for (color blocks in flat
+                //     anime gradients at quality 85)
+                //   - sharp_yuv improves the RGB->YUV downsampling itself, reducing color
+                //     bleed at sharp edges
+                encoder.set_preprocessing(1);
+                encoder.set_sharp_yuv(true);
             }
             log::warn!("[frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
 
