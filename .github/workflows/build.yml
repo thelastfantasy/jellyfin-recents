@@ -20,42 +20,62 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            src/poster-gen
-            src/seek-preview
+            . -> target
+
+      # 精简版 OpenCV（关 GTK/Qt/OpenGL/LAPACK，见 scripts/build-opencv-minimal.sh）—
+      # 替代 apt 的桌面版 libopencv-dev，与本地 mise run build-opencv-minimal-linux 用同一脚本，
+      # 保证 CI 和本地构建针对同一份 OpenCV 二进制做验证。缓存以脚本内容哈希为 key，
+      # 仅当脚本变更（如升级 OPENCV_VERSION）时才重新从源码编译。
+      - name: Cache OpenCV-minimal
+        id: cache-opencv
+        uses: actions/cache@v4
+        with:
+          path: /opt/opencv-minimal
+          key: opencv-minimal-${{ runner.os }}-${{ hashFiles('scripts/build-opencv-minimal.sh') }}
+
+      - name: Build OpenCV-minimal
+        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        run: sudo bash scripts/build-opencv-minimal.sh
+
+      - name: Export OpenCV/clang env for downstream steps
+        run: |
+          echo "PKG_CONFIG_PATH=/opt/opencv-minimal/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/opt/opencv-minimal/lib" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-18/lib" >> "$GITHUB_ENV"
 
       - name: Install FFmpeg 7.x dev libs
         run: |
           sudo add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
           sudo apt-get update
-          sudo apt-get install -y pkg-config clang libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y pkg-config clang libclang-dev libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "9.0.x"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            src/frontend/package-lock.json
-            src/player-enhancer/package-lock.json
+          cache: "pnpm"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install frontend dependencies
-        working-directory: src/frontend
-        run: npm ci
-
-      - name: Install enhancer dependencies
-        working-directory: src/player-enhancer
-        run: npm ci
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Test Rust
         run: make test-rust
+
+      # opencv 是 frame-forge 的 opt-in feature（见 crates/frame-forge/Cargo.toml），
+      # make test-rust 默认不启用，单独跑一遍覆盖 stitch/dl_match 等 opencv 代码路径。
+      - name: Test frame-forge (opencv feature)
+        run: cd crates/frame-forge && cargo test --features opencv
 
       - name: Test frontend
         run: make test-frontend
@@ -64,12 +84,12 @@ jobs:
         run: make test-csharp
 
       - name: Build frontend
-        working-directory: src/frontend
-        run: npm run build
+        working-directory: apps/frontend
+        run: pnpm run build
 
       - name: Build enhancer
-        working-directory: src/player-enhancer
-        run: npm run build
+        working-directory: apps/player-enhancer
+        run: pnpm run build
 
       - name: Build plugin
-        run: dotnet build src/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj -c Release
+        run: dotnet build packages/JellyfinSuite.Plugin/JellyfinSuite.Plugin.csproj -c Release

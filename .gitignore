@@ -11,9 +11,8 @@ build/
 .env
 .env.local
 .env.*.local
-# 根目录误生成的 npm lockfile（前端 lockfile 在 src/frontend/）
+# 根目录误生成的 npm lockfile（实际 lockfile 由 pnpm-lock.yaml 管理）
 /package-lock.json
-/package.json
 
 # C# / .NET
 bin/
@@ -21,7 +20,13 @@ obj/
 *.user
 *.suo
 .vs/
-packages/
+# packages/ is a source directory; ignore only NuGet metadata
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite.js
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-frontend.css
+packages/JellyfinSuite.Plugin/Web/jellyfin-suite-player-enhancer.css
+packages/JellyfinSuite.Plugin/bin/
+packages/JellyfinSuite.Plugin/obj/
 *.nupkg
 publish/
 *.DotSettings.user
@@ -40,14 +45,16 @@ Thumbs.db
 
 # IDE
 .idea/
+.vscode/
 *.swp
-src/frontend/node_modules/
-src/frontend/dist/
-src/JellyfinSuite.Plugin/Web/jellyfin-suite.js
-src/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js
-src/JellyfinSuite.Plugin/Web/jellyfin-suite-frontend.css
-src/JellyfinSuite.Plugin/bin/
-src/JellyfinSuite.Plugin/obj/
+apps/frontend/node_modules/
+apps/frontend/dist/
+apps/player-enhancer/node_modules/
+apps/player-enhancer/dist/
+packages/i18n/node_modules/
+packages/api-types/node_modules/
+tests/JellyfinSuite.Tests/bin/
+tests/JellyfinSuite.Tests/obj/
 tests/JellyfinRecents.Tests/bin/
 tests/JellyfinRecents.Tests/obj/
 
@@ -60,22 +67,26 @@ tests/JellyfinRecents.Tests/obj/
 .opencode/tmp/
 
 # Rust
-src/poster-gen/target/
-src/seek-preview/target/
+crates/poster-gen/target/
+crates/seek-preview/target/
+crates/frame-forge/target/
+target/
 
 # poster-gen 编译产物（运行时从 Docker 构建，不入仓库）
-src/poster-gen/poster-gen-linux-x64
-src/poster-gen/poster-gen-win-x64.exe
-src/JellyfinRecents.Plugin/poster-gen-linux-x64
-src/JellyfinSuite.Plugin/poster-gen-linux-x64
-src/JellyfinRecents.Plugin/poster-gen-win-x64.exe
-src/JellyfinSuite.Plugin/poster-gen-win-x64.exe
+crates/poster-gen/poster-gen-linux-x64
+crates/poster-gen/poster-gen-win-x64.exe
+packages/JellyfinSuite.Plugin/poster-gen-linux-x64
+packages/JellyfinSuite.Plugin/poster-gen-win-x64.exe
 
 # seek-preview 编译产物
-src/JellyfinSuite.Plugin/seek-preview-linux-x64
+packages/JellyfinSuite.Plugin/seek-preview-linux-x64
+
+# frame-forge 编译产物（含精简版 OpenCV .so 依赖闭包，见 scripts/build-frame-forge-linux.sh）
+packages/JellyfinSuite.Plugin/frame-forge-linux-x64
+packages/JellyfinSuite.Plugin/native-linux/
 
 # Vite 构建缓存
-src/frontend/.vite/
+apps/frontend/.vite/
 
 # speckit 当前功能指针（每次切换功能分支自动更新，属临时状态）
 .specify/feature.json
@@ -87,3 +98,37 @@ src/frontend/.vite/
 *.ass
 *.ssa
 *.srt
+
+# 拼接测试
+stitch-source/
+
+# jellyfin-dev 测试媒体库（从局域网传输的真实媒体文件，体积大且可能有版权，不入库）
+/demo/
+
+# stitch-eval：下载的第三方素材（可能有版权）和生成产物，不入库
+tests/stitch-eval/downloads/
+tests/stitch-eval/seagull-src/
+tests/stitch-eval/demo-output/
+tests/stitch-eval/demo-output-py/
+tests/stitch-eval/demo-output-legacy/
+tests/stitch-eval/demo-output-loftr/
+tests/stitch-eval/demo-output-gpu/
+# GPU 验证 pass 缓存的 ORT cuda13 build（~190MB，运行时下载，不入库）
+.cache/ort-gpu-cuda13/
+tests/stitch-eval/__pycache__/
+tests/stitch-eval/report.html
+
+# Python 字节码（通用）
+__pycache__/
+*.pyc
+
+# ONNX 模型文件（运行时下载，二进制大文件，不入库）
+models/
+
+# podman/docker context 元数据，曾被某次 CLI 调用误写到仓库根目录（应在 ~/.config/containers 下）
+/contexts/
+
+# 手动调试编译产物（非 Makefile 标准产物，临时 cargo build 输出）
+forge-test-noopt
+forge-dbg
+

@@ -1,17 +1,17 @@
 {
   "integration": "speckit",
-  "version": "0.8.7",
+  "version": "0.10.1",
   "installed_at": "2026-05-09T01:23:35.691841+00:00",
   "files": {
-    ".specify/scripts/powershell/check-prerequisites.ps1": "bcb37804b0757c37799b65a9321c1d3fb7b7ddcab6703c55c5b9a142c9166bf1",
-    ".specify/scripts/powershell/common.ps1": "916b3ea1e29ef626a353f0ec011f906c6afff6818a97d560a0321b8557d970ec",
-    ".specify/scripts/powershell/create-new-feature.ps1": "84227d4cde2af8ae7c854a2cbfb9145325cfce1be67f8018a63febcff8b1a272",
-    ".specify/scripts/powershell/setup-plan.ps1": "bcd5391f3b36c639d87c2b20944874becb62365a26291a06fff97212cd471637",
-    ".specify/scripts/powershell/setup-tasks.ps1": "aa7b19077dc4f6feee1dae47f68dc3e6d8ac75adf572a949443f3322b753cfa2",
+    ".specify/scripts/powershell/check-prerequisites.ps1": "7302acc26ed7920ed6e8c627be322cd8ae9a46482ead5930f36f5e38aff1f563",
+    ".specify/scripts/powershell/common.ps1": "3846917aff1e3fc68993c7e39b11fd230bea48d9705b920d1970b6a564507f98",
+    ".specify/scripts/powershell/create-new-feature.ps1": "1cd5b716e56c1df148cc1c690bff862a2576a42269380c0c61446b0f1dd5172d",
+    ".specify/scripts/powershell/setup-plan.ps1": "d55b161c13b1a83d10035d2601255698aed6c3a629a44bf0bfa3299c7b42729d",
+    ".specify/scripts/powershell/setup-tasks.ps1": "441f3a6cfa1da236411ed6a68ebf754a391515662df0bb74dd6916106d8caf52",
     ".specify/templates/checklist-template.md": "c37695297e5d3153d64f82c21223509940b13932046c7961c42d1d669516130c",
     ".specify/templates/constitution-template.md": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
-    ".specify/templates/plan-template.md": "5ad267630e370c73fe957dafa61bf76d633f3aea9d2f0b5195087d729cdd1e41",
-    ".specify/templates/spec-template.md": "785dc50d856dd92d6515eca0761e16dce0c9ba0a3cd07154fd33eae77932422a",
-    ".specify/templates/tasks-template.md": "fb7a30a6e8e7319b7134bd52a26dd52fb7dd9106ab8fa08b6fb551d704dac498"
+    ".specify/templates/plan-template.md": "cc7f7979cf8d8836ec26492785affd80791d3422a2b745062ec695be8c985ef7",
+    ".specify/templates/spec-template.md": "3945437fc35cd30a5b2bf7beea680337c3516826d3efa5a6b92c4a7eca1ba28e",
+    ".specify/templates/tasks-template.md": "fc29a233f6f5a27ca31f1aa46b596af6500c627441c6e62b2bc4a1d721525842"
   }
 }

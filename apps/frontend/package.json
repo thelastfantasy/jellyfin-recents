@@ -1,0 +1,44 @@
+{
+  "name": "jellyfin-suite-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "bun test ../../tests/frontend/",
+    "test:watch": "bun test --watch ../../tests/frontend/",
+    "gen:types": "node ../../scripts/gen-plugin-types.mjs --url=http://localhost:8600"
+  },
+  "dependencies": {
+    "@jellyfin/sdk": "^0.10.0",
+    "@jfs/api-types": "workspace:*",
+    "@jfs/common-ui": "workspace:*",
+    "@jfs/i18n": "workspace:*",
+    "axios": "^1.17.0",
+    "jotai": "^2.13.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-icons": "^5.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.60.0",
+    "@typescript-eslint/parser": "^8.60.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "@vitest/browser": "^4.1.6",
+    "eslint": "^10.4.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-simple-import-sort": "^13.0.0",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.0",
+    "vite-plugin-css-injected-by-js": "^5.0.1",
+    "vitest": "^4.1.6"
+  }
+}

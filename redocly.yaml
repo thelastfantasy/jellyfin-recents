@@ -1,0 +1,15 @@
+extends:
+  - recommended
+
+rules:
+  # localhost is intentional — this is a Jellyfin plugin with a well-known default port
+  no-server-example.com: off
+
+  # ASP.NET route segments like /SeekPreview/{itemId} and /{itemId}/FrameInfo
+  # are unambiguous at runtime (literal vs UUID-format param) but OAI tooling
+  # cannot infer format constraints for routing disambiguation
+  no-ambiguous-paths: off
+
+  # Several GET endpoints (Health, Tasks, Fonts, etc.) genuinely cannot return
+  # client errors — adding fake 4xx responses would be misleading
+  operation-4xx-response: off

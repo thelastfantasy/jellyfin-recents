@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/jfs-common",
+  "crates/seek-preview",
+  "crates/frame-forge",
+  "crates/poster-gen",
+]
+
+[profile.release]
+strip = true
+lto = true

@@ -1,0 +1,146 @@
+import { Lightbox } from '@jfs/common-ui'
+import { useCallback,useEffect, useState } from 'react'
+import { MdGridView } from 'react-icons/md'
+
+import { cancelJob, getImageUrl, listJobs } from '../api/posterSheetApi'
+import { useLocale } from '../i18n/context'
+import type { JobEntry} from '../state/posterJobStore';
+import { addJob, getJobs,removeJob, updateJob } from '../state/posterJobStore'
+import { downloadBlob } from '../utils/download'
+import { Popover } from './Popover'
+import { PosterJobRunner } from './PosterJobRunner'
+
+export function PosterQueueWidget() {
+  const { t } = useLocale()
+  const [jobs, setJobs] = useState<JobEntry[]>(getJobs)
+  const [open, setOpen] = useState(false)
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    // Restore jobs from backend on mount (iframe re-enter after navigation)
+    listJobs().then(serverJobs => {
+      const localIds = new Set(getJobs().map(j => j.jobId))
+      for (const sj of serverJobs) {
+        if (localIds.has(sj.jobId)) continue
+        addJob(sj.jobId, sj.itemId, sj.itemTitle, sj.createdAt || undefined)
+        updateJob(sj.jobId, {
+          status: sj.status === 'queued' ? 'running' : sj.status,
+          progress: sj.progress,
+          total: sj.total,
+          error: sj.error ?? undefined,
+        })
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    function handler() { setJobs(getJobs()) }
+    window.addEventListener('jfs-poster-jobs-changed', handler)
+    return () => window.removeEventListener('jfs-poster-jobs-changed', handler)
+  }, [])
+
+  const handleDelete = useCallback(async (job: JobEntry) => {
+    await cancelJob(job.jobId).catch(() => {})
+    removeJob(job.jobId)
+  }, [])
+
+  // Badge: running + error jobs
+  const badgeCount = jobs.filter(j => j.status === 'running' || j.status === 'error').length
+
+  // Sorted list of done jobs (same order as displayed), used for lightbox navigation
+  const doneJobs = [...jobs].sort((a, b) => b.addedAt - a.addedAt).filter(j => j.status === 'done')
+
+  if (jobs.length === 0) return null
+
+  const runningJobs = jobs.filter(j => j.status === 'running')
+
+  return (
+    <>
+      {runningJobs.map(j => <PosterJobRunner key={j.jobId} jobId={j.jobId} />)}
+      <button
+        className="jfs-queue-widget"
+        onClick={() => setOpen(v => !v)}
+        title={t.posterQueue}
+        aria-label={t.posterQueue}
+      >
+        <MdGridView size={22} />
+        {badgeCount > 0 && (
+          <span className="jfs-queue-widget__badge">{badgeCount}</span>
+        )}
+      </button>
+
+      <Popover open={open} onClose={() => setOpen(false)}>
+        <div className="jfs-queue-popover">
+          <div className="jfs-queue-popover__header">
+            <span>{t.posterQueue}</span>
+            <button className="jfs-queue-popover__header-close" onClick={() => setOpen(false)}>✕</button>
+          </div>
+          <div className="jfs-queue-popover__list">
+            {[...jobs].sort((a, b) => b.addedAt - a.addedAt).map(job => (
+              <div key={job.jobId} className={`jfs-queue-popover__item jfs-queue-popover__item--${job.status}`}>
+                <div className="jfs-queue-popover__item-header">
+                  <span className="jfs-queue-popover__title" title={job.itemTitle}>{job.itemTitle}</span>
+                  <button
+                    className="jfs-queue-popover__delete"
+                    onClick={() => handleDelete(job)}
+                    title={t.posterQueueRemove}
+                  >✕</button>
+                </div>
+
+                {job.status === 'running' && job.total > 0 && (
+                  <div className="jfs-queue-popover__bar">
+                    <div
+                      className="jfs-queue-popover__bar-fill"
+                      style={{ width: `${Math.round((job.progress / job.total) * 100)}%` }}
+                    />
+                    <span className="jfs-queue-popover__bar-text">
+                      {Math.round((job.progress / job.total) * 100)}%
+                    </span>
+                  </div>
+                )}
+
+                {job.status === 'running' && job.total === 0 && (
+                  <div className="jfs-queue-popover__status-text">Starting…</div>
+                )}
+
+                {job.status === 'error' && (
+                  <div className="jfs-queue-popover__status-text jfs-queue-popover__status-text--error">
+                    {job.error ?? 'Error'}
+                  </div>
+                )}
+
+                {job.status === 'done' && (
+                  <img
+                    src={getImageUrl(job.jobId)}
+                    alt={job.itemTitle}
+                    className="jfs-queue-popover__thumb"
+                    onClick={() => setLightboxIdx(doneJobs.findIndex(j => j.jobId === job.jobId))}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </Popover>
+
+      {lightboxIdx !== null && doneJobs[lightboxIdx] && (() => {
+        const job = doneJobs[lightboxIdx]
+        const src = getImageUrl(job.jobId)
+        return (
+          <Lightbox
+            src={src}
+            alt="Poster sheet"
+            onClose={() => setLightboxIdx(null)}
+            onDownload={() => downloadBlob(src, `poster-sheet-${job.jobId}.jpg`)}
+            onDelete={() => {
+              handleDelete(job)
+              setLightboxIdx(null)
+            }}
+            onPrev={lightboxIdx > 0 ? () => setLightboxIdx(lightboxIdx - 1) : undefined}
+            onNext={lightboxIdx < doneJobs.length - 1 ? () => setLightboxIdx(lightboxIdx + 1) : undefined}
+          />
+        )
+      })()}
+    </>
+  )
+}

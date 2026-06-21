@@ -1,0 +1,18 @@
+pre-commit:
+  parallel: true
+  commands:
+    player-enhancer-lint:
+      glob: "apps/player-enhancer/src/**/*.{ts,tsx}"
+      root: "apps/player-enhancer"
+      run: npx tsc --noEmit && npx eslint {staged_files}
+      stage_fixed: true
+    frontend-lint:
+      glob: "apps/frontend/src/**/*.{ts,tsx}"
+      root: "apps/frontend"
+      run: npx tsc --noEmit && npx eslint {staged_files}
+      stage_fixed: true
+    common-ui-lint:
+      glob: "packages/common-ui/src/**/*.{ts,tsx}"
+      root: "packages/common-ui"
+      run: npx eslint {staged_files}
+      stage_fixed: true

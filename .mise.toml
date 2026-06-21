@@ -2,22 +2,72 @@
 "conda:make" = "latest"
 "aqua:nektos/act" = "latest"
 bun = "latest"
+lefthook = "latest"
+rust = "stable"
+node = "lts"
+pnpm = "latest"
+ffmpeg = "7.1.4"
+
+# seek-preview/frame-forge 依赖 ffmpeg-next（仅需 codec+format+software-scaling，
+# 不需要 libx264/libvpx 等外部编码器），系统 apt 默认装的是 FFmpeg 8（已移除 avfft.h）。
+# 用 mise 从官方源码以默认 configure 编译 7.x（--enable-shared 产出可链接的 .so + headers +
+# pkg-config，且因不启用外部编码器，没有 18 个 transitive codec 库的依赖地狱）。
+[env]
+ASDF_FFMPEG_OPTIONS_EXTRA = "--enable-shared"
+PKG_CONFIG_PATH = "{{env.HOME}}/.local/share/mise/installs/ffmpeg/7.1.4/lib/pkgconfig"
+LD_LIBRARY_PATH = "{{env.HOME}}/.local/share/mise/installs/ffmpeg/7.1.4/lib"
 
 [tasks.build]
 description = "构建前端和插件"
 run = "make build"
 
 [tasks.build-poster-gen]
-description = "在 Docker 中构建 Rust Linux 二进制"
+description = "在容器中构建 Rust Linux 二进制（Podman/Docker 自动检测）"
 run = "make build-poster-gen"
 
 [tasks.build-seek-preview]
-description = "在 Docker 中编译 seek-preview Linux 二进制（含 FFmpeg 7 dev 库）"
+description = "在容器中编译 seek-preview Linux 二进制（含 FFmpeg 7 dev 库）"
 run = "make build-seek-preview"
 
+[tasks.build-frame-forge]
+description = "在容器中编译 frame-forge Linux 二进制（含 OpenCV + FFmpeg 7 dev 库）"
+run = "make build-frame-forge"
+
+[tasks.check-seek-preview]
+description = "在容器中类型检查 seek-preview（快速，不产出二进制）"
+run = "make check-seek-preview"
+
+[tasks.check-frame-forge]
+description = "在容器中类型检查 frame-forge（快速，不产出二进制）"
+run = "make check-frame-forge"
+
+[tasks.check-frame-forge-opencv]
+description = "在容器中类型检查 frame-forge（含 opencv 特性，覆盖 stitch_liveaction 等 opencv 代码路径）"
+run = "make check-frame-forge-opencv"
+
+[tasks.check-seek-preview-ps1]
+description = "pwsh: Docker 内 check seek-preview"
+run = "pwsh -NoProfile -File scripts/check-seek-preview.ps1"
+
+[tasks.check-frame-forge-ps1]
+description = "pwsh: Docker 内 check frame-forge"
+run = "pwsh -NoProfile -File scripts/check-frame-forge.ps1"
+
 [tasks.update]
-description = "构建并部署到本地 Jellyfin 开发容器"
+description = "构建并部署到本地 Jellyfin 开发容器（完整）"
 run = "make update"
+
+[tasks.deploy]
+description = "完整部署（构建所有组件并部署到 jellyfin-dev 容器）"
+run = "pwsh -NoProfile -File scripts/deploy.ps1"
+
+[tasks.update-quick]
+description = "快速部署：仅重建前端+增强器+C#，跳过 Rust 构建"
+run = "make update-quick"
+
+[tasks.deploy-enhancer]
+description = "极速部署：仅重建 player-enhancer JS 并 cp 到容器，无需重启"
+run = "make deploy-enhancer"
 
 [tasks.test]
 description = "运行所有测试（Rust + TypeScript + C#）"
@@ -35,6 +85,26 @@ run = "make test-frontend"
 description = "运行 C# xUnit 测试"
 run = "make test-csharp"
 
+[tasks.gen-spec]
+description = "从 C# DTO 反射生成插件 OpenAPI 3.2 spec（packages/api-types/openapi.json）"
+run = "dotnet run --project packages/JfsSpecGen -- --out packages/api-types/openapi.json"
+
+[tasks.gen-client]
+description = "从插件 spec 生成 orval 类型 + HTTP 客户端（packages/api-types/src/client/）"
+run = "pnpm --filter @jfs/api-types run gen-client"
+
+[tasks.gen-types]
+description = "完整 codegen 流程：生成 spec → orval 客户端 → openapi-typescript 兜底类型"
+run = "mise run gen-spec && mise run gen-client && node scripts/gen-plugin-types.mjs --file=packages/api-types/openapi.json"
+
+[tasks.fetch-jellyfin-spec]
+description = "从运行中的 jellyfin-dev 下载官方 Jellyfin OpenAPI spec（一次性操作）"
+run = "node scripts/fetch-jellyfin-spec.mjs"
+
+[tasks.gen-types-from-server]
+description = "从运行中的 jellyfin-dev 生成插件 OpenAPI TypeScript 类型（旧流程，仅供参考）"
+run = "node scripts/gen-plugin-types.mjs"
+
 [tasks.workflow-test]
 description = "本地运行 build workflow（需要 Docker）"
 run = "make workflow-test"
@@ -42,3 +112,62 @@ run = "make workflow-test"
 [tasks.workflow-test-release]
 description = "本地运行 release workflow（构建步骤可测；GitHub Release/Pages 步骤因无真实 token 会失败）"
 run = "make workflow-test-release"
+
+[tasks.check-gpu]
+description = "验证 Arc A380 OpenCL 在 jellyfin-dev 容器内可见"
+run = "docker exec jellyfin-dev clinfo 2>&1 | grep -E 'Platform|Device|Arc'"
+
+[tasks.demo-stitch]
+description = "拼接质量演示：cargo clean(修复Windows NTFS mtime) → 构建 forge(cli+opencv) → 生成 fixtures → 拼接 → score.py 评分 → 结果写 tests/stitch-eval/demo-output/"
+run = "make demo-stitch"
+
+# ── Linux-native tasks (Podman/Docker, no cygpath) ────────────────────────────
+# 专供 Linux 开发机使用；Windows 开发机继续使用上面不带 -linux 后缀的原始 task。
+
+[tasks.build-poster-gen-linux]
+description = "Linux: 在 Podman/Docker 容器中构建 poster-gen Rust 二进制"
+run = "make build-poster-gen-linux"
+
+[tasks.build-seek-preview-linux]
+description = "Linux: 在 Podman/Docker 容器中编译 seek-preview（含 FFmpeg 7 dev 库）"
+run = "make build-seek-preview-linux"
+
+[tasks.build-opencv-minimal-linux]
+description = "Linux: 源码编译精简版 OpenCV（关 GTK/Qt/OpenGL/LAPACK），缓存进 opencv-minimal-root volume，仅升级版本时需重跑"
+run = "make build-opencv-minimal-linux"
+
+[tasks.build-frame-forge-linux]
+description = "Linux: 在 Podman/Docker 容器中编译 frame-forge（链接精简版 OpenCV + FFmpeg 7 dev 库，$ORIGIN rpath 自带 .so 闭包到 native-linux/）"
+run = "make build-frame-forge-linux"
+
+[tasks.check-seek-preview-linux]
+description = "Linux: 在容器中类型检查 seek-preview（快速，不产出二进制）"
+run = "make check-seek-preview-linux"
+
+[tasks.check-frame-forge-linux]
+description = "Linux: 在容器中类型检查 frame-forge（快速，不产出二进制）"
+run = "make check-frame-forge-linux"
+
+[tasks.check-frame-forge-opencv-linux]
+description = "Linux: 在容器中类型检查 frame-forge（含 opencv 特性）"
+run = "make check-frame-forge-opencv-linux"
+
+[tasks.demo-stitch-linux]
+description = "Linux: 拼接质量演示（Podman/Docker，无 cygpath）→ 结果写 tests/stitch-eval/demo-output/"
+run = "make demo-stitch-linux"
+
+[tasks.demo-stitch-gpu-linux]
+description = "Linux: GPU 拼接验证（需 nvidia-container-toolkit + CDI）→ 真实 CUDA EP 跑 DL 匹配，结果写 tests/stitch-eval/demo-output-gpu/，含 fallback_events 校验"
+run = "make demo-stitch-gpu-linux"
+
+[tasks.build-linux]
+description = "Linux: 构建前端和插件（Rust 二进制走 build-*-linux，无 cygpath）"
+run = "make build-linux"
+
+[tasks.update-linux]
+description = "Linux: 构建并部署到本地 Jellyfin 开发容器（完整，无 cygpath，会重启容器）"
+run = "make update-linux"
+
+[tasks.lint]
+description = "ESLint 检查 apps/frontend 与 apps/player-enhancer"
+run = "pnpm --filter jellyfin-suite-frontend --filter jellyfin-suite-player-enhancer exec eslint ."

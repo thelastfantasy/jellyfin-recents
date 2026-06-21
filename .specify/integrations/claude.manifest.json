@@ -1,16 +1,16 @@
 {
   "integration": "claude",
-  "version": "0.8.7",
-  "installed_at": "2026-05-09T01:23:35.485279+00:00",
+  "version": "0.10.1",
+  "installed_at": "2026-06-11T05:19:32.866246+00:00",
   "files": {
     ".claude/skills/speckit-analyze/SKILL.md": "adb9c4baed1d0e27cebd08e506a7247c1357ee721b6ea340201553d5792e6c8a",
-    ".claude/skills/speckit-checklist/SKILL.md": "812b2a102310470141b313670a51e7f33fe4f673a3b8c3d97ddff4abce2e5fbd",
-    ".claude/skills/speckit-clarify/SKILL.md": "0ca2d6dd6eae86d0e02149b1c3df0b7770e5e5dcfc0482f2b7176b12f6f6457d",
+    ".claude/skills/speckit-clarify/SKILL.md": "fd720c2b468f10f89cf4b6dfcff876e735e557cde5f9bcb2ec1fc7079c19051c",
     ".claude/skills/speckit-constitution/SKILL.md": "c1a044aba243ca6aff627fb5e4404feb6f1108d4f7dd174631bee3ae477d6c15",
-    ".claude/skills/speckit-implement/SKILL.md": "efeb6dc763bcf6ee5fe6732ce4d4243fe7c9c37f1db10ac39d8b0780ff9eebe0",
-    ".claude/skills/speckit-plan/SKILL.md": "5dbf517056a7df98de24835cb44c582b8d9b5c95950f917b129a740ca7f6448b",
-    ".claude/skills/speckit-specify/SKILL.md": "caadc05119eca453709a0425ed88d253883f9c55da4c13a4898367653a859483",
-    ".claude/skills/speckit-tasks/SKILL.md": "6a8ca4d9d9948e4f50ed7614cd5a0c743b510fd98d6791de554db8f53a0626ed",
-    ".claude/skills/speckit-taskstoissues/SKILL.md": "ccacc12041d1e27d3afffc7a189ac3d17444836e10eeb4e128b272b5e8ae45cb"
+    ".claude/skills/speckit-implement/SKILL.md": "97a339450a2a81cb63d17cac84e8fdca6be07f0e66c37bcdca6ee87cf1f8d9f2",
+    ".claude/skills/speckit-plan/SKILL.md": "08e693951151193ea45fe4a42079c520e223999eb803e10a89190e070f089949",
+    ".claude/skills/speckit-checklist/SKILL.md": "82a54d9ce969ae87c0034ffce77539bc708290efc26a6160efe928b248c712c4",
+    ".claude/skills/speckit-specify/SKILL.md": "ebe19db388407058a6b078b3a66ea7198cb89795dc75680ba3c457f11bc8bf7a",
+    ".claude/skills/speckit-tasks/SKILL.md": "84c276f7037693ebc69eef74dce0af127280eda1d8e6af18d29ff8440b028d3f",
+    ".claude/skills/speckit-taskstoissues/SKILL.md": "e326c30c89a6bb67a9251cbe038178bc4dd1281948267d1921d361d8c327a0d9"
   }
 }

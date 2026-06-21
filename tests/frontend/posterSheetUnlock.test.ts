@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test'
-import { registerPosterViewClick, isPosterUnlocked, _resetState } from '../../src/frontend/src/state/posterSheetUnlock'
+import { registerPosterViewClick, isPosterUnlocked, _resetState } from '../../apps/frontend/src/state/posterSheetUnlock'
 
 describe('registerPosterViewClick', () => {
   beforeEach(() => {

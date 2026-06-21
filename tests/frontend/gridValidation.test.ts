@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { isGridValid, maxFrames } from '../../src/frontend/src/utils/gridValidation'
+import { isGridValid, maxFrames } from '../../apps/frontend/src/utils/gridValidation'
 
 describe('isGridValid', () => {
   it('2×4 grid for 30 s video → valid (3.75 s/frame)', () => {

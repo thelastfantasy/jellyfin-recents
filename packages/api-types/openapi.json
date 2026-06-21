@@ -1,0 +1,3381 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "JellyfinSuite Plugin API",
+    "version": "1.0.0",
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8096",
+      "description": "Jellyfin server (default port)"
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/JellyfinSuite/PlayHistory": {
+      "get": {
+        "tags": [
+          "PlayHistory"
+        ],
+        "operationId": "playHistory_get",
+        "summary": "Get",
+        "parameters": [
+          {
+            "name": "groupBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mediaType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "showRepeats",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "groupDedup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Play history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayHistoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/{itemId}/FrameInfo": {
+      "get": {
+        "tags": [
+          "JellyfinSuite"
+        ],
+        "operationId": "jellyfinSuite_getFrameInfo",
+        "summary": "Get Frame Info",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Frame index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameIndexDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/{itemId}/FrameInfoStream": {
+      "get": {
+        "tags": [
+          "JellyfinSuite"
+        ],
+        "operationId": "jellyfinSuite_frameInfoStream",
+        "summary": "Frame Info Stream",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "currentTimeMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameIndexStreamEvent"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/FrameIndexStreamEvent"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/SeekPreview/{itemId}": {
+      "get": {
+        "tags": [
+          "SeekPreview"
+        ],
+        "operationId": "seekPreview_getFrame",
+        "summary": "Get Frame",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "prefetch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG frame",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/SeekPreview/{itemId}/frame-info": {
+      "get": {
+        "tags": [
+          "SeekPreview"
+        ],
+        "operationId": "seekPreview_getFrameInfo",
+        "summary": "Get Frame Info",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Frame info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameInfoDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/SeekPreview/{itemId}/frame-index": {
+      "get": {
+        "tags": [
+          "SeekPreview"
+        ],
+        "operationId": "seekPreview_getFrameIndex",
+        "summary": "Get Frame Index",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Frame index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameIndexDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/SeekPreview/{itemId}/ready-stream": {
+      "get": {
+        "tags": [
+          "SeekPreview"
+        ],
+        "operationId": "seekPreview_readyStream",
+        "summary": "Ready Stream",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeekReadyEvent"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/SeekReadyEvent"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/{itemId}": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_getFrame",
+        "summary": "Get Frame",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "frameIdx",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "positionMs",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebP frame",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Prefetch/{itemId}": {
+      "post": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_prefetch",
+        "summary": "Prefetch",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrefetchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/PrefetchReady/{itemId}": {
+      "post": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_prefetchReady",
+        "summary": "Prefetch Ready",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrefetchRangeStreamRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefetchRangeEvent"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/PrefetchRangeEvent"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Generate": {
+      "post": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_generate",
+        "summary": "Generate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Task accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/TaskProgress": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_taskProgress",
+        "summary": "Task Progress",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProgressDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/TaskProgressDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Result/{taskId}/{filename}": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_getResult",
+        "summary": "Get Result",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Result/{taskId}": {
+      "delete": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_deleteResult",
+        "summary": "Delete Result",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Cancel/{taskId}": {
+      "post": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_cancel",
+        "summary": "Cancel",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Already complete"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Tasks": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_getTasks",
+        "summary": "Get Tasks",
+        "responses": {
+          "200": {
+            "description": "Task list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FrameExportTaskListItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Health": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_health",
+        "summary": "Health",
+        "responses": {
+          "200": {
+            "description": "Health info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameExportHealth"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/Debug": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_debug",
+        "summary": "Debug",
+        "responses": {
+          "200": {
+            "description": "Debug JSON"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/FrameExport/QualityThresholds": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_getQualityThresholds",
+        "summary": "Get Quality Thresholds",
+        "responses": {
+          "200": {
+            "description": "Quality thresholds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityThresholds"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_setQualityThresholds",
+        "summary": "Set Quality Thresholds",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityThresholds"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated thresholds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityThresholds"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/{id}": {
+      "post": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_startJob",
+        "summary": "Start Job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PosterSheetRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartJobResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Unprocessable Entity"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_deleteJob",
+        "summary": "Delete Job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/jobs": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_listJobs",
+        "summary": "List Jobs",
+        "responses": {
+          "200": {
+            "description": "Job list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PosterSheetStatusDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/{jobId}/status": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_getStatus",
+        "summary": "Get Status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PosterSheetStatusDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/{jobId}/image": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_getImage",
+        "summary": "Get Image",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Poster sheet image",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/{jobId}/stream": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_streamStatus",
+        "summary": "Stream Status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/PosterSheetStatusDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/PosterSheetStatusDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/preview": {
+      "post": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_preview",
+        "summary": "Preview",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview image",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/cache/{itemId}": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_checkCache",
+        "summary": "Check Cache",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rows",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cols",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "thumbWidth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "seed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "overlayHash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cache hit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheCheckResponseDto"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Not cached"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/fonts": {
+      "get": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_listFonts",
+        "summary": "List Fonts",
+        "responses": {
+          "200": {
+            "description": "Font list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FontMetaRecord"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_uploadFont",
+        "summary": "Upload Font",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uploaded font",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FontMetaRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/PosterSheet/fonts/{key}": {
+      "delete": {
+        "tags": [
+          "PosterSheet"
+        ],
+        "operationId": "posterSheet_deleteFont",
+        "summary": "Delete Font",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Devices": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getDevices",
+        "summary": "Get Devices",
+        "responses": {
+          "200": {
+            "description": "Compute device list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getModels",
+        "summary": "Get Models",
+        "responses": {
+          "200": {
+            "description": "Model catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/Download": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_downloadModel",
+        "summary": "Download Model",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDownloadRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "Version not found in catalog"
+          },
+          "409": {
+            "description": "Already installed or in progress"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/DownloadProgress": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getModelDownloadProgress",
+        "summary": "Get Model Download Progress",
+        "parameters": [
+          {
+            "name": "family",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDownloadProgressDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/ModelDownloadProgressDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/{family}/{version}": {
+      "delete": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_deleteModel",
+        "summary": "Delete Model",
+        "parameters": [
+          {
+            "name": "family",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getOrtVersions",
+        "summary": "Get Ort Versions",
+        "responses": {
+          "200": {
+            "description": "ORT version list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrtVersionListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/Download": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_downloadOrtVersion",
+        "summary": "Download Ort Version",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrtDownloadRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "Version not found in catalog"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/Activate": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_activateOrtVersion",
+        "summary": "Activate Ort Version",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrtActivateRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activated"
+          },
+          "404": {
+            "description": "Version not installed"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/DownloadProgress": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getOrtDownloadProgress",
+        "summary": "Get Ort Download Progress",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrtDownloadProgressDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/OrtDownloadProgressDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_startUpscale",
+        "summary": "Start Upscale",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpscaleStartRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source result not found or expired"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleStatus",
+        "summary": "Get Upscale Status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Result": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleResult",
+        "summary": "Get Upscale Result",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upscaled image (not yet confirmed)",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Result not available"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Log": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleLog",
+        "summary": "Get Upscale Log",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobLogDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Cancel": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_cancelUpscale",
+        "summary": "Cancel Upscale",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled"
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PrefetchRangeStreamRequest": {
+        "type": "object",
+        "properties": {
+          "currentTimeMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "currentFrameIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "beforeSeconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "afterSeconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "includeCurrentFrame": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "prefetchSessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "includeCurrentFrame",
+          "width",
+          "prefetchSessionId"
+        ]
+      },
+      "PrefetchRequest": {
+        "type": "object",
+        "properties": {
+          "startFrameIdx": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "beforeSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "afterSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "includeStart": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "positions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "framePairs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/FramePairDto"
+            }
+          }
+        },
+        "required": [
+          "startFrameIdx",
+          "beforeSeconds",
+          "afterSeconds",
+          "includeStart",
+          "width"
+        ]
+      },
+      "FramePairDto": {
+        "type": "object",
+        "properties": {
+          "fiIdx": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "posMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "fiIdx",
+          "posMs"
+        ]
+      },
+      "GenerateRequest": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "itemTitle": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FrameReference"
+            }
+          },
+          "params": {
+            "$ref": "#/components/schemas/ExportParams"
+          }
+        },
+        "required": [
+          "itemId",
+          "itemTitle",
+          "type",
+          "frames",
+          "params"
+        ]
+      },
+      "FrameReference": {
+        "type": "object",
+        "properties": {
+          "frameIdx": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "positionMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ExportParams": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string"
+          },
+          "resizeMode": {
+            "type": "string"
+          },
+          "customWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "customHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "resolutionPreset": {
+            "type": "string"
+          },
+          "speed": {
+            "type": "number",
+            "format": "float"
+          },
+          "loopCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cropX": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "cropY": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "cropW": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "cropH": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "quality": {
+            "type": "number",
+            "format": "float"
+          },
+          "deviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelFamily": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ortVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "format",
+          "resizeMode",
+          "resolutionPreset",
+          "speed",
+          "loopCount",
+          "quality"
+        ]
+      },
+      "GenerateResponse": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId"
+        ]
+      },
+      "TaskProgressDto": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "current": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "resultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fileSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "taskId",
+          "status",
+          "phase",
+          "current",
+          "total",
+          "percent"
+        ]
+      },
+      "QualityThresholds": {
+        "type": "object",
+        "properties": {
+          "blackBrightnessVarMin": {
+            "type": "number",
+            "format": "double"
+          },
+          "whiteBrightnessVarMax": {
+            "type": "number",
+            "format": "double"
+          },
+          "blurLaplacianVarMin": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "blackBrightnessVarMin",
+          "whiteBrightnessVarMax",
+          "blurLaplacianVarMin"
+        ]
+      },
+      "FrameExportTaskListItemDto": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "itemTitle": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "resultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fileSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "taskId",
+          "itemId",
+          "itemTitle",
+          "type",
+          "status",
+          "createdAt"
+        ]
+      },
+      "FrameInfoDto": {
+        "type": "object",
+        "properties": {
+          "frameIdx": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "frameStartMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "frameIdx",
+          "frameStartMs"
+        ]
+      },
+      "FrameIndexDto": {
+        "type": "object",
+        "properties": {
+          "frames": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FrameIndexEntryDto"
+            }
+          },
+          "fps": {
+            "$ref": "#/components/schemas/FpsFracDto"
+          }
+        },
+        "required": [
+          "frames",
+          "fps"
+        ]
+      },
+      "FrameIndexEntryDto": {
+        "type": "object",
+        "properties": {
+          "frameIndex": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "isKey": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "frameIndex",
+          "ms",
+          "isKey"
+        ]
+      },
+      "FpsFracDto": {
+        "type": "object",
+        "properties": {
+          "num": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "den": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "num",
+          "den"
+        ]
+      },
+      "PosterSheetStatusDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "itemTitle": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mediaInfo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaInfoDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "jobId",
+          "itemId",
+          "itemTitle",
+          "status",
+          "progress",
+          "total",
+          "createdAt"
+        ]
+      },
+      "StartJobResponseDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
+        ]
+      },
+      "CacheCheckResponseDto": {
+        "type": "object",
+        "properties": {
+          "cached": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "cached"
+        ]
+      },
+      "SkipSegmentDto": {
+        "type": "object",
+        "properties": {
+          "startMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "startMs",
+          "endMs"
+        ]
+      },
+      "PosterSheetRequestDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cols": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "seed": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "thumbWidth": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/OverlaySettings"
+          },
+          "skipSegments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SkipSegmentDto"
+            }
+          }
+        },
+        "required": [
+          "rows",
+          "cols",
+          "mode",
+          "thumbWidth",
+          "overlay"
+        ]
+      },
+      "PreviewRequestDto": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cols": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "thumbWidth": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/OverlaySettings"
+          }
+        },
+        "required": [
+          "rows",
+          "cols",
+          "thumbWidth",
+          "overlay"
+        ]
+      },
+      "OverlaySettings": {
+        "type": "object",
+        "properties": {
+          "brandingEnabled": {
+            "type": "boolean"
+          },
+          "brandingText": {
+            "type": "string"
+          },
+          "videoInfoEnabled": {
+            "type": "boolean"
+          },
+          "showFileSize": {
+            "type": "boolean"
+          },
+          "showResolutionFps": {
+            "type": "boolean"
+          },
+          "showVideoEncoding": {
+            "type": "boolean"
+          },
+          "showAudioEncoding": {
+            "type": "boolean"
+          },
+          "showDuration": {
+            "type": "boolean"
+          },
+          "showSubtitles": {
+            "type": "boolean"
+          },
+          "showFrameTimestamp": {
+            "type": "boolean"
+          },
+          "timestampFont": {
+            "type": "string"
+          },
+          "timestampBg": {
+            "type": "boolean"
+          },
+          "timestampShadow": {
+            "type": "boolean"
+          },
+          "colorTheme": {
+            "type": "string"
+          },
+          "fontFamily": {
+            "type": "string"
+          },
+          "brandingLatinFont": {
+            "type": "string"
+          },
+          "brandingCjkFont": {
+            "type": "string"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "timestampPosition": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "brandingEnabled",
+          "brandingText",
+          "videoInfoEnabled",
+          "showFileSize",
+          "showResolutionFps",
+          "showVideoEncoding",
+          "showAudioEncoding",
+          "showDuration",
+          "showSubtitles",
+          "showFrameTimestamp",
+          "timestampFont",
+          "timestampBg",
+          "timestampShadow",
+          "colorTheme",
+          "fontFamily",
+          "brandingLatinFont",
+          "brandingCjkFont",
+          "lang",
+          "timestampPosition"
+        ]
+      },
+      "MediaInfoDto": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "string"
+          },
+          "fileSizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "fps": {
+            "type": "number",
+            "format": "double"
+          },
+          "videoCodec": {
+            "type": "string"
+          },
+          "bitDepth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "hdrType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "colourSpace": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audioCodec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audioFormat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audioBitrate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audioSampleRate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "audioTracks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "subtitleCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "duration": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "fileSize",
+          "fileSizeBytes",
+          "resolution",
+          "fps",
+          "videoCodec",
+          "audioTracks",
+          "subtitleCount",
+          "duration"
+        ]
+      },
+      "PlayHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string"
+          },
+          "playedDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "favoritedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "addedDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "seriesName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seriesId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seasonNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episodeNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "imagePrimaryTag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasAncestors": {
+            "type": "boolean"
+          },
+          "playbackPositionTicks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "videoDuration": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        },
+        "required": [
+          "itemId",
+          "playedDate",
+          "mediaType",
+          "hasAncestors"
+        ]
+      },
+      "PlayHistoryResponse": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlayHistoryEntry"
+            }
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "entries",
+          "totalCount",
+          "totalPages"
+        ]
+      },
+      "ComputeDeviceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "vramMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "isIntegrated": {
+            "type": "boolean"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "computeCapability": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "devicePath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "deviceType",
+          "vendor",
+          "isIntegrated",
+          "isDefault"
+        ]
+      },
+      "DeviceListDto": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComputeDeviceDto"
+            }
+          }
+        },
+        "required": [
+          "devices"
+        ]
+      },
+      "ModelEntryDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "downloadUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "localPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isLatest": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "family",
+          "displayName",
+          "version",
+          "fileName",
+          "status",
+          "isLatest"
+        ]
+      },
+      "ModelListDto": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelEntryDto"
+            }
+          },
+          "catalogFetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalogStale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "models",
+          "catalogStale"
+        ]
+      },
+      "ModelDownloadRequestDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "version"
+        ]
+      },
+      "ModelDownloadProgressDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "family",
+          "version",
+          "percent",
+          "status"
+        ]
+      },
+      "OrtAssetDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "url",
+          "sha256",
+          "sizeBytes"
+        ]
+      },
+      "OrtVersionDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "localDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assets": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OrtAssetDto"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "isActive",
+          "status"
+        ]
+      },
+      "OrtVersionListDto": {
+        "type": "object",
+        "properties": {
+          "activeVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrtVersionDto"
+            }
+          },
+          "maxRetainedVersions": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "versions",
+          "maxRetainedVersions"
+        ]
+      },
+      "OrtDownloadRequestDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "OrtActivateRequestDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "OrtDownloadProgressDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "percent",
+          "status"
+        ]
+      },
+      "FallbackEventDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "reason",
+          "timestamp"
+        ]
+      },
+      "UpscaleLogDto": {
+        "type": "object",
+        "properties": {
+          "deviceName": {
+            "type": "string"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "faceRestoreRequested": {
+            "type": "boolean"
+          },
+          "faceRestoreSkippedNoFace": {
+            "type": "boolean"
+          },
+          "fallbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FallbackEventDto"
+            }
+          }
+        },
+        "required": [
+          "deviceName",
+          "deviceType",
+          "deviceId",
+          "faceRestoreRequested",
+          "faceRestoreSkippedNoFace",
+          "fallbacks"
+        ]
+      },
+      "UpscaleStartRequestDto": {
+        "type": "object",
+        "properties": {
+          "resultPath": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelScale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelStyle": {
+            "type": "string"
+          },
+          "faceRestore": {
+            "type": "boolean"
+          },
+          "deviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "resultPath",
+          "scale",
+          "modelScale",
+          "modelStyle",
+          "faceRestore"
+        ]
+      },
+      "UpscaleJobDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originalUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originalWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "originalHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "resultWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "resultHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "originalSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "resultSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "faceRestoreSkippedNoFace": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "jobId",
+          "status",
+          "percent",
+          "faceRestoreSkippedNoFace"
+        ]
+      },
+      "UpscaleJobLogDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelStyle": {
+            "type": "string"
+          },
+          "faceRestoreRequested": {
+            "type": "boolean"
+          },
+          "deviceIdRequested": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "log": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UpscaleLogDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "jobId",
+          "status",
+          "scale",
+          "modelStyle",
+          "faceRestoreRequested",
+          "createdAt"
+        ]
+      },
+      "FontMetaRecord": {
+        "type": "object",
+        "required": [
+          "key",
+          "displayName",
+          "script",
+          "format"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "isSerif": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isMonospace": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isBold": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isItalic": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hasLigatures": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FrameExportHealth": {
+        "type": "object",
+        "required": [
+          "available",
+          "activeTasks"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "activeTasks": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SeekReadyEvent": {
+        "type": "object",
+        "required": [
+          "frameReady"
+        ],
+        "properties": {
+          "frameReady": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FrameIndexStreamEvent": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FrameIndexEntryDto"
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "fps"
+            ],
+            "properties": {
+              "fps": {
+                "$ref": "#/components/schemas/FpsFracDto"
+              }
+            }
+          }
+        ]
+      },
+      "PrefetchRangeEvent": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "frameReady"
+            ],
+            "properties": {
+              "frameReady": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "done"
+            ],
+            "properties": {
+              "done": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

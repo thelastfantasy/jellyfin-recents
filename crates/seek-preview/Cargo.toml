@@ -1,0 +1,14 @@
+[package]
+name = "seek-preview"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "seek-preview"
+path = "src/main.rs"
+
+[dependencies]
+jfs-common = { path = "../jfs-common" }
+tokio = { version = "1", features = ["full"] }
+lru = "0.18"
+anyhow = "1"
