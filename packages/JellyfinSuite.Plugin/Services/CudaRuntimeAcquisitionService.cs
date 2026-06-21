@@ -77,7 +77,7 @@ public sealed class CudaRuntimeAcquisitionService : BackgroundService
     {
         _deviceEnum = deviceEnum;
         _logger = logger;
-        _pluginDir = Path.Combine(appPaths.PluginsPath, "JellyfinSuite");
+        _pluginDir = Path.GetDirectoryName(typeof(CudaRuntimeAcquisitionService).Assembly.Location)!;
         _frameForgeBinaryPath = Path.Combine(_pluginDir, "frame-forge-linux-x64");
     }
 

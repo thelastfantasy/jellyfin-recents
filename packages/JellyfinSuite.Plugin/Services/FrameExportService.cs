@@ -58,7 +58,8 @@ public sealed class FrameExportService : IDisposable
     {
         _logger = logger;
         _socketPath = Path.Combine(appPaths.DataPath, "jfs-frame-forge.sock");
-        _binaryPath = Path.Combine(appPaths.PluginsPath, "JellyfinSuite", BinaryName);
+        var dir = Path.GetDirectoryName(typeof(FrameExportService).Assembly.Location)!;
+        _binaryPath = Path.Combine(dir, BinaryName);
     }
 
     /// <summary>

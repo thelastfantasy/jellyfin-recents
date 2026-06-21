@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.JellyfinSuite.Services;
 
 /// <summary>
-/// Manages ORT runtime versions under /config/plugins/JellyfinSuite/ort/. Bootstraps on
+/// Manages ORT runtime versions under {plugin install dir}/ort/. Bootstraps on
 /// startup by scanning for an active version, downloads new versions on demand (detecting
 /// host OS + GPU vendor to pick the matching asset), and activates a version by writing
 /// active.txt and killing the running frame-forge daemon so it relaunches with the new
@@ -69,7 +69,7 @@ public sealed class OrtVersionService : BackgroundService
     {
         _deviceEnum = deviceEnum;
         _logger = logger;
-        _pluginDir = Path.Combine(appPaths.PluginsPath, "JellyfinSuite");
+        _pluginDir = Path.GetDirectoryName(typeof(OrtVersionService).Assembly.Location)!;
         _catalogPath = Path.Combine(OrtRoot, "catalog.json");
         _catalogTtlPath = _catalogPath + ".ttl";
     }

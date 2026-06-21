@@ -73,7 +73,8 @@ public class PlayerEnhancerController : ControllerBase
     [AllowAnonymous]
     public IActionResult GetCore()
     {
-        var fsPath = Path.Combine(_appPaths.PluginsPath, "JellyfinSuite", "jellyfin-suite-enhancer.js");
+        var pluginDir = Path.GetDirectoryName(GetType().Assembly.Location)!;
+        var fsPath = Path.Combine(pluginDir, "jellyfin-suite-enhancer.js");
         if (System.IO.File.Exists(fsPath))
         {
             var mtime = new FileInfo(fsPath).LastWriteTimeUtc;
