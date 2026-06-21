@@ -3,7 +3,15 @@
 use image::DynamicImage;
 use rustfft::{FftPlanner, num_complex::Complex};
 
-const QUALITY_THRESHOLD: f64 = 0.02;
+// Empirically, real adjacent-frame motion in this app's actual usage scores 0.47-0.83
+// peak-correlation quality; near-duplicate/near-static frame pairs (no real motion at all —
+// the case this threshold exists to catch) score 0.01-0.025, a noise floor with zero overlap
+// with the real-motion range (see production incident logs, 36-sample distribution). The
+// previous value of 0.02 sat *inside* that noise floor instead of above it, so several
+// noise-level pairs (q=0.0215-0.0233) were accepted as real motion purely by chance, silently
+// corrupting the panorama's coordinate system for every frame after them. 0.15 sits with large
+// margin on both sides of the observed gap.
+const QUALITY_THRESHOLD: f64 = 0.15;
 
 /// Returns (dx, dy, peak_quality). quality < QUALITY_THRESHOLD → scene cut.
 pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32, f64) {
@@ -244,18 +252,47 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     eprintln!("[stitch] stitch_anime: {} frames, {fw}x{fh}", frames.len());
 
     // Compute offsets; low-quality pairs don't extend the canvas.
+    //
+    // A weak correlation against the *immediately preceding* frame doesn't mean frame i has
+    // no usable relationship to the sequence — it's frequently just that frame i-1 happens to
+    // be a near-duplicate/near-static frame with nothing reliable to lock onto. Giving up at
+    // that point (the old behavior) silently shrinks the panorama's true extent: maximizing
+    // how much of the real footage the final canvas covers is the whole point of this
+    // algorithm, so before writing a frame off as a scene cut, back off to i-2, i-3, ... and
+    // try those instead. Only if *none* of the prior frames correlate is it a genuine cut.
     let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];
     let mut pair_quality: Vec<f64> = vec![];
     for i in 1..frames.len() {
-        let (dx, dy, q) = phase_correlate(&frames[i - 1], &frames[i]);
-        eprintln!("[stitch] pair {}-{}: dx={dx} dy={dy} q={q:.4}", i - 1, i);
-        pair_quality.push(q);
-        let prev = offsets[i - 1];
-        if q >= QUALITY_THRESHOLD {
-            offsets.push((prev.0 + dx, prev.1 + dy));
-        } else {
-            eprintln!("[stitch] frame {i}: scene cut (q={q:.4} < {QUALITY_THRESHOLD})");
-            offsets.push(prev);
+        let mut accepted: Option<(usize, i32, i32, f64)> = None;
+        let mut best_q = 0.0f64;
+        for k in 1..=i {
+            let ref_idx = i - k;
+            let (dx, dy, q) = phase_correlate(&frames[ref_idx], &frames[i]);
+            eprintln!(
+                "[stitch] pair {ref_idx}-{i}: dx={dx} dy={dy} q={q:.4}{}",
+                if k > 1 { " (backtrack)" } else { "" }
+            );
+            best_q = best_q.max(q);
+            if q >= QUALITY_THRESHOLD {
+                accepted = Some((ref_idx, dx, dy, q));
+                break;
+            }
+        }
+        pair_quality.push(best_q);
+        match accepted {
+            Some((ref_idx, dx, dy, q)) => {
+                let base = offsets[ref_idx];
+                offsets.push((base.0 + dx, base.1 + dy));
+                if ref_idx != i - 1 {
+                    eprintln!("[stitch] frame {i}: recovered via backtrack to frame {ref_idx} (q={q:.4})");
+                }
+            }
+            None => {
+                eprintln!(
+                    "[stitch] frame {i}: scene cut (best q={best_q:.4} < {QUALITY_THRESHOLD} against all {i} prior frames)"
+                );
+                offsets.push(offsets[i - 1]);
+            }
         }
     }
 
@@ -382,6 +419,36 @@ mod quality_tests {
     use super::*;
     use crate::test_metrics::*;
 
+    /// Reproduces the production incident: a low-quality pair against the immediately
+    /// preceding frame must not freeze/corrupt the offset chain when an earlier frame still
+    /// correlates well. Frame 1 here is unrelated noise (simulating a near-duplicate/blurry
+    /// frame that just happens to score near the noise floor against its neighbors); frame 2
+    /// is a real, known vertical pan *relative to frame 0*. Without backtracking, frame 2
+    /// would be frozen at frame 1's position (a scene cut) and the true pan would be lost.
+    #[test]
+    fn low_quality_adjacent_pair_recovers_via_backtrack() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/stitch-eval/fixtures/flower_landscape/reference.png");
+        let reference = image::open(&path).expect("reference.png missing");
+        let (w, h) = (reference.width(), reference.height());
+
+        let true_dy = 195u32;
+        let frame0 = reference.crop_imm(0, 0, w, 600);
+        let frame2 = reference.crop_imm(0, true_dy, w, h - true_dy);
+        // Deterministic pseudo-random noise, unrelated to either real frame.
+        let frame1 = DynamicImage::ImageRgb8(image::RgbImage::from_fn(w, 600, |x, y| {
+            let v = (x.wrapping_mul(2654435761).wrapping_add(y.wrapping_mul(40503))) as u8;
+            image::Rgb([v, v.wrapping_add(85), v.wrapping_add(170)])
+        }));
+
+        let (_, _, q_noise) = phase_correlate(&frame0, &frame1);
+        assert!(q_noise < QUALITY_THRESHOLD, "noise frame must score below threshold (got {q_noise:.4})");
+
+        let stitched = stitch_anime(&[frame0, frame1, frame2]).expect("stitch_anime failed");
+        assert_eq!(stitched.height(), h, "frame 2's true offset from frame 0 must still be recovered \
+            via backtrack — canvas should cover the full vertical extent, not collapse to frame 1's position");
+    }
+
     #[test]
     fn ssim_identical_images() {
         let img = DynamicImage::new_rgb8(64, 64);
@@ -393,6 +460,34 @@ mod quality_tests {
         let black = DynamicImage::new_rgb8(64, 64);
         let white = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(64, 64, image::Rgb([255, 255, 255])));
         assert!(ssim(&black, &white) < 0.5, "SSIM of black vs white must be low");
+    }
+
+    /// gen_synthetic.sh / phase_corr_ssim_on_synthetic_fixtures only ever exercise
+    /// *horizontal* pans — there was no regression coverage at all for vertical panning
+    /// (the kind a top/bottom-cropped panorama report would implicate) until this test.
+    /// Crops two vertically-overlapping windows out of a real photo with a known true
+    /// offset and checks stitch_anime reconstructs the original exactly.
+    #[test]
+    fn vertical_pan_reconstructs_without_cropping() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/stitch-eval/fixtures/flower_landscape/reference.png");
+        let reference = image::open(&path).expect("reference.png missing");
+        let (w, h) = (reference.width(), reference.height());
+
+        let true_dy = 195u32;
+        let top = reference.crop_imm(0, 0, w, 600);
+        let bottom = reference.crop_imm(0, true_dy, w, h - true_dy);
+
+        let (dx, dy, q) = phase_correlate(&top, &bottom);
+        assert_eq!(dx, 0, "pure vertical pan must not report horizontal motion");
+        assert_eq!(dy, true_dy as i32, "phase_correlate dy must match the true vertical offset");
+        assert!(q >= QUALITY_THRESHOLD, "quality {q:.4} too low for a clean synthetic pair");
+
+        let stitched = stitch_anime(&[top, bottom]).expect("stitch_anime failed");
+        assert_eq!((stitched.width(), stitched.height()), (w, h),
+            "canvas must cover the full vertical extent, not just one input frame's height");
+        assert_eq!(stitched.to_rgb8().into_raw(), reference.to_rgb8().into_raw(),
+            "vertical stitch must reconstruct the source exactly — no row should be dropped at either edge");
     }
 
     #[test]
