@@ -115,14 +115,27 @@ cd apps/frontend      && npx tsc --noEmit && npx eslint src/
 
 ## 项目结构
 
+pnpm + Cargo workspace monorepo（自 spec 010 起）：
+
 ```
-src/
-  JellyfinRecents.Plugin/   — C# Jellyfin 插件
-  frontend/                 — TypeScript/Preact 前端
-  poster-gen/               — Rust 海报生成器 CLI
+apps/
+  frontend/                — TypeScript/React 前端（Jellyfin 插件页面）
+  player-enhancer/         — TypeScript/React 播放器增强脚本
+crates/
+  frame-forge/             — Rust：DL 拼接/动图生成 daemon（GPU EP + OpenCV）
+  jfs-common/              — Rust：seek-preview/frame-forge 共享解码/缓存逻辑
+  poster-gen/              — Rust：海报生成器 CLI
+  seek-preview/            — Rust：trickplay seek 预览 daemon
+packages/
+  JellyfinSuite.Plugin/    — C# Jellyfin 插件（控制器、服务、DTO）
+  JfsSpecGen/              — C# DTO → OpenAPI spec 生成器
+  api-types/               — 共享 OpenAPI/TypeScript 类型包 (@jfs/api-types)
+  common-ui/               — 共享 React UI 组件包
+  i18n/                    — 共享 i18n 包（zh/en/ja）
 tests/
-  frontend/                 — Vitest 前端测试
-  JellyfinRecents.Tests/    — C# xUnit 测试
+  frontend/                — Vitest 前端测试
+  JellyfinSuite.Tests/     — C# xUnit 测试
+  stitch-eval/             — 拼接质量评估 fixtures + demo 脚本
 specs/
-  003-poster-sheet-generator/ — 当前功能规格文档
+  012-ort-gpu-model-ui/    — 当前进行中的功能规格文档
 ```

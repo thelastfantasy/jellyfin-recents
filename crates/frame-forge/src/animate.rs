@@ -1,4 +1,5 @@
-﻿use image::DynamicImage;
+﻿use anyhow::Context as _;
+use image::DynamicImage;
 use std::io::Cursor;
 
 // ── GIF encoding ────────────────────────────────────────────────────────────
@@ -21,6 +22,42 @@ pub fn encode_gif(frames: &[DynamicImage], delays_ms: &[u32], loop_count: u16) -
         }
     }
     Ok(buf.into_inner())
+}
+
+/// Decode a GIF previously produced by `encode_gif`. Assumes every frame covers the
+/// full canvas at (0,0) — true for our own output, but not GIFs with partial-frame
+/// disposal methods in general — so no canvas compositing is attempted.
+pub fn decode_gif(data: &[u8]) -> anyhow::Result<(Vec<DynamicImage>, Vec<u32>, u16)> {
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = options.read_info(Cursor::new(data))?;
+    let loop_count = match decoder.repeat() {
+        gif::Repeat::Infinite => 0,
+        gif::Repeat::Finite(n) => n,
+    };
+    let mut frames = Vec::new();
+    let mut delays = Vec::new();
+    while let Some(frame) = decoder.read_next_frame()? {
+        let img = image::RgbaImage::from_raw(frame.width as u32, frame.height as u32, frame.buffer.to_vec())
+            .context("invalid GIF frame buffer")?;
+        frames.push(DynamicImage::ImageRgba8(img));
+        delays.push(frame.delay as u32 * 10);
+    }
+    Ok((frames, delays, loop_count))
+}
+
+/// Decode an animated WebP previously produced by `encode_webp_anim`.
+pub fn decode_webp_anim(data: &[u8]) -> anyhow::Result<(Vec<DynamicImage>, Vec<u32>, u16)> {
+    let mut dec = webpx::AnimationDecoder::new(data)?;
+    let raw_frames = dec.decode_all()?;
+    let mut frames = Vec::with_capacity(raw_frames.len());
+    let mut delays = Vec::with_capacity(raw_frames.len());
+    for f in raw_frames {
+        let img = image::RgbaImage::from_raw(f.width, f.height, f.data).context("invalid WebP frame buffer")?;
+        frames.push(DynamicImage::ImageRgba8(img));
+        delays.push(f.duration_ms);
+    }
+    Ok((frames, delays, 0))
 }
 
 // ── WebP encoding (webpx crate) ─────────────────────────────────────────────

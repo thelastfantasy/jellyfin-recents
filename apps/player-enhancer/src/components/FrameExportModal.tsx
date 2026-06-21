@@ -56,6 +56,8 @@ import { FrameGridSkeleton } from "./FrameGridSkeleton";
 import { GridPage } from "./GridPage";
 import { ProgressPage } from "./ProgressPage";
 import { ResultPage } from "./ResultPage";
+import { showToast } from "./Toast";
+import { UpscalePage } from "./UpscalePage";
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
@@ -76,17 +78,37 @@ function frameIdxAt(frames: FrameInfoEntry[], ms: number): number {
 }
 
 // Binary search: first index where frames[i].ms >= ms
-function bsFirst(frames: FrameInfoEntry[], ms: number): number {
+// Exported so GridPage can run the same "would expandBack/expandForward find anything?" check
+// to proactively disable the buttons while the frame index is still streaming in, instead of
+// only discovering "no data here (yet)" after the user clicks.
+export function bsFirst(frames: FrameInfoEntry[], ms: number): number {
   let lo = 0, hi = frames.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (frames[mid].ms < ms) lo = mid + 1; else hi = mid; }
   return lo;
 }
 
 // Binary search: last index where frames[i].ms <= ms (-1 if none)
-function bsLast(frames: FrameInfoEntry[], ms: number): number {
+export function bsLast(frames: FrameInfoEntry[], ms: number): number {
   let lo = 0, hi = frames.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (frames[mid].ms <= ms) lo = mid + 1; else hi = mid; }
   return lo - 1;
+}
+
+// Diagnostic for expandBack/expandForward's "no frames in this ~1s window" guard — only ever
+// called on that rare path, so the extra index[] lookups here cost nothing in the common case.
+// `sliceEnd`/`start` bound the hole: index[sliceEnd] is the last known frame before it,
+// index[start] is the first known frame after it — printing both pins down whether this is a
+// genuine PTS gap in the source container (large ms delta, no frame_index gap) versus something
+// else, without needing to reproduce it under a debugger.
+function logIndexGap(index: FrameInfoEntry[], sliceEnd: number, start: number, boundaryMs: number): void {
+  const before = sliceEnd >= 0 ? index[sliceEnd] : null;
+  const after = start < index.length ? index[start] : null;
+  console.warn('[frameExport] index gap', {
+    boundaryMs,
+    before: before && { frameIndex: before.frameIndex, ms: before.ms },
+    after: after && { frameIndex: after.frameIndex, ms: after.ms },
+    gapMs: before && after ? after.ms - before.ms : null,
+  });
 }
 
 // Re-sync _fi.minIdx / _fi.maxIdx after _fi.index expands (Queue B batches shift positions).
@@ -177,6 +199,12 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
 
   const rootRef = useRef<HTMLDivElement>(null)
   const prefetchAbortRef = useRef<AbortController | null>(null)
+  // expandBack/expandForward each request a different, non-overlapping ~1s window of frames —
+  // unlike triggerPrefetch's repeated calls (which really do supersede each other, same evolving
+  // center position), two expand calls are never "stale vs fresh" relative to each other, so they
+  // must not share one abort ref. Tracked here only so modal close/unmount can still cancel
+  // whatever's left in flight — never aborted proactively by a new expand call.
+  const expandAbortControllersRef = useRef<Set<AbortController>>(new Set())
   // Tracks the session ID of the last-started prefetch for FR-006 conditional UI reset
   const lastSessionIdRef = useRef<string>('')
   // Mirror posMs prop in a ref so callbacks can read the latest value without dep churn
@@ -212,6 +240,27 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     );
   }, []);
 
+  // Backend decode failed for this specific frame (e.g. corrupted source GOP at that PTS) —
+  // without this, a frame whose decode fails just stays in the "loading" placeholder forever
+  // (jpegUrl="" and loadError=false both stay falsy after the stream's `done` event), since
+  // the only other terminal state transition is markFrameReady. Reuses the existing
+  // retry-error UI in FrameCard.tsx instead of inventing a new visual state.
+  const markFrameError = useCallback((idx: number) => {
+    setFrames(_frames.map((f, i) => (i === idx ? { ...f, loadError: true } : f)));
+  }, []);
+
+  // The whole stream connection can die before delivering a `done`/`frameFailed` for every frame
+  // it was going to cover (e.g. the frame-forge daemon or the whole container restarting mid-flight,
+  // not just one frame's decode failing) — `onError` only fires once for the stream as a whole, so
+  // without this every frame that request was still waiting on stays stuck in the loading
+  // placeholder forever, with no retry button ever appearing (that only renders once loadError is
+  // true). Scoped to the exact fiIdx set the failed request owned — must NOT sweep all pending
+  // frames indiscriminately, since other independent in-flight requests (concurrent expandBack/
+  // expandForward calls no longer share one abort ref) may still be legitimately filling in others.
+  const markFiIdxsError = useCallback((fiIdxs: Set<number>) => {
+    setFrames(_frames.map((f) => (fiIdxs.has(f.fiIdx) && !f.jpegUrl && !f.loadError ? { ...f, loadError: true } : f)));
+  }, []);
+
   const triggerPrefetch = useCallback(() => {
     prefetchAbortRef.current?.abort();
     if (_frames.length === 0) return;
@@ -226,6 +275,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     // 用展示范围中心（不用 posMs），确保返回的 fiIdx 与 _frames 一致
     const centerMs = Math.round((_minPosMs + _maxPosMs) / 2);
     bench.mark('prefetch_triggered', { centerMs })
+    const ownedFiIdxs = new Set(_frames.map(f => f.fiIdx));
     prefetchAbortRef.current = openPrefetchRangeStream(
       itemId,
       { currentTimeMs: centerMs, beforeSeconds: 1, afterSeconds: 1, includeCurrentFrame: true, width: 320, prefetchSessionId: sessionId },
@@ -235,9 +285,10 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
         else bench.mark('prefetch_no_match', { fiIdx, framesLen: _frames.length });
       },
       () => {},
-      () => {},
+      () => markFiIdxsError(ownedFiIdxs),
+      (fiIdx) => { const idx = _frames.findIndex((f) => f.fiIdx === fiIdx); if (idx >= 0) markFrameError(idx); },
     );
-  }, [itemId, markFrameReady]);
+  }, [itemId, markFrameReady, markFrameError, markFiIdxsError]);
 
   // Applies the ±1s display range centered at ms, then triggers prefetch.
   // Returns true if range was applied; false if grid was already showing or index not there yet.
@@ -391,7 +442,11 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
   }, [itemId, videoEl, posMs, applyRangeAt]);
 
   useEffect(() => {
-    return () => { prefetchAbortRef.current?.abort(); };
+    return () => {
+      prefetchAbortRef.current?.abort();
+      for (const c of expandAbortControllersRef.current) c.abort();
+      expandAbortControllersRef.current.clear();
+    };
   }, []);
 
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
@@ -402,24 +457,35 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     const boundaryMs = firstFrame.posMs;
     const sliceEnd = bsLast(_fi.index, boundaryMs - 1); // last frame with ms < boundaryMs
     const start = bsFirst(_fi.index, boundaryMs - 1000);
-    if (sliceEnd < 0 || start > sliceEnd) return;
+    if (sliceEnd < 0 || start > sliceEnd) {
+      // No frame-index entry in the requested ~1s window (e.g. a stretch of source frames
+      // that failed to decode/index) — without this the button just looks unresponsive,
+      // indistinguishable from a hang. bench.mark so it shows up in the same diagnostic
+      // stream as expand_back itself.
+      bench.mark('expand_back_no_frames', { boundaryMs });
+      logIndexGap(_fi.index, sliceEnd, start, boundaryMs);
+      showToast(t('frameExport.expandGap'));
+      return;
+    }
     bench.mark('expand_back', {
       addingFiIdxRange: [start, sliceEnd],
       anchorFiIdx: _fi.index[start].frameIndex,
       framesBefore: _frames.length,
     });
+    const addedFiIdxs = new Set(_fi.index.slice(start, sliceEnd + 1).map(e => e.frameIndex));
     setFrames([..._fi.index.slice(start, sliceEnd + 1).map(makeEntry), ..._frames]);
     setFiMinIdx(start);
     setMinPosMs(_fi.index[start].ms);
-    prefetchAbortRef.current?.abort();
-    prefetchAbortRef.current = openPrefetchRangeStream(
+    const controller = openPrefetchRangeStream(
       itemId,
       { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_back', { fiIdx }); },
-      () => bench.mark('expand_back_prefetch_done'),
-      () => bench.mark('expand_back_prefetch_error'),
+      () => { bench.mark('expand_back_prefetch_done'); expandAbortControllersRef.current.delete(controller); },
+      () => { bench.mark('expand_back_prefetch_error'); expandAbortControllersRef.current.delete(controller); markFiIdxsError(addedFiIdxs); },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameError(idx); },
     );
-  }, [itemId, markFrameReady]);
+    expandAbortControllersRef.current.add(controller);
+  }, [itemId, markFrameReady, markFrameError, markFiIdxsError]);
 
   const expandForward = useCallback(() => {
     if (!_fi.index || _frames.length === 0) return;
@@ -427,24 +493,31 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     const boundaryMs = lastFrame.posMs;
     const sliceStart = bsFirst(_fi.index, boundaryMs + 1); // first frame with ms > boundaryMs
     const end = bsLast(_fi.index, boundaryMs + 1000);
-    if (sliceStart >= _fi.index.length || end < sliceStart) return;
+    if (sliceStart >= _fi.index.length || end < sliceStart) {
+      bench.mark('expand_forward_no_frames', { boundaryMs });
+      logIndexGap(_fi.index, end, sliceStart, boundaryMs);
+      showToast(t('frameExport.expandGap'));
+      return;
+    }
     bench.mark('expand_forward', {
       addingFiIdxRange: [sliceStart, end],
       anchorFiIdx: _fi.index[sliceStart].frameIndex,
       framesBefore: _frames.length,
     });
+    const addedFiIdxs = new Set(_fi.index.slice(sliceStart, end + 1).map(e => e.frameIndex));
     setFrames([..._frames, ..._fi.index.slice(sliceStart, end + 1).map(makeEntry)]);
     setFiMaxIdx(end);
     setMaxPosMs(_fi.index[end].ms);
-    prefetchAbortRef.current?.abort();
-    prefetchAbortRef.current = openPrefetchRangeStream(
+    const controller = openPrefetchRangeStream(
       itemId,
       { currentFrameIndex: lastFrame.fiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_fwd', { fiIdx }); },
-      () => bench.mark('expand_forward_prefetch_done'),
-      () => bench.mark('expand_forward_prefetch_error'),
+      () => { bench.mark('expand_forward_prefetch_done'); expandAbortControllersRef.current.delete(controller); },
+      () => { bench.mark('expand_forward_prefetch_error'); expandAbortControllersRef.current.delete(controller); markFiIdxsError(addedFiIdxs); },
+      (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameError(idx); },
     );
-  }, [itemId, markFrameReady]);
+    expandAbortControllersRef.current.add(controller);
+  }, [itemId, markFrameReady, markFrameError, markFiIdxsError]);
 
   const submitGenerate = useCallback(() => {
     const exportType = sExportType.value;
@@ -482,6 +555,11 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
           exportType === "animate"
             ? settings.animateQuality
             : settings.stitchQuality,
+        ...(settings.deviceId ? { deviceId: settings.deviceId } : {}),
+        ...(settings.modelFamily ? { modelFamily: settings.modelFamily } : {}),
+        ...(settings.modelFamily && settings.modelFamily !== "disabled" && settings.modelVersion
+          ? { modelVersion: settings.modelVersion }
+          : {}),
       },
     };
     generateMutation.mutate(body, {
@@ -586,6 +664,17 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
               onClose={handleClose}
               onBack={() => {
                 sPage.value = "grid";
+              }}
+              onUpscale={() => {
+                sPage.value = "upscale";
+              }}
+            />
+          )}
+          {page === "upscale" && (
+            <UpscalePage
+              onClose={handleClose}
+              onBack={() => {
+                sPage.value = "result";
               }}
             />
           )}

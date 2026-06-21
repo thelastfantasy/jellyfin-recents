@@ -324,7 +324,7 @@ fn dominant_translation(
     eprintln!("[liveaction] dominant_translation: NCC failed -> full-image SIFT + ratio test");
 
     // Phase 2: Full-image SIFT + Lowe ratio test
-    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6).ok()?;
+    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6, false).ok()?;
     let mut kp_a = core::Vector::<core::KeyPoint>::new();
     let mut kp_b = core::Vector::<core::KeyPoint>::new();
     let mut desc_a = core::Mat::default();
@@ -584,7 +584,7 @@ mod quality_tests {
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         let reference = image::open(dir.join("reference.png")).expect("reference.png");
 
-        let stitched = stitch_liveaction(&[a, b]).expect("stitch_liveaction failed");
+        let stitched = stitch_liveaction(&[a, b], None).expect("stitch_liveaction failed");
         let score = ssim(&stitched, &reference);
         assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
     }

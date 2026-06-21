@@ -433,6 +433,7 @@ body.jfs-seeking .upNextContainer {
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+.jfs-fe-pbar.nopad { padding: 0; }
 .jfs-fe-pgroup {
   display: flex;
   flex-direction: column;
@@ -443,7 +444,32 @@ body.jfs-seeking .upNextContainer {
   flex-direction: column;
   gap: 4px;
   flex: 1;
+  position: relative;
 }
+.jfs-fe-combobox-trigger { text-align: left; width: 100%; }
+.jfs-fe-combobox-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: #181818;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 5px;
+  max-height: 220px;
+  overflow-y: auto;
+  min-width: 120px;
+}
+.jfs-fe-combobox-item { padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; color: #fff; }
+.jfs-fe-combobox-item:hover { background: rgba(255,255,255,0.10); }
+.jfs-fe-combobox-item.selected { background: rgba(0,164,220,0.18); }
+.jfs-fe-combobox-item.installed { color: #00a4dc; }
+.jfs-fe-combobox-item.catalog { color: rgba(255,255,255,0.55); }
+.jfs-fe-combobox-item.two-line { padding: 5px 10px; }
+.jfs-fe-combobox-item-main { white-space: nowrap; }
+.jfs-fe-combobox-item-sub { font-size: 10px; color: rgba(255,255,255,0.4); white-space: nowrap; margin-top: 1px; }
 .jfs-fe-pgroup-label {
   font-size: 10px;
   color: rgba(255,255,255,0.32);
@@ -745,6 +771,37 @@ body.jfs-fe-open .upNextContainer {
 }
 .jfs-fe-toggle-chk:checked + .jfs-fe-toggle-track { background: rgba(0,184,212,0.8); }
 .jfs-fe-toggle-chk:checked + .jfs-fe-toggle-track::after { transform: translateX(12px); }
+
+/* Advanced (collapsible) panel */
+.jfs-fe-advanced {
+  flex-basis: 100%;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+.jfs-fe-advanced-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 2px 0;
+  color: rgba(255,255,255,0.55); font-size: 11px; cursor: pointer;
+}
+.jfs-fe-advanced-toggle:hover { color: rgba(255,255,255,0.8); }
+.jfs-fe-advanced-chevron { display: inline-block; font-size: 10px; transition: transform 0.15s; }
+.jfs-fe-advanced-chevron.open { transform: rotate(-180deg); }
+.jfs-fe-advanced-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.jfs-fe-advanced-warning { margin: 0; font-size: 11px; color: rgba(255,200,80,0.85); }
+.jfs-fe-download-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+}
+.jfs-fe-download-prompt-actions { display: flex; align-items: center; gap: 6px; }
+.jfs-fe-progress-sm { height: 16px; margin: 0; }
+.jfs-fe-progress-sm .jfs-fe-progress-label { font-size: 10px; }
+.jfs-fe-download-error { font-size: 11px; color: rgba(255,100,100,0.9); }
 
 /* ── Toast notification ─────────────────────────────────────────────────── */
 .jfs-fe-toast {

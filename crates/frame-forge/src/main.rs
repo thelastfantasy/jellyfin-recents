@@ -16,14 +16,21 @@ mod resources;
 mod scene_classifier;
 mod server;
 mod stitch_anime;
+mod tar_xz;
 #[cfg(feature = "opencv")]
 mod dl_match;
 #[cfg(feature = "opencv")]
 mod generation_log;
 #[cfg(feature = "opencv")]
+mod gpu_compat;
+#[cfg(feature = "opencv")]
 mod stitch_landscape;
 #[cfg(feature = "opencv")]
 mod stitch_liveaction;
+#[cfg(feature = "opencv")]
+mod upscale;
+#[cfg(feature = "opencv")]
+mod face_restore;
 #[cfg(test)]
 mod test_metrics;
 
@@ -45,6 +52,14 @@ async fn run() -> Result<()> {
     ).init();
 
     let args: Vec<String> = std::env::args().collect();
+
+    // One-shot CLI subcommand, not the daemon — exits immediately instead of binding a socket.
+    if args.get(1).map(String::as_str) == Some("extract-tar-xz") {
+        let archive = args.get(2).context("Usage: frame-forge extract-tar-xz <archive.tar.xz> <dest-dir>")?;
+        let dest = args.get(3).context("Usage: frame-forge extract-tar-xz <archive.tar.xz> <dest-dir>")?;
+        return tar_xz::extract(archive, dest);
+    }
+
     let sock_path = args.get(1).context("Usage: frame-forge <socket-path>")?;
 
     jfs_common::init();

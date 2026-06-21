@@ -54,3 +54,30 @@ export function withAuth(url: string): string {
 export async function deleteTask(taskId: string): Promise<void> {
   await apiFetch(`${BASE}/Result/${taskId}`, { method: 'DELETE' })
 }
+
+export interface FallbackEventDto {
+  type: string
+  reason: string
+  timestamp: string
+}
+
+export interface GenerationLogDto {
+  algorithm: string
+  modelFileName: string
+  modelVersion: string
+  ortVersion: string
+  deviceName: string
+  deviceType: string
+  deviceId: string
+  keypointMatchCount: number
+  inferenceDurationMs: number
+  totalDurationMs: number
+  fallbacks: FallbackEventDto[]
+}
+
+/** Fetches the GenerationLog for a completed stitch task. Throws if not found/not a stitch task. */
+export async function getGenerationLog(taskId: string): Promise<GenerationLogDto> {
+  const res = await apiFetch(`${BASE}/Result/${taskId}/generation-log.json`)
+  if (!res.ok) throw new Error(`generation-log fetch failed: ${res.status}`)
+  return res.json() as Promise<GenerationLogDto>
+}

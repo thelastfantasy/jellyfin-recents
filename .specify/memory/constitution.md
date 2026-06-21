@@ -1,10 +1,13 @@
 <!--
 Sync Impact Report
 ==================
-Version change: (template) → 1.0.0 → 1.0.1 (PATCH: scope clarification added)
-Added principles: I through VII (initial ratification, all new)
-Added sections: Quality Gates, Amendment Procedure
-Removed sections: none (template placeholders replaced)
+Version change: 1.1.0 → 1.1.1 → 1.1.2 (PATCH: translated entire document to Chinese; fixed stale
+  "Preact" reference in Principle II to "React", reflecting the completed Preact→React migration)
+Added principles: none
+Modified: full-document translation (English → Chinese); Principle II frontend example updated
+  from Preact to React (no normative/semantic change to the principle itself)
+Added sections: none
+Removed sections: none
 Templates updated:
   ✅ .specify/memory/constitution.md (this file)
   ⚠ .specify/templates/plan-template.md — Constitution Check section should reference these principles
@@ -13,136 +16,131 @@ Templates updated:
 Deferred: none
 -->
 
-# Jellyfin Suite Constitution
+# Jellyfin Suite 宪章
 
-> **适用范围**：本 Constitution 专用于**重构与迁移类工作**（目录结构调整、依赖体系改造、包拆分合并等）。
-> 它不是通用编码规范，不约束日常功能开发中的实现风格、命名约定或架构决策。
+> **适用范围**：原则 I（功能无损）、II（结构不变性）、VI（Git 历史保留）、VII（结构与逻辑分离）
+> 专用于**重构与迁移类工作**（目录结构调整、依赖体系改造、包拆分合并等），不约束日常功能开发中的
+> 实现风格、命名约定或架构决策。
+>
+> 原则 III（Test Gate）、IV（Build Gate）、V（增量验证）是**通用质量门槛**，适用于**所有开发
+> 工作**，包括新功能开发——不论是否为重构类工作，任何 Stage/Phase 在标记完成前都必须满足这三项门槛。
 
-## Core Principles
+## 核心原则
 
-### I. No Functionality Loss
+### I. 功能无损
 
-Any restructuring, refactor, or migration MUST NOT remove, disable, or silently alter existing
-user-facing behaviour. This includes:
-- All plugin API endpoints and their response shapes
-- All UI features (seek preview, frame export, OSD controls, trickplay)
-- All background daemon behaviours (seek-preview, frame-forge)
-- C# binary names (`seek-preview-linux-x64`, `frame-forge-linux-x64`, `poster-gen-linux-x64`)
+任何重构、refactor 或迁移 MUST NOT 移除、停用或悄悄改变既有的用户可见行为，包括：
+- 所有插件 API 端点及其响应结构
+- 所有 UI 功能（seek preview、frame export、OSD 控件、trickplay）
+- 所有后台 daemon 行为（seek-preview、frame-forge）
+- C# 二进制文件名（`seek-preview-linux-x64`、`frame-forge-linux-x64`、`poster-gen-linux-x64`）
 
-**Rationale**: Restructuring work is invisible to users; any regression destroys trust without
-delivering value.
+**理由**：重构工作对用户是不可见的；任何回归都会在没有带来价值的情况下破坏用户信任。
 
-### II. Structural Invariance
+### II. 结构不变性
 
-Order-sensitive elements MUST preserve their relative ordering across any refactor:
-- CSS rules and `@import` sequences (later rules override earlier; wrong order silently breaks styles)
-- JavaScript/TypeScript module import sequences where side-effect order matters
-- Preact render tree structure (component hierarchy must not change without explicit intent)
-- HTTP middleware registration order in C# (auth, routing, etc.)
+顺序敏感的元素 MUST 在任何 refactor 中保持其相对顺序：
+- CSS 规则与 `@import` 顺序（后面的规则会覆盖前面的；顺序错误会悄悄破坏样式）
+- JavaScript/TypeScript 模块导入顺序（当副作用顺序有影响时）
+- React 渲染树结构（组件层级不得在没有明确意图的情况下改变）
+- C# 中 HTTP 中间件的注册顺序（鉴权、路由等）
 
-**Rationale**: Reordering often produces no compile error but breaks runtime behaviour in ways
-that are hard to detect through automated tests.
+**理由**：重新排序通常不会产生编译错误，但会以难以通过自动化测试检测的方式破坏运行时行为。
 
-### III. Test Gate (NON-NEGOTIABLE)
+### III. Test Gate（不可妥协）
 
-`mise run test` MUST pass at the end of every Stage before proceeding to the next.
-No exceptions. Failing tests block progress regardless of apparent cause.
+每个 Stage 结束、进入下一个 Stage 之前，`mise run test` MUST 通过。
+没有例外。测试失败会阻塞进度，不论表面原因是什么。
 
-Covered by `mise run test`:
-- Rust: `cargo test -p seek-preview && cargo test -p frame-forge`
-- TypeScript: bun test (frontend)
-- C#: dotnet test
+`mise run test` 覆盖范围：
+- Rust：`cargo test -p seek-preview && cargo test -p frame-forge`
+- TypeScript：bun test（前端）
+- C#：dotnet test
 
-**Rationale**: A Stage that "almost works" is not done. Accumulated deferred failures compound
-into unresolvable states.
+**理由**："差不多能用"的 Stage 不算完成。被延后的失败会不断累积，最终演变成无法收拾的状态。
 
-### IV. Build Gate (NON-NEGOTIABLE)
+### IV. Build Gate（不可妥协）
 
-Both of the following MUST pass before any Stage is marked complete:
-1. **Local deployment**: `mise run update` (builds all artifacts, deploys to `jellyfin-dev` container,
-   container restarts successfully)
-2. **CI pipeline**: `.github/workflows/` — all workflow jobs pass (build + test + artifact upload)
+在任何 Stage 被标记为完成之前，以下两项 MUST 都通过：
+1. **本地部署**：Windows 开发机用 `mise run update`，原生 Linux 开发机用 `mise run update-linux`
+   （普通的 `update`/`build` target 会调用 `cygpath`，这在 Linux 上不存在，会直接报错）——构建全部
+   产物、部署到 `jellyfin-dev` 容器、容器成功重启
+2. **CI 流水线**：`.github/workflows/`——所有 workflow job 通过（构建 + 测试 + 产物上传）
 
-Path changes in Makefile, `.mise.toml`, and workflow YAML MUST be updated atomically with the
-directory moves that cause them.
+Makefile、`.mise.toml` 和 workflow YAML 中的路径变更 MUST 与引发该变更的目录移动同一时间提交。
 
-**Rationale**: A build that passes locally but breaks CI (or vice versa) is not shippable.
+**理由**：本地能过但 CI 挂掉（或反之）的构建不具备可发布性。
 
-### V. Incremental Verification
+### V. 增量验证
 
-Each Stage MUST be independently verified before the next Stage begins. The verification command
-for each Stage MUST be defined in the plan before implementation starts.
+每个 Stage MUST 在下一个 Stage 开始之前独立完成验证。每个 Stage 的验证命令 MUST 在开始实现之前
+就在 plan 中定义好。
 
-Allowed remediation within a Stage: fix and re-verify within the same Stage.
-Not allowed: "I'll fix this in Stage N+1."
+Stage 内允许的补救方式：在同一个 Stage 内修复并重新验证。
+不允许的方式："这个我留到 Stage N+1 再修。"
 
-**Rationale**: Deferred fixes accumulate and become entangled with subsequent changes, making
-rollback and root-cause analysis exponentially harder.
+**理由**：被延后的修复会不断累积，并与后续改动相互纠缠，使回滚和根因排查的难度呈指数级上升。
 
-### VI. Git History Preservation
+### VI. Git 历史保留
 
-File and directory moves MUST use `git mv`, never delete-then-create. This preserves:
-- `git blame` attribution
-- `git log --follow` rename tracking
-- PR diff readability (rename vs. full rewrite)
+文件与目录的移动 MUST 使用 `git mv`，绝不能先删除再新建。这样才能保留：
+- `git blame` 的归属信息
+- `git log --follow` 的重命名追踪
+- PR diff 的可读性（重命名 diff 而非整体重写 diff）
 
-Bulk renames MUST be committed separately from content edits. A commit that moves a file AND
-edits its content MUST be split into two commits: move first, then edit.
+批量重命名 MUST 与内容编辑分开提交。一个既移动文件又编辑其内容的 commit MUST 拆成两个：先移动，
+再编辑。
 
-**Rationale**: Lost history is permanently lost. It cannot be recovered after the fact, and it
-makes future debugging significantly harder.
+**理由**：丢失的历史是永久丢失的，事后无法恢复，并且会让未来的调试明显更困难。
 
-### VII. Structure and Logic Separation
+### VII. 结构与逻辑分离
 
-Structural changes (directory moves, package renames, import path updates) MUST NOT be mixed
-with business logic changes in the same commit.
+结构性改动（目录移动、包重命名、import 路径更新）MUST NOT 与业务逻辑改动混在同一个 commit 里。
 
-Permitted in the same commit:
-- Moving a file AND updating import paths in files that reference it (pure mechanical consequence)
+同一个 commit 中允许的情况：
+- 移动文件并更新引用该文件的 import 路径（纯粹的机械性连带改动）
 
-Not permitted in the same commit:
-- Moving a file AND changing the logic inside it
-- Renaming a package AND fixing a bug in that package
+同一个 commit 中不允许的情况：
+- 移动文件同时改动其内部逻辑
+- 重命名包的同时修复该包里的 bug
 
-**Rationale**: Mixed commits make code review impossible, bisect unreliable, and rollback risky.
+**理由**：混杂的 commit 会让 code review 无法进行，让 bisect 变得不可靠，也让回滚变得有风险。
 
-## Quality Gates
+## 质量关卡（Quality Gates）
 
-Each Stage in any restructuring plan MUST define and execute a verification command before
-the Stage is considered complete. Typical gates per domain:
+任何重构计划中的每个 Stage MUST 在被认为完成之前，定义并执行一条验证命令。各领域的典型关卡：
 
-| Domain     | Gate command                                                                  |
+| 领域       | 关卡命令                                                                       |
 | ---------- | ----------------------------------------------------------------------------- |
-| Rust       | `cargo check -p <crate>` (per crate, not workspace-wide)                      |
+| Rust       | `cargo check -p <crate>`（按 crate 单独检查，不要整个 workspace 一起检查）      |
 | TypeScript | `tsc --noEmit` + `pnpm -r build` + eslint check                               |
 | C#         | `dotnet build packages/JellyfinSuite.Plugin/`                                 |
-| Full stack | `mise run test`                                                               |
-| Deployment | `mise run update`                                                             |
-| CI         | `.github/workflows/` pass (verified via `mise run workflow-test` using `act`) |
+| 全栈       | `mise run test`                                                               |
+| 部署       | `mise run update`（Windows）/ `mise run update-linux`（Linux）                |
+| CI         | `.github/workflows/` 全部通过（通过 `mise run workflow-test` 用 `act` 验证）    |
 
-Gates are sequential and non-optional. A failed gate MUST be resolved before moving forward.
+各关卡按顺序执行，且不可省略。未通过的关卡 MUST 在继续推进之前解决。
 
-## Amendment Procedure
+## 修订流程
 
-1. Propose amendment in a spec or conversation context with explicit rationale.
-2. Identify version bump type (MAJOR / MINOR / PATCH) per semantic rules below.
-3. Update this file; increment `CONSTITUTION_VERSION`; set `LAST_AMENDED_DATE` to today.
-4. Verify no principle contradicts another; remove any now-superseded guidance.
-5. Update `.specify/templates/plan-template.md` Constitution Check section if affected.
+1. 在 spec 或对话上下文中提出修订建议，并附明确理由。
+2. 按下方语义化规则确定版本号递增类型（MAJOR / MINOR / PATCH）。
+3. 更新本文件；递增 `CONSTITUTION_VERSION`；将 `LAST_AMENDED_DATE` 设为今天。
+4. 确认没有原则相互矛盾；移除任何已被取代的旧指引。
+5. 如有影响，更新 `.specify/templates/plan-template.md` 中的 Constitution Check 部分。
 
-**Version bump rules**:
-- MAJOR: Removing a principle, or redefining a NON-NEGOTIABLE principle in a weaker form
-- MINOR: Adding a new principle or a new Quality Gate row
-- PATCH: Wording clarification, example addition, typo fix
+**版本号递增规则**：
+- MAJOR：移除某条原则，或将某条不可妥协的原则改成更弱的形式
+- MINOR：新增一条原则，或新增一行 Quality Gate
+- PATCH：文字澄清、补充示例、修正笔误
 
-## Governance
+## 治理
 
-This constitution supersedes all other project conventions when conflicts arise.
-All implementation plans MUST include a "Constitution Check" section verifying compliance
-before any work begins. Any plan that violates a principle requires explicit documented
-justification and a temporary exception recorded here.
+本宪章在与其他项目约定冲突时具有最高优先级。
+所有实现计划 MUST 包含一个"Constitution Check"部分，在任何工作开始之前验证是否符合本宪章。
+任何违反某条原则的计划，都需要明确写出书面理由，并在此记录一个临时例外。
 
-`mise run test` and `mise run update` are the canonical compliance verification commands.
-CI pipeline pass is mandatory before any PR merge.
+`mise run test` 与 `mise run update`（原生 Linux 开发机上为 `mise run update-linux`）是规范的合规
+验证命令。CI 流水线通过是合并任何 PR 的前提条件。
 
-**Version**: 1.0.1 | **Ratified**: 2026-05-31 | **Last Amended**: 2026-05-31
+**版本**：1.1.2 | **批准日期**：2026-05-31 | **最近修订**：2026-06-19

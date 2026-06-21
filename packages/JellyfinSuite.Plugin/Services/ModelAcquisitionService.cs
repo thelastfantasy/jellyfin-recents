@@ -114,7 +114,10 @@ public class ModelAcquisitionService : IHostedService
         var cachedPath = Path.Combine(modelsDir, cacheFileName);
         var etagPath   = cachedPath + ".etag";
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // Timeout is fixed at construction — HttpClient forbids changing it after the
+        // first request is sent (the HEAD check below), so it must already cover the
+        // slower download path that follows.
+        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         http.DefaultRequestHeaders.Add("User-Agent", "JellyfinSuite/1.0");
 
         // 2. HEAD request — check whether the remote file has changed
@@ -180,7 +183,6 @@ public class ModelAcquisitionService : IHostedService
         try
         {
             _logger.LogInformation("[ModelAcquisition] {Model}: downloading from {Url}", modelName, url);
-            http.Timeout = TimeSpan.FromMinutes(30);
 
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
                 .ConfigureAwait(false);

@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import type { ExportSettings } from '../core/state'
 import { _videoEl, exportTypeAtom,sCropOpen, settingsAtom, updateSettings } from '../core/state'
 import { t } from '../lib/i18n'
+import { AdvancedPanel } from './AdvancedPanel'
 
 const ICON_CROP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 2 6 17 21 17"/><polyline points="2 6 17 6 17 21"/></svg>`
 
@@ -209,6 +210,8 @@ export function ParamsPanel() {
         </div>
         <div className="jfs-fe-pgroup-label">{t('params.quality')}</div>
       </div>
+
+      <AdvancedPanel />
     </div>
   )
 }

@@ -68,6 +68,10 @@ static class SchemaReflector
             return new() { ["type"] = "array", ["items"] = CoreSchema(t.GetElementType()!) };
         if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(List<>))
             return new() { ["type"] = "array", ["items"] = CoreSchema(t.GetGenericArguments()[0]) };
+        // Dictionary<string, T> (e.g. OrtVersionDto.Assets) — every usage so far is string-keyed,
+        // so this doesn't bother branching on the key type the way a fully general reflector would.
+        if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+            return new() { ["type"] = "object", ["additionalProperties"] = CoreSchema(t.GetGenericArguments()[1]) };
 
         return new() { ["$ref"] = $"#/components/schemas/{t.Name}" };
     }

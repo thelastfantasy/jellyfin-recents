@@ -20,6 +20,12 @@ export interface ExportSettings {
   cropRect:           CropRect | null
   animateQuality:     number
   stitchQuality:      number
+  // Advanced panel (spec 012 US2/US3/US6) — undefined = "use server default";
+  // omitted entirely from the Generate request body when undefined (FR-013).
+  deviceId?:          string
+  modelFamily?:       string
+  modelVersion?:      string
+  ortVersion?:        string
 }
 
 export interface FrameEntry {
@@ -88,7 +94,7 @@ export function saveSettings(s: ExportSettings): void {
 // ── Jotai atoms ──────────────────────────────────────────────────────────────
 
 const _settingsAtom          = atom(loadSettingsOnce())
-const _pageAtom              = atom<'grid' | 'progress' | 'result'>('grid')
+const _pageAtom              = atom<'grid' | 'progress' | 'result' | 'upscale'>('grid')
 const _framesAtom            = atom<FrameEntry[]>([])
 const _exportTypeAtom        = atom<'animate' | 'stitch'>('animate')
 const _paramsOpenAtom        = atom(false)
@@ -235,6 +241,12 @@ export function setItemId(v: string)                         { _itemId = v }
 export function setItemTitle(v: string)                      { _itemTitle = v }
 
 export function setActiveTaskId(v: string)                   { _activeTaskId = v }
+
+// 记录已执行过"提升画质"确认（替换或另存为）的任务 id，用于 Edge Case：
+// "对已处理过的结果再次提升" 的提示（spec.md Edge Cases）。仅前端会话内有效，刷新后重置，符合软提示性质。
+export const _upscaledTaskIds = new Set<string>()
+
+export function markTaskUpscaled(taskId: string): void { _upscaledTaskIds.add(taskId) }
 
 export let _frames:         FrameEntry[] = []
 

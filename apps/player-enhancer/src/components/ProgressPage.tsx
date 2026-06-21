@@ -2,10 +2,11 @@ import { useMutation } from '@tanstack/react-query'
 import { useAtomValue } from 'jotai'
 import { useEffect,useState } from 'react'
 
-import { cancelExportMutation,openProgressStream } from '../api/frameExportApi'
+import { cancelExportMutation, getGenerationLog,openProgressStream } from '../api/frameExportApi'
 import { sProgressPercent, sProgressVisible } from '../components/OsdButtons'
-import { progressTaskIdAtom } from '../core/state'
+import { exportTypeAtom, progressTaskIdAtom } from '../core/state'
 import { t } from '../lib/i18n'
+import { cleanItemTitle, triggerDownload } from '../lib/utils'
 import type { TaskProgressEvent } from '../types/api'
 
 export function ProgressPage({ onClose, onMinimize, onResult }: {
@@ -14,6 +15,7 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
   onResult:    (resultUrl: string, fileSize: number) => void
 }) {
   const taskId = useAtomValue(progressTaskIdAtom)
+  const exportType = useAtomValue(exportTypeAtom)
   const [percent, setPercent] = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const cancelMut = useMutation(cancelExportMutation())
@@ -62,6 +64,19 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
     onClose()
   }
 
+  // 全景图（stitch）失败时也可能用到了 DL 模型/GPU EP，诊断价值不低于成功时——动图没有这个日志
+  // （后端 generation-log 只在 stitch 路径写），所以只在 stitch 失败时显示。
+  async function handleDownloadLog() {
+    try {
+      const log = await getGenerationLog(taskId)
+      const blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const title = cleanItemTitle() || 'export'
+      triggerDownload(url, `${title}-${taskId.slice(0, 6)}-log.json`)
+      URL.revokeObjectURL(url)
+    } catch { /* generation log unavailable for this failure — silently ignore */ }
+  }
+
   return (
     <div className="jfs-fe-osd" style={{ minWidth: '480px', maxWidth: '640px', margin: '0 auto', height: 'auto' }}>
       <div className="jfs-fe-row sep-b">
@@ -80,6 +95,11 @@ export function ProgressPage({ onClose, onMinimize, onResult }: {
             {errorMsg ? errorMsg.substring(0, 40) : `${Math.round(percent)}%`}
           </span>
         </div>
+        {errorMsg && exportType === 'stitch' && (
+          <div className="jfs-fe-row" style={{ justifyContent: 'center', marginTop: '10px' }}>
+            <button className="jfs-fe-btn g" onClick={handleDownloadLog}>{t('result.downloadLog')}</button>
+          </div>
+        )}
       </div>
     </div>
   )

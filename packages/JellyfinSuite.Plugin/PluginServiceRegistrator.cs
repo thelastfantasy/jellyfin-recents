@@ -97,10 +97,24 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<OrtVersionService>(sp =>
         {
             var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var deviceEnum = sp.GetRequiredService<DeviceEnumerationService>();
             var logger = sp.GetRequiredService<ILogger<OrtVersionService>>();
-            return new OrtVersionService(appPaths, logger);
+            return new OrtVersionService(appPaths, deviceEnum, logger);
         });
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<OrtVersionService>());
+
+        // CudaRuntimeAcquisitionService: bootstraps the CUDA 13 runtime libs (cudart/cublas/
+        // cudnn) the base jellyfin/jellyfin image doesn't ship, lazily and only when an NVIDIA
+        // GPU is present — see class doc-comment for why ORT's gpu_cuda13 EP silently falls
+        // back to CPU without this.
+        serviceCollection.AddSingleton<CudaRuntimeAcquisitionService>(sp =>
+        {
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var deviceEnum = sp.GetRequiredService<DeviceEnumerationService>();
+            var logger = sp.GetRequiredService<ILogger<CudaRuntimeAcquisitionService>>();
+            return new CudaRuntimeAcquisitionService(appPaths, deviceEnum, logger);
+        });
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<CudaRuntimeAcquisitionService>());
 
         // ModelCatalogService: manages ONNX model catalog, downloads, and LRU eviction
         serviceCollection.AddSingleton<ModelCatalogService>(sp =>
@@ -145,6 +159,18 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             return new UserSettingsService(appPaths);
         });
 
+        // UpscaleService: 单例，管理"提升画质"(US7) 任务的独立 job 字典 + 定时清理
+        serviceCollection.AddSingleton<UpscaleService>(sp =>
+        {
+            var frameExport = sp.GetRequiredService<FrameExportService>();
+            var modelCatalog = sp.GetRequiredService<ModelCatalogService>();
+            var taskManager = sp.GetRequiredService<FrameExportTaskManager>();
+            var deviceEnum = sp.GetRequiredService<DeviceEnumerationService>();
+            var appPaths = applicationHost.Resolve<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            var logger = sp.GetRequiredService<ILogger<UpscaleService>>();
+            return new UpscaleService(frameExport, modelCatalog, taskManager, deviceEnum, appPaths, logger);
+        });
+
         // 注入 IHttpContextAccessor 供 i18n 读取浏览器语言
         serviceCollection.AddHttpContextAccessor();
         serviceCollection.AddSingleton<IStartupFilter, TaskStringsInitializer>();
@@ -152,28 +178,37 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 }
 
 /// <summary>
-/// Wires OrtVersionService and DeviceEnumerationService into FrameExportService
-/// after the DI container is fully built (avoids constructor-time circular dependency).
+/// Wires OrtVersionService, DeviceEnumerationService, and ModelCatalogService into
+/// FrameExportService after the DI container is fully built (avoids constructor-time
+/// circular dependency).
 /// </summary>
 internal class FrameExportAuxServicesWirer : IStartupFilter
 {
     private readonly FrameExportService _frameExport;
     private readonly OrtVersionService _ortVersion;
     private readonly DeviceEnumerationService _deviceEnum;
+    private readonly ModelCatalogService _modelCatalog;
+    private readonly CudaRuntimeAcquisitionService _cudaRuntime;
 
     public FrameExportAuxServicesWirer(
         FrameExportService frameExport,
         OrtVersionService ortVersion,
-        DeviceEnumerationService deviceEnum)
+        DeviceEnumerationService deviceEnum,
+        ModelCatalogService modelCatalog,
+        CudaRuntimeAcquisitionService cudaRuntime)
     {
         _frameExport = frameExport;
         _ortVersion = ortVersion;
         _deviceEnum = deviceEnum;
+        _modelCatalog = modelCatalog;
+        _cudaRuntime = cudaRuntime;
     }
 
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
     {
-        _frameExport.SetAuxServices(_ortVersion, _deviceEnum);
+        _frameExport.SetAuxServices(_ortVersion, _deviceEnum, _modelCatalog, _cudaRuntime);
+        _ortVersion.SetFrameExportService(_frameExport);
+        _cudaRuntime.SetFrameExportService(_frameExport);
         next(app);
     };
 }

@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
 
 use jfs_common::DiskCache;
 use jfs_common::FrameIndexEntry;
-use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, write_ack, write_jpeg_response};
+use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, read_upscale_req, write_ack, write_jpeg_response};
 use crate::quality::detect_quality;
 
 
@@ -26,6 +26,15 @@ const MSG_INDEX_FRAMES_STREAM: u8 = 0x17;
 const MSG_PREFETCH_STREAM: u8 = 0x18;
 const MSG_PREFETCH_RANGE_STREAM: u8 = 0x19;
 const MSG_DEBUG_DUMP:           u8 = 0x1A;
+// tasks.md's spec text says "MSG_UPSCALE (0x1A)", but 0x1A is already MSG_DEBUG_DUMP above —
+// this uses 0x1B instead to avoid colliding with that existing, functioning handler.
+const MSG_UPSCALE:             u8 = 0x1B;
+const MSG_CANCEL_UPSCALE:      u8 = 0x1C;
+
+/// Real-ESRGAN tile size / overlap (px, in input-tile coordinates) for `upscale::upscale_image`.
+/// Not user-configurable (FR-024: scale/style are model-version choices, not runtime params).
+const UPSCALE_TILE: u32 = 256;
+const UPSCALE_OVERLAP: u32 = 32;
 
 const RAM_CACHE_CAP: usize = 100;
 const FRAME_INDEX_CAP: usize = 20;
@@ -159,6 +168,12 @@ pub struct State {
     prefetch_tx: mpsc::Sender<PrefetchJob>,
     in_progress: Mutex<HashSet<(String, i64, u32)>>,
     pub fi: Arc<FrameIndexManager>,
+    /// Per-job cancel flags for in-flight MSG_UPSCALE jobs, keyed by the C#-side job id.
+    /// Unlike `cancel_flag` above (a single current-session flag for the unrelated seek-preview
+    /// prefetch feature), upscale jobs are identified individually since nothing prevents two
+    /// from being in flight at once. handle_upscale inserts on start and removes on exit (via
+    /// CancelFlagGuard); MSG_CANCEL_UPSCALE just flips the flag if the entry is still present.
+    upscale_cancel_flags: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl State {
@@ -174,6 +189,7 @@ impl State {
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
             fi: FrameIndexManager::new(),
+            upscale_cancel_flags: std::sync::Mutex::new(HashMap::new()),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -316,6 +332,31 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                     log::warn!("[frame-forge] debug_dump error: {e}");
                     break;
                 }
+            }
+            MSG_UPSCALE => {
+                if let Err(e) = handle_upscale(&mut stream, &state).await {
+                    log::warn!("[frame-forge] upscale error: {e}");
+                    // handle_upscale can fail (model load, decode, inference OOM, encode, ...)
+                    // at points that never reached a send_progress("error", ...) call on their
+                    // own — leaving the client's ReceiveExactAsync waiting forever for a response
+                    // to a request frame-forge already considers finished (it just loops back to
+                    // await the *next* message on this same connection). Always emit one terminal
+                    // error event here so the client unblocks regardless of where inside
+                    // handle_upscale the failure happened. Best-effort: if the stream itself is
+                    // already broken, there's nothing left to notify anyway.
+                    let _ = send_progress(&mut stream, "error", &e.to_string(), 0, 1, 0.0).await;
+                }
+            }
+            MSG_CANCEL_UPSCALE => {
+                // Fire-and-forget on this connection too: no response, and any read error here
+                // just ends this short-lived connection without affecting the job's own one.
+                if let Ok(req) = crate::protocol::read_cancel_upscale_req(&mut stream).await {
+                    if let Some(flag) = state.upscale_cancel_flags.lock().unwrap().get(&req.job_id) {
+                        flag.store(true, Ordering::Relaxed);
+                        log::info!("[frame-forge] UPSCALE job {} flagged for cancellation", req.job_id);
+                    }
+                }
+                break;
             }
             _ => {
                 log::warn!("[frame-forge] unknown msg_type: 0x{msg_type:02x}");
@@ -515,6 +556,9 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     log::warn!("[frame-forge] ANIMATE decode done, {} images", images.len());
 
     if images.is_empty() {
+        // Same hang hazard as the stitch dedup check below — must send an error progress
+        // event before bailing, or the client's ReceiveExactAsync waits forever.
+        send_progress(stream, "error", "no frames left after deduplication", 0, 1, 50.0).await?;
         anyhow::bail!("no unique frames after deduplication");
     }
 
@@ -668,8 +712,17 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
+    // Logged before parsing (not just after) so a wire-desync bail!/hang inside
+    // read_stitch_req is distinguishable from "never reached handle_stitch at all" —
+    // two production OOM kills left zero application log output, and this entry point not
+    // having a pre-parse marker was part of why it took this long to even narrow down.
+    log::warn!("[frame-forge] STITCH: request received, parsing...");
+    let parse_start = std::time::Instant::now();
     let req = crate::protocol::read_stitch_req(stream).await?;
-    log::warn!("[frame-forge] STITCH task={} frames={} device={:?}", req.task_id, req.paths.len(), req.device_id);
+    log::warn!(
+        "[frame-forge] STITCH task={} frames={} device={:?} parse_ms={}",
+        req.task_id, req.paths.len(), req.device_id, parse_start.elapsed().as_millis()
+    );
 
     // Reject under high resource pressure to protect seek-preview latency (T085)
     let pressure = crate::resources::resource_pressure();
@@ -734,30 +787,53 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         log::debug!("[frame-forge] pHash dedup: {} → {} unique frames", orig_len, images.len());
     }
     if images.len() < 2 {
+        // Must send an error progress event before bailing — handle_conn only logs Err
+        // returns and loops back to read the next request, so a bare `bail!` here leaves
+        // the client's ReceiveExactAsync waiting forever for a response that never comes
+        // (a true deadlock, not a timeout — unlike the EP-init-timeout path in dl_match.rs).
+        send_progress(stream, "error", "selected frames are too similar to stitch (need at least 2 visually distinct frames)", 0, 1, 30.0).await?;
         anyhow::bail!("pHash dedup left < 2 unique frames; cannot stitch");
     }
 
     let class = crate::scene_classifier::classify(&images);
-    log::debug!(
-        "[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1}",
-        class.category, class.motion, class.edge_density, class.color_entropy
+    log::warn!(
+        "[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1} flat={:.3}",
+        class.category, class.motion, class.edge_density, class.color_entropy, class.flat_region_ratio
     );
 
     send_progress(stream, "running", &format!("{:?}", class.category).to_lowercase(), 0, 1, 35.0).await?;
     send_progress(stream, "running", "matching", 0, 1, 40.0).await?;
 
     #[cfg(feature = "opencv")]
-    let (per_req_matcher, ep_fallbacks) = crate::dl_match::load_matcher_for_request(
+    let resolution_mp = images.first()
+        .map(|img| (img.width() as f64 * img.height() as f64) / 1_000_000.0)
+        .unwrap_or(0.0);
+    #[cfg(feature = "opencv")]
+    let (per_req_matcher, ep_fallbacks) = crate::dl_match::load_matcher_with_selection(
         &req.device_id,
-        crate::dl_match::ModelChoice::Auto,
+        req.model_disabled,
+        &req.model_family,
+        if req.model_path.is_empty() { None } else { Some(std::path::Path::new(&req.model_path)) },
+        images.len(),
+        resolution_mp,
     );
+    // Capture matcher identity before it's moved into the blocking closure — the
+    // matcher itself is consumed there, but GenerationLog needs to know which model
+    // was selected (or that none was: AKAZE-only).
+    #[cfg(feature = "opencv")]
+    let (model_file_name, matcher_algorithm_name) = per_req_matcher.as_ref()
+        .map(|m| (m.model_file_name().to_string(), Some(m.algorithm_name().to_string())))
+        .unwrap_or_default();
 
     // Capture algorithm label before moving class into the closure
     let scene_label = format!("{:?}", class.category).to_lowercase();
     let stitch_start = std::time::Instant::now();
 
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<image::DynamicImage> {
-        match class.category {
+    #[cfg(feature = "opencv")]
+    crate::dl_match::reset_match_stats();
+
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(image::DynamicImage, u32, u64)> {
+        let image = match class.category {
             crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images),
             #[cfg(feature = "opencv")]
             crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher),
@@ -765,8 +841,16 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
             crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher),
             #[cfg(not(feature = "opencv"))]
             _ => crate::stitch_anime::stitch_anime(&images),
-        }
+        }?;
+        // Must read the thread-local stats here, on the same blocking-pool thread that
+        // just ran the stitch — see dl_match::take_match_stats doc comment.
+        #[cfg(feature = "opencv")]
+        let (match_count, inference_ms) = crate::dl_match::take_match_stats();
+        #[cfg(not(feature = "opencv"))]
+        let (match_count, inference_ms) = (0u32, 0u64);
+        Ok((image, match_count, inference_ms))
     }).await??;
+    let (result, dl_match_count, dl_inference_ms) = result;
 
     let total_ms = stitch_start.elapsed().as_millis() as u64;
 
@@ -774,23 +858,21 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     #[cfg(feature = "opencv")]
     if !req.log_path.is_empty() {
         let device_id = &req.device_id;
-        let (device_type, device_name) = if device_id.starts_with("cuda") {
-            ("GPU".to_string(), format!("CUDA device ({})", device_id))
-        } else if device_id.starts_with("directml") {
-            ("GPU".to_string(), format!("DirectML device ({})", device_id))
-        } else {
-            ("CPU".to_string(), "CPU".to_string())
+        let (device_type, device_name) = crate::dl_match::infer_device_label(device_id, ep_fallbacks.is_empty());
+        let algorithm = match &matcher_algorithm_name {
+            Some(name) => format!("{scene_label}: {name}"),
+            None => format!("{scene_label}: AKAZE + USAC-MAGSAC"),
         };
         let gen_log = crate::generation_log::GenerationLog {
-            algorithm: scene_label + " → warp_expand_blend",
-            model_file_name: String::new(),
-            model_version: String::new(),
+            algorithm,
+            model_file_name,
+            model_version: req.model_version.clone(),
             ort_version: std::env::var("ORT_DYLIB_PATH").unwrap_or_default(),
             device_name,
             device_type,
             device_id: device_id.clone(),
-            keypoint_match_count: 0,
-            inference_duration_ms: 0,
+            keypoint_match_count: dl_match_count,
+            inference_duration_ms: dl_inference_ms,
             total_duration_ms: total_ms,
             fallbacks: ep_fallbacks,
         };
@@ -842,6 +924,222 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     Ok(())
 }
 
+// ── MSG_UPSCALE (0x1B): Real-ESRGAN super-resolution + optional GFPGAN face restore ──
+
+/// Generous default (tiled super-resolution over a multi-frame animation is genuinely slow,
+/// especially on a CPU EP fallback) — this is a backstop against a true hang, not a budget for
+/// normal completion time. See the timeout call site below for why aborting on expiry matters.
+fn upscale_timeout_secs() -> u64 {
+    std::env::var("FRAME_FORGE_UPSCALE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300)
+}
+
+/// Removes this job's entry from `State::upscale_cancel_flags` on drop — guarantees cleanup on
+/// every exit path out of `handle_upscale` (early `?` return, panic, or normal completion)
+/// without needing a matching `remove()` call at each one.
+struct CancelFlagGuard<'a> {
+    state: &'a Arc<State>,
+    job_id: String,
+}
+
+impl Drop for CancelFlagGuard<'_> {
+    fn drop(&mut self) {
+        self.state.upscale_cancel_flags.lock().unwrap().remove(&self.job_id);
+    }
+}
+
+#[cfg(not(feature = "opencv"))]
+async fn handle_upscale(stream: &mut UnixStream, _state: &Arc<State>) -> anyhow::Result<()> {
+    let _req = crate::protocol::read_upscale_req(stream).await?;
+    send_progress(stream, "error", "opencv feature not enabled in this build", 0, 1, 0.0).await?;
+    anyhow::bail!("upscale requires the opencv feature");
+}
+
+#[cfg(feature = "opencv")]
+async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let req = crate::protocol::read_upscale_req(stream).await?;
+    log::warn!("[frame-forge] UPSCALE item={} animation={} device={}", req.item_id, req.is_animation, req.device_id);
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    state.upscale_cancel_flags.lock().unwrap().insert(req.job_id.clone(), cancel_flag.clone());
+    let _cancel_guard = CancelFlagGuard { state, job_id: req.job_id.clone() };
+
+    let pressure = crate::resources::resource_pressure();
+    if pressure > 0.8 {
+        log::warn!("[frame-forge] UPSCALE: resource pressure {pressure:.2} > 0.8, rejecting task");
+        send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
+        return Ok(());
+    }
+
+    send_progress(stream, "running", "decoding", 0, 1, 0.0).await?;
+
+    let raw = tokio::fs::read(&req.input_path).await?;
+
+    // GIF files start with "GIF8"; everything else animated in this project is WebP.
+    let is_gif = raw.starts_with(b"GIF8");
+    let (mut frames, delays, loop_count): (Vec<image::DynamicImage>, Vec<u32>, u16) = if req.is_animation {
+        if is_gif {
+            crate::animate::decode_gif(&raw)?
+        } else {
+            crate::animate::decode_webp_anim(&raw)?
+        }
+    } else {
+        (vec![image::load_from_memory(&raw)?], Vec::new(), 0)
+    };
+
+    send_progress(stream, "running", "loading_model", 0, 1, 10.0).await?;
+
+    let memory_limit_bytes = crate::dl_match::cuda_memory_limit_bytes_upscale(&req.device_id);
+    let (mut session, mut fallbacks) =
+        crate::dl_match::build_ep_session(std::path::Path::new(&req.model_path), &req.device_id, memory_limit_bytes)?;
+
+    let mut face_session = if !req.face_restore_model_path.is_empty() {
+        let (s, fb2) = crate::dl_match::build_ep_session(
+            std::path::Path::new(&req.face_restore_model_path),
+            &req.device_id,
+            memory_limit_bytes,
+        )?;
+        fallbacks.extend(fb2);
+        Some(s)
+    } else {
+        None
+    };
+
+    let total_frames = frames.len() as u32;
+    send_progress(stream, "running", "upscaling", 0, total_frames, 20.0).await?;
+
+    let face_restore_requested = !req.face_restore_model_path.is_empty();
+    let post_downscale_factor = req.post_downscale_factor;
+
+    // Reports how many frames are done so far back to the async side below, which turns that
+    // into real "upscaling" progress events instead of leaving the percent bar dead at 20% for
+    // however long this takes (previously the only events were one at the very start and one
+    // at the very end of this whole loop, regardless of frame count) — best-effort send: a full
+    // channel or dropped receiver just means a skipped UI update, never a failed job.
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u32>();
+
+    let inference = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<image::DynamicImage>, ort::session::Session, Option<ort::session::Session>, usize)> {
+        let mut out = Vec::with_capacity(frames.len());
+        let mut total_faces_found = 0usize;
+        for (i, img) in frames.drain(..).enumerate() {
+            if cancel_flag.load(Ordering::Relaxed) {
+                anyhow::bail!("upscale cancelled");
+            }
+            let mut upscaled = crate::upscale::upscale_image(&mut session, &img, UPSCALE_TILE, UPSCALE_OVERLAP, &cancel_flag)?;
+            if let Some(fs) = face_session.as_mut() {
+                let (restored, face_count) = crate::face_restore::restore_faces(fs, &upscaled, &cancel_flag)?;
+                upscaled = restored;
+                total_faces_found += face_count;
+            }
+            // Applied after face restore (which benefits from the higher native resolution) —
+            // e.g. anime-x2 requests run the anime-x4 model and downscale here to net out at x2,
+            // since no native anime-x2 ONNX variant exists in the catalog.
+            if post_downscale_factor < 1.0 {
+                let (w, h) = (upscaled.width(), upscaled.height());
+                let new_w = ((w as f32) * post_downscale_factor).round().max(1.0) as u32;
+                let new_h = ((h as f32) * post_downscale_factor).round().max(1.0) as u32;
+                upscaled = upscaled.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
+            }
+            out.push(upscaled);
+            let _ = progress_tx.send(i as u32 + 1);
+        }
+        Ok((out, session, face_session, total_faces_found))
+    });
+
+    // FrameExportService.cs serialises every request (stitch/animate/upscale/...) through one
+    // shared Unix-socket connection + lock, so a hung inference call here doesn't just fail this
+    // one job — it wedges every other workshop feature behind it forever, with no client-side
+    // recovery short of restarting the container. Bound the wait the same way EP init already is
+    // (dl_match::run_with_ep_timeout) and abort the process on timeout: the orphaned
+    // spawn_blocking thread keeps running, but C#'s EnsureStartedAsync already detects
+    // HasExited and transparently relaunches a fresh daemon on the next request.
+    let timeout_secs = upscale_timeout_secs();
+    tokio::pin! {
+        let inference = inference;
+        let deadline = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs));
+    }
+    let (out_frames, session, face_session, total_faces_found) = loop {
+        tokio::select! {
+            recv = progress_rx.recv() => {
+                // None once the closure below finishes and drops progress_tx — at that point
+                // `inference` is about to resolve too, so just skip and loop back around to it.
+                if let Some(done) = recv {
+                    let pct = 20.0 + (done as f64 / total_frames.max(1) as f64) * 65.0;
+                    send_progress(stream, "running", "upscaling", done, total_frames, pct).await?;
+                }
+            }
+            joined = &mut inference => {
+                break joined??;
+            }
+            () = &mut deadline => {
+                log::error!(
+                    "[frame-forge] UPSCALE inference exceeded {timeout_secs}s timeout \
+                     (env FRAME_FORGE_UPSCALE_TIMEOUT_SECS) — aborting process immediately so the \
+                     daemon respawns clean instead of wedging every other request behind it"
+                );
+                std::process::abort();
+            }
+        }
+    };
+    // Sessions only need to outlive the blocking closure above; drop them once back on
+    // the async task (no further inference happens after this point).
+    drop(session);
+    drop(face_session);
+
+    if !req.log_path.is_empty() {
+        let (device_type, device_name) = crate::dl_match::infer_device_label(&req.device_id, fallbacks.is_empty());
+        let upscale_log = crate::generation_log::UpscaleLog {
+            device_name,
+            device_type,
+            device_id: req.device_id.clone(),
+            face_restore_requested,
+            face_restore_skipped_no_face: face_restore_requested && total_faces_found == 0,
+            fallbacks,
+        };
+        if let Err(e) = upscale_log.write_to_file(std::path::Path::new(&req.log_path)) {
+            log::warn!("[frame-forge] Failed to write upscale log to {}: {e}", req.log_path);
+        }
+    }
+
+    send_progress(stream, "running", "encoding", out_frames.len() as u32, out_frames.len() as u32, 85.0).await?;
+
+    let output = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+        if req.is_animation {
+            if is_gif {
+                crate::animate::encode_gif(&out_frames, &delays, loop_count)
+            } else {
+                crate::animate::encode_webp_anim(&out_frames, &delays, loop_count)
+            }
+        } else {
+            use image::codecs::png::{PngEncoder, CompressionType, FilterType};
+            use image::ImageEncoder;
+            let rgba = out_frames[0].to_rgba8();
+            let (w, h) = (rgba.width(), rgba.height());
+            let mut out_buf = std::io::Cursor::new(Vec::new());
+            PngEncoder::new_with_quality(&mut out_buf, CompressionType::Default, FilterType::Adaptive)
+                .write_image(rgba.as_raw(), w, h, image::ExtendedColorType::Rgba8)?;
+            Ok(out_buf.into_inner())
+        }
+    }).await??;
+
+    tokio::fs::write(&req.output_path, &output).await?;
+
+    log::warn!("[frame-forge] UPSCALE encoding done, output {} bytes → {}", output.len(), req.output_path.display());
+
+    // Skip "done" progress — C# detects completion via statusCode=2, mirroring handle_stitch.
+    let mut header = Vec::with_capacity(8 + output.len());
+    header.extend_from_slice(&2u32.to_le_bytes());
+    header.extend_from_slice(&(output.len() as u32).to_le_bytes());
+    header.extend_from_slice(&output);
+    stream.write_all(&header).await?;
+
+    Ok(())
+}
+
 async fn send_progress(
     stream: &mut UnixStream,
     status: &str,
@@ -852,9 +1150,15 @@ async fn send_progress(
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    let json = format!(
-        r#"{{"taskId":"","status":"{status}","phase":"{phase}","current":{current},"total":{total},"percent":{percent}}}"#
-    );
+    let json = if status == "error" {
+        format!(
+            r#"{{"taskId":"","status":"{status}","phase":"{phase}","current":{current},"total":{total},"percent":{percent},"error":"{phase}"}}"#
+        )
+    } else {
+        format!(
+            r#"{{"taskId":"","status":"{status}","phase":"{phase}","current":{current},"total":{total},"percent":{percent}}}"#
+        )
+    };
     let json_bytes = json.as_bytes();
     let status_code: u32 = if status == "error" { 1 } else { 0 };
 
@@ -1599,9 +1903,15 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                     write_chunk(stream, line.as_bytes()).await?;
                 } else {
                     failed += 1;
+                    let line = format!("data: {{\"frameFailed\":{anchor_fi_idx}}}\n\n");
+                    write_chunk(stream, line.as_bytes()).await?;
                 }
             }
-            _ => { failed += 1; }
+            _ => {
+                failed += 1;
+                let line = format!("data: {{\"frameFailed\":{anchor_fi_idx}}}\n\n");
+                write_chunk(stream, line.as_bytes()).await?;
+            }
         }
     }
 
@@ -1649,6 +1959,8 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                 write_chunk(stream, line.as_bytes()).await?;
             } else {
                 failed += 1;
+                let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
+                write_chunk(stream, line.as_bytes()).await?;
             }
         }
     }

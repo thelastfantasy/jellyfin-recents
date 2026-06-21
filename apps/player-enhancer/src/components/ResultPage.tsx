@@ -1,22 +1,37 @@
 import { useMutation } from '@tanstack/react-query'
 import { useAtomValue } from 'jotai'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { buildResultUrl, deleteResultMutation } from '../api/frameExportApi'
+import { buildResultUrl, deleteResultMutation, fetchDevices, getGenerationLog } from '../api/frameExportApi'
 import { _activeTaskId, _frames, fileSizeAtom,resultUrlAtom, sExportType } from '../core/state'
 import { t } from '../lib/i18n'
-import { cleanItemTitle, formatTime, triggerDownload } from '../lib/utils'
+import { buildExportFileName, cleanItemTitle, triggerDownload } from '../lib/utils'
 
 const ICON_CCW = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 const ICON_CW  = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`
 
-export function ResultPage({ onBack, onClose }: {
-  onBack:  () => void
-  onClose: () => void
+export function ResultPage({ onBack, onClose, onUpscale }: {
+  onBack:    () => void
+  onClose:   () => void
+  onUpscale: () => void
 }) {
   const resultUrl = useAtomValue(resultUrlAtom)
   const fileSize  = useAtomValue(fileSizeAtom)
   const [rotation, setRotation] = useState(0)
+  const [gpuFallback, setGpuFallback] = useState<string | null>(null)
+  const isAnimation = sExportType.value === 'animate'
+  // 动图提升画质需要 NVIDIA GPU（见 UpscaleService.StartJob 同名校验）；没有的话直接不显示按钮，
+  // 比点进去再被拒绝体验更好。设备查询失败时 fail-open，仍交给后端兜底拒绝。
+  const [hasNvidiaGpu, setHasNvidiaGpu] = useState(true)
+
+  useEffect(() => {
+    if (!isAnimation) return
+    let cancelled = false
+    fetchDevices()
+      .then(devices => { if (!cancelled) setHasNvidiaGpu(devices.some(d => d.vendor === 'NVIDIA')) })
+      .catch(() => { /* fetch failed — fail-open, backend still enforces this */ })
+    return () => { cancelled = true }
+  }, [isAnimation])
 
   const fullUrl = buildResultUrl('', resultUrl)
   const sizeStr = fileSize > 1024 * 1024
@@ -31,12 +46,23 @@ export function ResultPage({ onBack, onClose }: {
 
   function handleDownload() {
     const extension = resultUrl.split('.').pop() ?? 'bin'
-    const prefix = sExportType.value === 'animate' ? 'jellyfin-animate' : 'jellyfin-stitch'
-    const title  = cleanItemTitle() || 'export'
     const selectedFrames = _frames.filter(f => f.selected)
-    const startTimestamp = formatTime(selectedFrames[0]?.posMs ?? 0).replace(/[:.]/g, '-')
-    const endTimestamp   = formatTime(selectedFrames[selectedFrames.length - 1]?.posMs ?? 0).replace(/[:.]/g, '-')
-    triggerDownload(fullUrl, `${prefix}-${title}-${startTimestamp}-to-${endTimestamp}.${extension}`)
+    const name = buildExportFileName(sExportType.value, selectedFrames[0]?.posMs ?? 0, selectedFrames[selectedFrames.length - 1]?.posMs ?? 0)
+    triggerDownload(fullUrl, `${name}.${extension}`)
+  }
+
+  async function handleDownloadLog() {
+    try {
+      const log = await getGenerationLog(_activeTaskId)
+      if (log.fallbacks.length > 0) setGpuFallback(log.fallbacks[0].reason)
+      const blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const title = cleanItemTitle() || 'export'
+      triggerDownload(url, `${title}-${_activeTaskId.slice(0, 6)}-log.json`)
+      URL.revokeObjectURL(url)
+    } catch {
+      /* generation log unavailable — silently ignore, the result image download still works */
+    }
   }
 
   return (
@@ -67,8 +93,19 @@ export function ResultPage({ onBack, onClose }: {
         <button className="jfs-fe-btn g" onClick={() => setRotation(r => r + 5)} dangerouslySetInnerHTML={{ __html: '5° ' + ICON_CW }} />
         <div className="jfs-fe-spacer" />
         <button className="jfs-fe-btn p" onClick={handleDownload}>{t('result.download')}</button>
+        {!(isAnimation && !hasNvidiaGpu) && (
+          <button className="jfs-fe-btn" onClick={onUpscale}>{t('result.upscale')}</button>
+        )}
+        {sExportType.value !== 'animate' && (
+          <button className="jfs-fe-btn" onClick={handleDownloadLog}>{t('result.downloadLog')}</button>
+        )}
         <button className="jfs-fe-btn"   onClick={handleDelete}>{t('result.delete')}</button>
       </div>
+      {gpuFallback && (
+        <div className="jfs-fe-row sep-t jfs-fe-muted" style={{ color: 'var(--jf-warn, #e0a030)' }}>
+          {t('result.gpuFallback')}: {gpuFallback}
+        </div>
+      )}
     </div>
   )
 }

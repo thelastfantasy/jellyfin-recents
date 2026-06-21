@@ -1,0 +1,10 @@
+{
+  "denylist": [
+    {
+      "vendor": "NVIDIA",
+      "computeCapability": "12.0",
+      "ortAssetKey": "linux-x64-gpu",
+      "reason": "Blackwell (sm_120, compute capability 12.0) has no CUDA12 SASS/PTX kernels in ORT's standard `gpu` (CUDA12) asset — hangs or silently falls back to CPU. Requires the `gpu_cuda13` asset instead. See research.md §7a."
+    }
+  ]
+}

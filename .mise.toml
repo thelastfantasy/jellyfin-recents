@@ -6,6 +6,16 @@ lefthook = "latest"
 rust = "stable"
 node = "lts"
 pnpm = "latest"
+ffmpeg = "7.1.4"
+
+# seek-preview/frame-forge 依赖 ffmpeg-next（仅需 codec+format+software-scaling，
+# 不需要 libx264/libvpx 等外部编码器），系统 apt 默认装的是 FFmpeg 8（已移除 avfft.h）。
+# 用 mise 从官方源码以默认 configure 编译 7.x（--enable-shared 产出可链接的 .so + headers +
+# pkg-config，且因不启用外部编码器，没有 18 个 transitive codec 库的依赖地狱）。
+[env]
+ASDF_FFMPEG_OPTIONS_EXTRA = "--enable-shared"
+PKG_CONFIG_PATH = "{{env.HOME}}/.local/share/mise/installs/ffmpeg/7.1.4/lib/pkgconfig"
+LD_LIBRARY_PATH = "{{env.HOME}}/.local/share/mise/installs/ffmpeg/7.1.4/lib"
 
 [tasks.build]
 description = "构建前端和插件"
@@ -122,8 +132,12 @@ run = "make build-poster-gen-linux"
 description = "Linux: 在 Podman/Docker 容器中编译 seek-preview（含 FFmpeg 7 dev 库）"
 run = "make build-seek-preview-linux"
 
+[tasks.build-opencv-minimal-linux]
+description = "Linux: 源码编译精简版 OpenCV（关 GTK/Qt/OpenGL/LAPACK），缓存进 opencv-minimal-root volume，仅升级版本时需重跑"
+run = "make build-opencv-minimal-linux"
+
 [tasks.build-frame-forge-linux]
-description = "Linux: 在 Podman/Docker 容器中编译 frame-forge（含 OpenCV + FFmpeg 7 dev 库）"
+description = "Linux: 在 Podman/Docker 容器中编译 frame-forge（链接精简版 OpenCV + FFmpeg 7 dev 库，$ORIGIN rpath 自带 .so 闭包到 native-linux/）"
 run = "make build-frame-forge-linux"
 
 [tasks.check-seek-preview-linux]
@@ -141,3 +155,19 @@ run = "make check-frame-forge-opencv-linux"
 [tasks.demo-stitch-linux]
 description = "Linux: 拼接质量演示（Podman/Docker，无 cygpath）→ 结果写 tests/stitch-eval/demo-output/"
 run = "make demo-stitch-linux"
+
+[tasks.demo-stitch-gpu-linux]
+description = "Linux: GPU 拼接验证（需 nvidia-container-toolkit + CDI）→ 真实 CUDA EP 跑 DL 匹配，结果写 tests/stitch-eval/demo-output-gpu/，含 fallback_events 校验"
+run = "make demo-stitch-gpu-linux"
+
+[tasks.build-linux]
+description = "Linux: 构建前端和插件（Rust 二进制走 build-*-linux，无 cygpath）"
+run = "make build-linux"
+
+[tasks.update-linux]
+description = "Linux: 构建并部署到本地 Jellyfin 开发容器（完整，无 cygpath，会重启容器）"
+run = "make update-linux"
+
+[tasks.lint]
+description = "ESLint 检查 apps/frontend 与 apps/player-enhancer"
+run = "pnpm --filter jellyfin-suite-frontend --filter jellyfin-suite-player-enhancer exec eslint ."

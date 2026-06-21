@@ -196,6 +196,38 @@ the new version string is reflected in the panel, and confirm stitch still succe
 
 ---
 
+### User Story 7 — AI 一键提升画质 (Priority: P6)
+
+部分源视频画质本身较低，导致 frame-forge 生成的全景图/动图结果同样偏低。用户在结果面板点击"提升画质"
+按钮，弹出 modal 调用 AI 超分辨率模型对结果做画质增强，处理完成后展示原图与提升后的对比预览，用户确认
+后选择替换原文件或另存为新文件。
+
+**Why this priority**: P6 —是在 US1-US6 建立的 GPU 加速 + 设备/模型管理基础设施之上的增值能力，直接
+复用同一套 ComputeDevice 枚举、EP 选择（含回退）与模型目录/下载/LRU 管理机制（仅新增一个模型族），
+而不是独立子系统；本身不影响 GPU 拼接的核心价值，故优先级低于已有六个故事。
+
+**Independent Test**: 对一张已知偏低分辨率的全景图结果点击"提升画质"，验证 modal 展示处理进度、完成后
+显示原图/提升后对比预览，确认后产出文件分辨率提升且画面内容（构图、物体、配色）与原图一致；取消或失败
+时原始文件保持不变。
+
+**Acceptance Scenarios**:
+
+1. **Given** 用户在结果面板查看一个已完成的全景图或动图结果，**When** 用户点击"提升画质"按钮，**Then**
+   弹出 modal 展示选项（缩放倍数 x2/x4、模型风格"写实/风景"或"动画"、人脸修复开关，默认 x2 + 写实/风景 +
+   人脸修复关闭），用户确认后开始处理，处理期间持续展示进度状态，且可随时取消而不影响原文件。
+2. **Given** 提升画质处理完成，**When** modal 展示对比预览，**Then** 用户能通过切换/滑动方式对比原图与
+   提升后版本，并能看到分辨率与文件大小的前后变化（如"1280×720 → 2560×1440"），且画面内容与原图一致
+   （仅分辨率/清晰度提升）；若命中"原图已较高分辨率"或"对已处理过的结果再次提升"等边界情况，对应提示
+   文案会显示在预览区域。
+3. **Given** 用户在对比预览中确认满意，**When** 用户选择"替换原文件"或"另存为新文件"并确认，**Then**
+   系统按所选方式保存结果；在用户做出最终确认前，原始结果文件始终不受影响。
+4. **Given** 处理对象是动图（多帧），**When** 处理完成，**Then** 所有帧使用一致的处理参数，不引入额外
+   的帧间跳变。
+5. **Given** 处理失败（资源不足、模型异常）或用户主动取消，**When** 该情况发生，**Then** 系统展示清晰
+   提示，原始结果文件不被修改或删除。
+
+---
+
 ### Edge Cases
 
 - What happens when a GPU is present but its driver is outdated (EP initialisation fails)?
@@ -208,6 +240,16 @@ the new version string is reflected in the panel, and confirm stitch still succe
   → Show a clear error; clean up partial file; provide a retry button.
 - What if inference fails on the selected GPU mid-stitch (OOM, driver crash)?
   → Retry on CPU, complete the stitch, and notify the user of the fallback.
+- 原结果分辨率已经很高（如已是 4K 全景图）时提升画质收益有限甚至处理耗时不成比例？
+  → 允许继续处理，但在 modal 中提示"该结果分辨率已较高，提升幅度可能有限"。
+- 用户对同一结果重复执行"提升画质"（对已提升过的版本再提升一次）？
+  → 不做强制限制，但 modal 提示"对已处理过的结果再次提升可能放大失真"。
+- 动图帧数很多导致逐帧处理耗时很长？
+  → 允许用户在处理中取消任务；取消后不产生任何文件改动（同 US7 Scenario 5）。
+- 处理过程中用户关闭/离开结果面板？
+  → 任务在后台继续完成；用户返回时可看到处理结果或失败状态，不要求用户全程停留。
+- 用户开启人脸修复开关，但图中没有可识别的人脸（如纯风景全景图）？
+  → 跳过人脸修复步骤，仅应用分辨率提升，不报错、不提示失败。
 
 ## Requirements *(mandatory)*
 
@@ -282,6 +324,53 @@ the new version string is reflected in the panel, and confirm stitch still succe
 - **FR-016**: When a fallback occurred (GPU → CPU, DL → AKAZE, etc.), the JSON log MUST
   include a `fallbacks` array where each entry describes the fallback type and reason. When
   no model was used, model fields MUST be present with a value of `null` or `"disabled"`.
+- **FR-017**: The system MUST provide a "提升画质" (upscale) action on each completed generated
+  result (panoramic stitch or animated GIF) in the result panel.
+- **FR-018**: Triggering the upscale action MUST open a modal that first lets the user choose
+  processing options (see FR-024, FR-025), then — once confirmed — runs AI super-resolution
+  processing and displays processing progress while it runs; the user MUST be able to cancel
+  from either the options or the processing state without any effect on the original file.
+- **FR-019**: Once upscale processing completes, the modal MUST display a toggleable or
+  slide-to-compare view of the original result and the upscaled result, along with the
+  resolution and file-size change (e.g. "1280×720 → 2560×1440"); when an edge case applies
+  (original already high-resolution, or the result was already upscaled once before), the
+  modal MUST show the corresponding inline warning text from the Edge Cases section.
+- **FR-020**: The comparison view MUST let the user download either the original or the upscaled
+  result directly as separate files; the original result MUST remain completely unchanged
+  regardless of which the user downloads. (Superseded design note: an earlier version of this
+  requirement specified an in-place "replace existing result file" / "save as new file" choice.
+  Both targets resolved to the same server-side temp directory that every generated result
+  already lives in and is purged a few minutes after creation regardless of user action — so
+  neither ever persisted anything beyond what a direct download already does. Removed as dead
+  ceremony rather than kept for spec-conformance's own sake.)
+- **FR-021**: Upscale processing MUST only enhance resolution/sharpness and MUST NOT alter the
+  underlying scene content (composition, objects, colour); the system MUST default to a
+  conservative, photo-realistic model profile that minimises AI-hallucinated detail rather than
+  the most aggressive enhancement available. The system MUST NOT offer watermark removal or any
+  other generative content-editing capability — that is explicitly out of scope.
+- **FR-022**: Upscale processing MUST reuse the existing compute device enumeration and EP
+  selection/fallback infrastructure (FR-001 through FR-004) so it runs on whichever device
+  (GPU or CPU) is available, with the same automatic CPU fallback behaviour on GPU failure.
+  The upscale model(s) — including the face-restoration model from FR-025 — MUST be managed
+  through the same model catalog/download/retention infrastructure (FR-005 through FR-009) as
+  the existing matching models, each as its own model family.
+- **FR-023**: When the result being upscaled is an animated GIF, all frames MUST be processed
+  with identical parameters so the output does not introduce additional frame-to-frame visual
+  jumps beyond what the source animation already has; the user MUST be able to cancel an
+  in-progress upscale job, and a failed or cancelled job MUST leave the original result file
+  unmodified.
+- **FR-024**: Before processing starts, the upscale modal MUST let the user choose: a scale
+  factor (×2 or ×4, default ×2 as the more conservative choice per FR-021) and a model
+  style/variant suited to the source content (e.g. "写实/风景" for photo/landscape content vs.
+  "动画" for anime/illustration content, default "写实/风景"). Each {style × scale} combination
+  maps to a distinct pre-trained model version managed by the catalog infrastructure (FR-022);
+  this is not a runtime-tunable parameter of a single model.
+- **FR-025**: The upscale modal MUST provide an optional face-restoration toggle (default off).
+  When enabled, after the resolution upscale completes, the system MUST additionally run a
+  dedicated face-restoration pass on any detected faces to recover facial detail, without
+  altering the subject's identity or generating new faces; if no face is detected, the system
+  MUST skip this pass silently (no error, no warning) and return the plain upscaled result. This
+  option is independent of the scale/style choice in FR-024 and available for both result types.
 
 ### Key Entities
 
@@ -302,6 +391,13 @@ the new version string is reflected in the panel, and confirm stitch still succe
   name, model file name (nullable), model version (nullable), ORT version (nullable), device
   name, device type, keypoint match count, inference duration (ms), fallbacks array (each
   entry: type, reason, timestamp).
+- **UpscaleJob**: Represents a single "提升画质" operation — attributes: target result reference
+  (panorama or animation), selected/used device ID, scale factor (×2 / ×4), model style/variant
+  (photo-landscape / anime) resolved to a model family + version (a new entry in the same
+  `ModelEntry` catalog), face-restoration enabled flag and its own model family + version when
+  enabled, status (pending / running / succeeded / failed / cancelled), progress indicator,
+  preview output, save mode chosen by the user (replace / save-as) and the resulting output path
+  once confirmed.
 
 ## Success Criteria *(mandatory)*
 
@@ -321,6 +417,15 @@ the new version string is reflected in the panel, and confirm stitch still succe
   from the main workshop modal (open modal → expand Advanced section).
 - **SC-007**: Users who never open the Advanced section experience identical stitch quality and
   success rate to the current baseline (no regression).
+- **SC-008**: On a GPU-equipped device, upscaling a single panoramic result completes within
+  15 seconds from button click to comparison preview; processing exceeding 3 seconds shows
+  continuous progress feedback.
+- **SC-009**: In informal usability review, at least 90% of users judge an upscaled result as
+  "same content, just sharper" rather than "looks like a different image."
+- **SC-010**: When a user cancels or an upscale job fails, the original result file is unchanged
+  100% of the time (content, path, and modification time all preserved).
+- **SC-011**: The upscale feature works the same way across both result types (panoramic stitch
+  and animated GIF) without requiring the user to learn a different interaction flow per type.
 
 ## Assumptions
 
@@ -353,3 +458,19 @@ the new version string is reflected in the panel, and confirm stitch still succe
   (no retry); HTTP 5xx responses and network-level errors trigger up to 3 automatic retries
   with a back-off interval between attempts. After 3 failed retries the error is surfaced in
   the management panel and the user must trigger a manual retry.
+- The upscale feature (US7) operates on already-generated result files (panorama/animation),
+  not on the original source video frames — it is a post-hoc remediation step, not part of the
+  stitch/animate pipeline itself.
+- The upscale feature exposes a small, fixed set of user-facing options (scale ×2/×4, style
+  写实/风景 vs. 动画, an optional face-restoration toggle) rather than exposing raw model
+  parameters or a strength slider; each {style × scale} combination is a distinct pre-trained
+  model version, not a runtime-tunable setting of one model (FR-024).
+- The upscale model(s) are registered as new model families in the same catalog/download/LRU
+  retention mechanism as LightGlue/EfficientLoFTR (FR-007a); they introduce no new hardware
+  detection requirements beyond what US1/US2 already provide.
+- Face detection for the face-restoration pass (FR-025) reuses the project's existing OpenCV
+  dependency (already required for the stitch pipeline) rather than introducing a third ONNX
+  model family solely for detection; only the face-restoration model itself is catalog-managed.
+- Watermark removal and other generative content-editing capabilities are explicitly out of
+  scope for US7 and are not planned as part of this feature; they are a different problem
+  (inpainting) and may be evaluated independently in the future.

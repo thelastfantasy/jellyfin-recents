@@ -15,17 +15,20 @@ public class StitchController : ControllerBase
     private readonly DeviceEnumerationService _deviceEnum;
     private readonly ModelCatalogService _modelCatalog;
     private readonly OrtVersionService _ortVersion;
+    private readonly UpscaleService _upscale;
     private readonly ILogger<StitchController> _logger;
 
     public StitchController(
         DeviceEnumerationService deviceEnum,
         ModelCatalogService modelCatalog,
         OrtVersionService ortVersion,
+        UpscaleService upscale,
         ILogger<StitchController> logger)
     {
         _deviceEnum = deviceEnum;
         _modelCatalog = modelCatalog;
         _ortVersion = ortVersion;
+        _upscale = upscale;
         _logger = logger;
     }
 
@@ -154,5 +157,71 @@ public class StitchController : ControllerBase
             await Response.WriteAsync($"data: {json}\n\n");
             await Response.Body.FlushAsync();
         }
+    }
+
+    // ── Upscale (US7) ─────────────────────────────────────────────────────
+
+    /// <summary>POST /JellyfinSuite/Stitch/Upscale — start an upscale job for a completed
+    /// FrameExport result. <c>resultPath</c> is the same `/FrameExport/Result/{taskId}/...`
+    /// URL already used for downloads.</summary>
+    [HttpPost("Upscale")]
+    [ProducesResponseType(typeof(UpscaleJobDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult StartUpscale([FromBody] UpscaleStartRequestDto req)
+    {
+        var (result, job) = _upscale.StartJob(req.ResultPath, req.Scale, req.ModelScale, req.ModelStyle, req.FaceRestore, req.DeviceId);
+        if (result == UpscaleStartResult.AnimationRequiresNvidiaGpu)
+            return BadRequest(new { error = "Animation quality upscale requires an NVIDIA GPU; none was detected on this host" });
+        if (result == UpscaleStartResult.SourceNotFound || job is null)
+            return NotFound(new { error = "Source result not found or expired" });
+        return Accepted(job);
+    }
+
+    /// <summary>GET /JellyfinSuite/Stitch/Upscale/{jobId} — poll job status/progress.</summary>
+    [HttpGet("Upscale/{jobId}")]
+    [ProducesResponseType(typeof(UpscaleJobDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetUpscaleStatus(string jobId)
+    {
+        var job = _upscale.GetStatus(jobId);
+        if (job is null)
+            return NotFound(new { error = "Job not found" });
+        return Ok(job);
+    }
+
+    /// <summary>GET /JellyfinSuite/Stitch/Upscale/{jobId}/Result — serves the not-yet-confirmed
+    /// upscaled image for the before/after comparison preview (FR-019). The original is already
+    /// reachable via <see cref="UpscaleJobDto.OriginalUrl"/> (the existing FrameExport route).</summary>
+    [HttpGet("Upscale/{jobId}/Result")]
+    public IActionResult GetUpscaleResult(string jobId)
+    {
+        var result = _upscale.GetResultBytes(jobId);
+        if (result is null)
+            return NotFound(new { error = "Result not available" });
+        return File(result.Value.Bytes, result.Value.ContentType);
+    }
+
+    /// <summary>GET /JellyfinSuite/Stitch/Upscale/{jobId}/Log — diagnostics (device actually used,
+    /// GPU fallbacks) for the "下载日志" button, mirroring FrameExportController's stitch-only
+    /// generation-log endpoint but available for upscale jobs regardless of source export type.</summary>
+    [HttpGet("Upscale/{jobId}/Log")]
+    [ProducesResponseType(typeof(UpscaleJobLogDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetUpscaleLog(string jobId)
+    {
+        var log = _upscale.GetLog(jobId);
+        if (log is null)
+            return NotFound(new { error = "Job not found" });
+        return Ok(log);
+    }
+
+    /// <summary>POST /JellyfinSuite/Stitch/Upscale/{jobId}/Cancel — leaves the original file untouched (FR-023).</summary>
+    [HttpPost("Upscale/{jobId}/Cancel")]
+    public IActionResult CancelUpscale(string jobId)
+    {
+        if (!_upscale.Cancel(jobId))
+            return NotFound(new { error = "Job not found" });
+        return Ok(new { cancelled = true });
     }
 }

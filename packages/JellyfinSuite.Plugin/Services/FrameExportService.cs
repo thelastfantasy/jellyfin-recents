@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -21,12 +22,16 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgPrefetchStream = 0x18;
     private const byte MsgPrefetchRangeStream = 0x19;
     private const byte MsgDebugDump          = 0x1A;
+    private const byte MsgUpscale             = 0x1B;
+    private const byte MsgCancelUpscale      = 0x1C;
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
     private readonly string _binaryPath;
     private OrtVersionService? _ortVersion;
     private DeviceEnumerationService? _deviceEnum;
+    private ModelCatalogService? _modelCatalog;
+    private CudaRuntimeAcquisitionService? _cudaRuntime;
 
     private Process? _process;
     private readonly SemaphoreSlim _startLock = new(1, 1);
@@ -60,10 +65,16 @@ public sealed class FrameExportService : IDisposable
     /// Wire in optional services after construction (avoids circular DI).
     /// Called from <see cref="PluginServiceRegistrator"/> after both services are registered.
     /// </summary>
-    public void SetAuxServices(OrtVersionService ortVersion, DeviceEnumerationService deviceEnum)
+    public void SetAuxServices(
+        OrtVersionService ortVersion,
+        DeviceEnumerationService deviceEnum,
+        ModelCatalogService modelCatalog,
+        CudaRuntimeAcquisitionService cudaRuntime)
     {
         _ortVersion = ortVersion;
         _deviceEnum = deviceEnum;
+        _modelCatalog = modelCatalog;
+        _cudaRuntime = cudaRuntime;
     }
 
     public async Task EnsureStartedAsync(CancellationToken ct = default)
@@ -91,24 +102,45 @@ public sealed class FrameExportService : IDisposable
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
-            psi.Environment["LD_LIBRARY_PATH"] = "/usr/lib/jellyfin-ffmpeg/lib";
+            // CudaRuntimeAcquisitionService's lib dir may not exist yet (still downloading, or no
+            // NVIDIA GPU) — appending a non-existent path is harmless, the dynamic linker just
+            // skips it; it becomes load-bearing the moment the background bootstrap finishes,
+            // with no restart needed beyond the one EnsureStartedAsync already does after it.
+            var ldLibraryPath = "/usr/lib/jellyfin-ffmpeg/lib";
+            if (_cudaRuntime?.ActiveLibDir is { Length: > 0 } cudaLibDir)
+                ldLibraryPath = $"{cudaLibDir}:{ldLibraryPath}";
+            psi.Environment["LD_LIBRARY_PATH"] = ldLibraryPath;
             psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug";
             // ORT_DYLIB_PATH tells the `load-dynamic` ort build which ORT shared library to load.
             // OrtVersionService sets this after scanning/downloading the active ORT version.
             var ortLibPath = _ortVersion?.ActiveOrtLibPath;
             if (!string.IsNullOrEmpty(ortLibPath))
                 psi.Environment["ORT_DYLIB_PATH"] = ortLibPath;
+            // FRAME_FORGE_ORT_ASSET_KEY lets the daemon check the gpu-compat denylist
+            // (T040-T041) against the asset variant actually active — the ORT_DYLIB_PATH
+            // string alone carries no such signal (research.md §7a).
+            var ortAssetKey = _ortVersion?.ActiveOrtAssetKey;
+            if (!string.IsNullOrEmpty(ortAssetKey))
+                psi.Environment["FRAME_FORGE_ORT_ASSET_KEY"] = ortAssetKey;
 
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.Start();
 
-            // Pipe daemon stderr to Jellyfin log
+            // Pipe daemon stderr to Jellyfin log for the lifetime of the daemon process — must NOT
+            // be tied to `ct` (the caller's request-scoped token that happened to trigger this lazy
+            // startup): once that original HTTP request's connection closes, its token cancels,
+            // which would silently kill this loop forever while the daemon keeps running for the
+            // rest of the session — every subsequent stitch/upscale/prefetch becomes invisible to
+            // `docker logs` with no error anywhere (observed in production: log coverage stopped
+            // ~68 minutes into a session with no trace of why). The natural lifetime bound here is
+            // the process itself: ReadLineAsync returns null on EOF once the process exits.
+            var process = _process;
             _ = Task.Run(async () =>
             {
                 string? line;
-                while ((line = await _process.StandardError.ReadLineAsync(ct)) != null)
+                while ((line = await process.StandardError.ReadLineAsync(CancellationToken.None)) != null)
                     _logger.LogInformation("[frame-forge] {Line}", line);
-            }, ct);
+            });
 
             // Wait briefly for socket to appear
             for (int i = 0; i < 20 && !File.Exists(_socketPath); i++)
@@ -266,6 +298,25 @@ public sealed class FrameExportService : IDisposable
     {
         try { _socket?.Dispose(); } catch { }
         _socket = null;
+    }
+
+    /// <summary>Recovers a stitch task's diagnostics (model/EP used, GPU fallback events) when
+    /// the task ends in error — the daemon writes <paramref name="logPath"/> incrementally as it
+    /// runs, so a graceful daemon-reported failure (or even a crash after partial progress) can
+    /// still leave a useful file behind even though the success-only read further below never
+    /// runs. Mirrors <see cref="UpscaleService"/>'s identically-named orphan-log recovery for the
+    /// same reason: failures are exactly when this diagnostic is most wanted (FR — "下载日志"
+    /// button on generation failure, stitch only since animate never writes this log).</summary>
+    public static GenerationLogDto? TryReadOrphanGenerationLog(string? logPath)
+    {
+        if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath)) return null;
+        try
+        {
+            var json = File.ReadAllText(logPath);
+            return System.Text.Json.JsonSerializer.Deserialize<GenerationLogDto>(json);
+        }
+        catch { return null; }
+        finally { try { File.Delete(logPath); } catch { } }
     }
 
     private static async Task ReceiveExactAsync(Socket sock, byte[] buffer, int count, CancellationToken ct)
@@ -639,11 +690,32 @@ public sealed class FrameExportService : IDisposable
         float quality = 0.75f,
         string? deviceId = null,
         string? logPath = null,
+        bool modelDisabled = false,
+        string? modelFamily = null,
+        string? modelVersion = null,
+        string? modelPath = null,
         CancellationToken ct = default)
     {
         if (!IsAvailable) return null;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
         var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+
+        // T014: an empty device_id is interpreted by the Rust daemon as "cpu:0" (see
+        // dl_match::parse_device_id), not "best available GPU" — so the US1 MVP goal
+        // (GPU used automatically with zero UI interaction) requires resolving the
+        // highest-VRAM default device here whenever the caller didn't pick one explicitly.
+        if (string.IsNullOrEmpty(deviceId) && _deviceEnum != null)
+        {
+            try
+            {
+                var devices = await _deviceEnum.EnumerateAsync(ct).ConfigureAwait(false);
+                deviceId = devices.FirstOrDefault(d => d.IsDefault)?.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[FrameExport] Device default resolution failed, falling back to CPU: {Ex}", ex.Message);
+            }
+        }
 
         var taskIdBytes = Encoding.UTF8.GetBytes(task.TaskId);
         var frameCount = filePaths.Count;
@@ -688,6 +760,27 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes((uint)logPathBytes.Length), 0, 4);
         if (logPathBytes.Length > 0) ms.Write(logPathBytes, 0, logPathBytes.Length);
 
+        // MSG_STITCH model-selection trailing fields (spec 012 US3):
+        // [model_disabled(1)]                          -- 1 = AKAZE-only, skip DL matching entirely
+        // [model_family_len(4)][model_family(UTF-8)]    -- "lightglue" | "efficient-loftr" | "" (auto)
+        // [model_version_len(4)][model_version(UTF-8)]  -- echoed verbatim into GenerationLog.model_version
+        // [model_path_len(4)][model_path(UTF-8)]        -- explicit absolute model file path resolved by
+        //                                                  ModelCatalogService.GetInstalledModelPath; empty
+        //                                                  lets the daemon auto-detect by canonical filename
+        ms.WriteByte(modelDisabled ? (byte)1 : (byte)0);
+
+        var modelFamilyBytes = Encoding.UTF8.GetBytes(modelFamily ?? "");
+        ms.Write(BitConverter.GetBytes((uint)modelFamilyBytes.Length), 0, 4);
+        if (modelFamilyBytes.Length > 0) ms.Write(modelFamilyBytes, 0, modelFamilyBytes.Length);
+
+        var modelVersionBytes = Encoding.UTF8.GetBytes(modelVersion ?? "");
+        ms.Write(BitConverter.GetBytes((uint)modelVersionBytes.Length), 0, 4);
+        if (modelVersionBytes.Length > 0) ms.Write(modelVersionBytes, 0, modelVersionBytes.Length);
+
+        var modelPathBytes = Encoding.UTF8.GetBytes(modelPath ?? "");
+        ms.Write(BitConverter.GetBytes((uint)modelPathBytes.Length), 0, 4);
+        if (modelPathBytes.Length > 0) ms.Write(modelPathBytes, 0, modelPathBytes.Length);
+
         var reqBuf = ms.ToArray();
         try
         {
@@ -719,13 +812,20 @@ public sealed class FrameExportService : IDisposable
                             {
                                 task.Status = TaskStatus.Error;
                                 task.Error = prog.Error;
+                                task.GenerationLog = TryReadOrphanGenerationLog(logPath);
                                 task.ProgressChannel.Writer.TryComplete();
                                 return null;
                             }
                         }
                     }
                     catch { }
-                    if (statusCode == 1) { task.Status = TaskStatus.Error; task.ProgressChannel.Writer.TryComplete(); return null; }
+                    if (statusCode == 1)
+                    {
+                        task.Status = TaskStatus.Error;
+                        task.GenerationLog = TryReadOrphanGenerationLog(logPath);
+                        task.ProgressChannel.Writer.TryComplete();
+                        return null;
+                    }
                 }
                 else
                 {
@@ -743,6 +843,18 @@ public sealed class FrameExportService : IDisposable
                             var logJson = await File.ReadAllTextAsync(logPath, ct).ConfigureAwait(false);
                             task.GenerationLog = System.Text.Json.JsonSerializer.Deserialize<
                                 Jellyfin.Plugin.JellyfinSuite.Models.GenerationLogDto>(logJson);
+
+                            // T025: bump lastUsedAt for the DL model that was actually used, so
+                            // LRU eviction (T028) ranks it correctly. Algorithm/ModelVersion are
+                            // echoed verbatim by the daemon (dl_match::algorithm_name), so this
+                            // also covers the "Latest" sentinel resolving to a concrete version.
+                            var log = task.GenerationLog;
+                            if (_modelCatalog != null && log != null
+                                && (log.Algorithm == "lightglue" || log.Algorithm == "efficient-loftr")
+                                && !string.IsNullOrEmpty(log.ModelVersion))
+                            {
+                                await _modelCatalog.RecordUsageAsync(log.Algorithm, log.ModelVersion, ct).ConfigureAwait(false);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -764,6 +876,166 @@ public sealed class FrameExportService : IDisposable
             throw;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Sends MSG_UPSCALE (0x1B) to frame-forge: Real-ESRGAN super-resolution with an optional
+    /// GFPGAN face-restore pass. Mirrors <see cref="SubmitStitchTaskAsync"/>'s send/receive loop,
+    /// but reports progress via <paramref name="onProgress"/> instead of a <c>TaskState</c> —
+    /// upscale jobs are tracked by <c>UpscaleService</c>'s own in-memory job dictionary, not
+    /// <c>FrameExportTaskManager</c> (T057 deliberately puts the Upscale endpoints on
+    /// <c>StitchController</c>, not <c>FrameExportController</c>).
+    /// </summary>
+    public async Task<UpscaleSubmitResult?> SubmitUpscaleTaskAsync(
+        Guid itemId,
+        string inputPath,
+        string outputPath,
+        string modelPath,
+        bool isAnimation,
+        string? faceRestoreModelPath,
+        string? deviceId,
+        string? logPath,
+        float postDownscaleFactor,
+        string jobId,
+        Action<TaskProgress> onProgress,
+        CancellationToken ct = default)
+    {
+        if (!IsAvailable) return null;
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(deviceId) && _deviceEnum != null)
+        {
+            try
+            {
+                var devices = await _deviceEnum.EnumerateAsync(ct).ConfigureAwait(false);
+                deviceId = devices.FirstOrDefault(d => d.IsDefault)?.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[FrameExport] Device default resolution failed, falling back to CPU: {Ex}", ex.Message);
+            }
+        }
+
+        using var ms = new MemoryStream();
+        ms.WriteByte(MsgUpscale);
+        ms.Write(Encoding.ASCII.GetBytes(itemId.ToString("N")), 0, 32);
+
+        void WriteLenPrefixed(string? s)
+        {
+            var bytes = Encoding.UTF8.GetBytes(s ?? "");
+            ms.Write(BitConverter.GetBytes((uint)bytes.Length), 0, 4);
+            if (bytes.Length > 0) ms.Write(bytes, 0, bytes.Length);
+        }
+
+        WriteLenPrefixed(inputPath);
+        WriteLenPrefixed(outputPath);
+        WriteLenPrefixed(modelPath);
+        WriteLenPrefixed(deviceId);
+        ms.WriteByte(isAnimation ? (byte)1 : (byte)0);
+        WriteLenPrefixed(faceRestoreModelPath);
+        WriteLenPrefixed(logPath);
+        ms.Write(BitConverter.GetBytes(postDownscaleFactor), 0, 4);
+        WriteLenPrefixed(jobId);
+
+        var reqBuf = ms.ToArray();
+        try
+        {
+            await sock.SendAsync(reqBuf, SocketFlags.None, ct).ConfigureAwait(false);
+
+            var header = new byte[8];
+            while (!ct.IsCancellationRequested)
+            {
+                await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                var statusCode = BitConverter.ToUInt32(header, 0);
+                if (statusCode != 2)
+                {
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var jsonLen = (int)BitConverter.ToUInt32(header, 0);
+                    var jsonBuf = new byte[jsonLen];
+                    await ReceiveExactAsync(sock, jsonBuf, jsonLen, ct).ConfigureAwait(false);
+                    var json = Encoding.UTF8.GetString(jsonBuf);
+                    try
+                    {
+                        var prog = System.Text.Json.JsonSerializer.Deserialize<TaskProgress>(json);
+                        if (prog != null)
+                        {
+                            onProgress(prog);
+                            if (prog.Status == "error" || statusCode == 1) return null;
+                        }
+                    }
+                    catch { }
+                }
+                else
+                {
+                    await ReceiveExactAsync(sock, header, 4, ct).ConfigureAwait(false);
+                    var dataLen = (int)BitConverter.ToUInt32(header, 0);
+                    var dataBuf = new byte[dataLen];
+                    await ReceiveExactAsync(sock, dataBuf, dataLen, ct).ConfigureAwait(false);
+
+                    UpscaleLogDto? log = null;
+                    if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
+                    {
+                        try
+                        {
+                            var logJson = await File.ReadAllTextAsync(logPath, ct).ConfigureAwait(false);
+                            log = System.Text.Json.JsonSerializer.Deserialize<UpscaleLogDto>(logJson);
+                            if (log != null && log.Fallbacks.Count > 0)
+                            {
+                                _logger.LogWarning("[FrameExport] Upscale job fell back to CPU: {Fallbacks}",
+                                    string.Join("; ", log.Fallbacks.Select(f => f.Reason)));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("[FrameExport] Failed to read upscale log: {Ex}", ex.Message);
+                        }
+                        finally
+                        {
+                            try { File.Delete(logPath); } catch { }
+                        }
+                    }
+
+                    return new UpscaleSubmitResult { OutputBytes = dataBuf, Log = log };
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            InvalidateSocket();
+            throw;
+        }
+        return null;
+    }
+
+    /// <summary>Tells frame-forge to cooperatively abandon a still-running upscale job (checked
+    /// between tiles/faces — see server.rs CancelFlagGuard). Fire-and-forget on a brand-new
+    /// connection: the connection actually running the job is busy inside SubmitUpscaleTaskAsync
+    /// and won't read another message until that call returns, so this can't reuse <see cref="_socket"/>.
+    /// Best-effort only — UpscaleService.Cancel already marks the job Cancelled independently of
+    /// whether this succeeds; this just lets the daemon reclaim CPU/GPU sooner instead of running
+    /// to completion or waiting for the EnsureStartedAsync timeout watchdog.</summary>
+    public async Task CancelUpscaleTaskAsync(string jobId, CancellationToken ct = default)
+    {
+        if (!IsAvailable || !File.Exists(_socketPath)) return;
+
+        try
+        {
+            using var sock = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            await sock.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), ct).ConfigureAwait(false);
+
+            var jobIdBytes = Encoding.UTF8.GetBytes(jobId);
+            using var ms = new MemoryStream();
+            ms.WriteByte(MsgCancelUpscale);
+            ms.Write(BitConverter.GetBytes((uint)jobIdBytes.Length), 0, 4);
+            ms.Write(jobIdBytes, 0, jobIdBytes.Length);
+
+            await sock.SendAsync(ms.ToArray(), SocketFlags.None, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("[FrameExport] CancelUpscaleTaskAsync best-effort send failed: {Ex}", ex.Message);
+        }
     }
 
     /// <summary>
@@ -1010,6 +1282,22 @@ public sealed class FrameExportService : IDisposable
         {
             _requestLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Forcibly stops the running frame-forge daemon so the next <see cref="EnsureStartedAsync"/>
+    /// call relaunches it with an updated environment (e.g. after <see cref="OrtVersionService.ActivateVersionAsync"/>
+    /// changes which ORT_DYLIB_PATH gets passed in). No-op if the daemon isn't running.
+    /// </summary>
+    public void KillDaemon()
+    {
+        if (_process is { HasExited: false })
+        {
+            _logger.LogInformation("[FrameExport] Killing daemon to pick up new ORT_DYLIB_PATH");
+            _process.Kill();
+            _process.WaitForExit(3000);
+        }
+        InvalidateSocket();
     }
 
     public void Dispose()

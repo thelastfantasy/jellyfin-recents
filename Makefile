@@ -15,7 +15,8 @@ endif
         build update deploy update-quick deploy-enhancer clean test test-rust test-frontend test-csharp workflow-test workflow-test-release \
         build-poster-gen-linux build-seek-preview-linux build-frame-forge-linux \
         check-seek-preview-linux check-frame-forge-linux check-frame-forge-opencv-linux \
-        demo-stitch-linux
+        demo-stitch-linux demo-stitch-gpu-linux build-linux update-linux \
+        build-opencv-minimal-linux
 
 build-frontend:
 	cd apps/frontend && DEPLOY_MAP=1 pnpm run build
@@ -67,14 +68,14 @@ build-frame-forge:
 		ubuntu:24.04 \
 		sh -c "DEBIAN_FRONTEND=noninteractive && \
 		       apt-get update -qq && \
-		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
+		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev libopencv-dev && \
 		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
 		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
 		       apt-get install -y -qq intel-opencl-icd clinfo ocl-icd-libopencl1 2>/dev/null || true && \
 		       clinfo --list 2>/dev/null || echo '[build] no OpenCL platforms (CPU fallback)' && \
 		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release"
+		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release --features opencv"
 	cp target/release/frame-forge \
 		packages/JellyfinSuite.Plugin/frame-forge-linux-x64
 
@@ -205,8 +206,8 @@ demo-stitch:
 test-rust:
 	cd crates/poster-gen && cargo test
 	@if [ "$$(uname -s 2>/dev/null)" = "Linux" ]; then \
-		cd crates/seek-preview && cargo test; \
-		cd crates/frame-forge && cargo test; \
+		(cd crates/seek-preview && cargo test) && \
+		(cd crates/frame-forge && cargo test); \
 	else \
 		echo "[seek-preview] Skipping tests (Linux-only)"; \
 		echo "[frame-forge] Skipping tests (Linux-only)"; \
@@ -275,25 +276,28 @@ build-seek-preview-linux:
 	cp target/release/seek-preview \
 		packages/JellyfinSuite.Plugin/seek-preview-linux-x64
 
-build-frame-forge-linux:
+# Compiles a headless, dependency-trimmed OpenCV (no GTK/Qt/OpenGL/X11/LAPACK)
+# into the opencv-minimal-root volume. One-time cost — only rerun after
+# bumping OPENCV_VERSION in the script or deleting the volume. See
+# scripts/build-opencv-minimal.sh for the rationale.
+build-opencv-minimal-linux:
+	$(_CRUN) volume create opencv-minimal-root > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v opencv-minimal-root:/opt/opencv-minimal \
+		-w /workspace \
+		ubuntu:24.04 \
+		bash scripts/build-opencv-minimal.sh
+
+build-frame-forge-linux: build-opencv-minimal-linux
 	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
 	$(_CRUN) run --rm \
 		-v "$(CURDIR):/workspace" \
 		-v forge-cargo-home:/root/.cargo \
+		-v opencv-minimal-root:/opt/opencv-minimal \
 		-w /workspace \
 		ubuntu:24.04 \
-		sh -c "DEBIAN_FRONTEND=noninteractive && \
-		       apt-get update -qq && \
-		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev && \
-		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
-		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
-		       apt-get install -y -qq intel-opencl-icd clinfo ocl-icd-libopencl1 2>/dev/null || true && \
-		       clinfo --list 2>/dev/null || echo '[build] no OpenCL platforms (CPU fallback)' && \
-		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
-		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo build -p frame-forge --release"
-	cp target/release/frame-forge \
-		packages/JellyfinSuite.Plugin/frame-forge-linux-x64
+		bash scripts/build-frame-forge-linux.sh
 
 check-seek-preview-linux:
 	$(_CRUN) volume create seek-cargo-home > /dev/null 2>&1 || true
@@ -329,21 +333,15 @@ check-frame-forge-linux:
 		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
 		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check -p frame-forge --all-targets --features cli"
 
-check-frame-forge-opencv-linux:
+check-frame-forge-opencv-linux: build-opencv-minimal-linux
 	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
 	$(_CRUN) run --rm \
 		-v "$(CURDIR):/workspace" \
 		-v forge-cargo-home:/root/.cargo \
+		-v opencv-minimal-root:/opt/opencv-minimal \
 		-w /workspace \
 		ubuntu:24.04 \
-		sh -c "DEBIAN_FRONTEND=noninteractive && \
-		       apt-get update -qq && \
-		       apt-get install -y -qq curl build-essential pkg-config ca-certificates software-properties-common clang libclang-dev libopencv-dev libssl-dev && \
-		       add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 2>/dev/null && apt-get update -qq && \
-		       apt-get install -y -qq libavcodec-dev libavformat-dev libavutil-dev libswscale-dev && \
-		       [ -f /root/.cargo/bin/rustup ] || (curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal 2>/dev/null) && \
-		/root/.cargo/bin/rustup default stable 2>/dev/null || true && \
-		LIBCLANG_PATH=/usr/lib/llvm-18/lib /root/.cargo/bin/cargo check -p frame-forge --features 'cli,opencv'"
+		bash scripts/check-frame-forge-opencv-linux.sh
 
 demo-stitch-linux:
 	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
@@ -353,3 +351,39 @@ demo-stitch-linux:
 		-w /workspace \
 		ubuntu:24.04 \
 		bash tests/stitch-eval/run_demo.sh
+
+# GPU verification pass — requires nvidia-container-toolkit + CDI set up on the host
+# (see /home/jade/setup-nvidia-container.sh) so --device nvidia.com/gpu=all resolves.
+demo-stitch-gpu-linux:
+	$(_CRUN) volume create forge-cargo-home > /dev/null 2>&1 || true
+	$(_CRUN) run --rm \
+		--device nvidia.com/gpu=all \
+		-v "$(CURDIR):/workspace" \
+		-v forge-cargo-home:/root/.cargo \
+		-w /workspace \
+		docker.io/nvidia/cuda:13.1.2-cudnn-runtime-ubuntu24.04 \
+		bash tests/stitch-eval/run_demo_gpu.sh
+
+build-linux: build-frontend build-enhancer build-plugin build-seek-preview-linux build-frame-forge-linux
+
+update-linux: build-poster-gen-linux build-linux
+	$(_CRUN) cp build/plugin/JellyfinSuite.Plugin.dll \
+		jellyfin-dev:/config/plugins/JellyfinSuite/JellyfinSuite.Plugin.dll
+	$(_CRUN) cp build/plugin/poster-gen-linux-x64 \
+		jellyfin-dev:/config/plugins/JellyfinSuite/poster-gen-linux-x64
+	$(_CRUN) cp packages/JellyfinSuite.Plugin/seek-preview-linux-x64 \
+		jellyfin-dev:/config/plugins/JellyfinSuite/seek-preview-linux-x64
+	$(_CRUN) cp packages/JellyfinSuite.Plugin/frame-forge-linux-x64 \
+		jellyfin-dev:/config/plugins/JellyfinSuite/frame-forge-linux-x64
+	$(_CRUN) exec jellyfin-dev mkdir -p /config/plugins/JellyfinSuite/native-linux
+	$(_CRUN) cp packages/JellyfinSuite.Plugin/native-linux/. \
+		jellyfin-dev:/config/plugins/JellyfinSuite/native-linux/
+	$(_CRUN) cp packages/JellyfinSuite.Plugin/Web/jellyfin-suite-enhancer.js \
+		jellyfin-dev:/config/plugins/JellyfinSuite/jellyfin-suite-enhancer.js
+	$(_CRUN) cp packages/JellyfinSuite.Plugin/meta.json \
+		jellyfin-dev:/config/plugins/JellyfinSuite/meta.json
+	$(_CRUN) restart jellyfin-dev
+	@echo "Waiting for Jellyfin to start..."
+	@sleep 20
+	@$(_CRUN) exec jellyfin-dev \
+		curl -s -o /dev/null -w "Health check: %{http_code}\n" http://localhost:8096/health

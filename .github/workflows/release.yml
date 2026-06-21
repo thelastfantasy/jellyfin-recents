@@ -39,11 +39,31 @@ jobs:
           workspaces: |
             . -> target
 
-      - name: Install FFmpeg 7.x and OpenCV dev libs
+      # 精简版 OpenCV（关 GTK/Qt/OpenGL/LAPACK，见 scripts/build-opencv-minimal.sh）—
+      # 替代 apt 的桌面版 libopencv-dev，与本地 mise run build-opencv-minimal-linux 用同一脚本，
+      # 是 frame-forge release 二进制实际链接、随 .so 闭包打包发布的那份 OpenCV。
+      - name: Cache OpenCV-minimal
+        id: cache-opencv
+        uses: actions/cache@v4
+        with:
+          path: /opt/opencv-minimal
+          key: opencv-minimal-${{ runner.os }}-${{ hashFiles('scripts/build-opencv-minimal.sh') }}
+
+      - name: Build OpenCV-minimal
+        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        run: sudo bash scripts/build-opencv-minimal.sh
+
+      - name: Export OpenCV/clang env for downstream steps
+        run: |
+          echo "PKG_CONFIG_PATH=/opt/opencv-minimal/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/opt/opencv-minimal/lib" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-18/lib" >> "$GITHUB_ENV"
+
+      - name: Install FFmpeg 7.x dev libs
         run: |
           sudo add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
           sudo apt-get update
-          sudo apt-get install -y pkg-config clang libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libopencv-dev
+          sudo apt-get install -y pkg-config clang libclang-dev libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -85,8 +105,26 @@ jobs:
       - name: Build seek-preview (Linux x64)
         run: cargo build -p seek-preview --release
 
+      # $ORIGIN/native-linux 让二进制在不设 LD_LIBRARY_PATH 的情况下找到下一步打包的
+      # OpenCV .so 闭包；第二条 rpath 指向 jellyfin-dev 容器自带的 ffmpeg lib 目录
+      # （该容器已有 ffmpeg .so，故不随包打入）。详见 scripts/build-frame-forge-linux.sh。
       - name: Build frame-forge (Linux x64)
-        run: cargo build -p frame-forge --release
+        run: |
+          export RUSTFLAGS="-C link-arg=-Wl,-rpath,\$ORIGIN/native-linux -C link-arg=-Wl,-rpath,/usr/lib/jellyfin-ffmpeg/lib"
+          cargo build -p frame-forge --release --features opencv
+
+      # 与本地 build-frame-forge-linux.sh 同样的闭包收集逻辑：用 LD_LIBRARY_PATH 让 ldd
+      # 能解析到 /opt/opencv-minimal 下的 .so（此时二进制自身的 $ORIGIN rpath 还指向空目录，
+      # 无法用来解析依赖，这是先有鸡先有蛋问题，仅靠显式 LD_LIBRARY_PATH 绕开)。
+      - name: Bundle frame-forge native OpenCV libs
+        run: |
+          mkdir -p publish/native-linux
+          for lib in $(LD_LIBRARY_PATH=/opt/opencv-minimal/lib:/opt/opencv-minimal/lib/x86_64-linux-gnu ldd target/release/frame-forge | awk '{print $3}' | grep -E '^/opt/opencv-minimal/'); do
+            real=$(readlink -f "$lib")
+            cp -L "$real" "publish/native-linux/$(basename "$lib")"
+          done
+          echo "[release] bundled native libs:"
+          ls -la publish/native-linux
 
       - name: Install cross
         run: cargo install cross --locked
@@ -169,9 +207,12 @@ jobs:
           VER4="${{ steps.version.outputs.ver4 }}"
 
           # Base zip — download-on-demand variant
+          # native-linux/ 是 frame-forge 链接的精简版 OpenCV .so 闭包（见
+          # scripts/build-opencv-minimal.sh + 上面的 Bundle 步骤），必须与
+          # frame-forge-linux-x64 同级随包发布，否则其 $ORIGIN/native-linux rpath 找不到依赖。
           ZIPNAME="jellyfin-suite_${VER4}.zip"
           cd publish
-          zip "../${ZIPNAME}" JellyfinSuite.Plugin.dll meta.json poster-gen-linux-x64 poster-gen-win-x64.exe seek-preview-linux-x64 frame-forge-linux-x64
+          zip -r "../${ZIPNAME}" JellyfinSuite.Plugin.dll meta.json poster-gen-linux-x64 poster-gen-win-x64.exe seek-preview-linux-x64 frame-forge-linux-x64 native-linux
           cd ..
           CHECKSUM="$(md5sum "${ZIPNAME}" | awk '{print $1}')"
           echo "zipname=$ZIPNAME" >> $GITHUB_OUTPUT
@@ -186,6 +227,7 @@ jobs:
           cp publish/poster-gen-win-x64.exe publish-bundled/
           cp publish/seek-preview-linux-x64 publish-bundled/
           cp publish/frame-forge-linux-x64 publish-bundled/
+          cp -r publish/native-linux publish-bundled/native-linux
           cp publish/fonts/* publish-bundled/fonts/
           cp publish/meta-bundled.json publish-bundled/meta.json
           cd publish-bundled

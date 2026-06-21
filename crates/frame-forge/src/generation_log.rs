@@ -27,12 +27,36 @@ pub struct GenerationLog {
 
 impl GenerationLog {
     pub fn write_to_file(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        let json = serde_json::to_string_pretty(self)?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &json)?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        write_json_atomic(self, path)
     }
+}
+
+/// Stats collected during an upscale (Real-ESRGAN + optional GFPGAN) job — written to
+/// `UpscaleReq::log_path` for the C# side to read GPU-fallback info and the face-restoration
+/// outcome, the same way `GenerationLog` does for stitch jobs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpscaleLog {
+    pub device_name: String,
+    pub device_type: String,
+    pub device_id: String,
+    pub face_restore_requested: bool,
+    pub face_restore_skipped_no_face: bool,
+    pub fallbacks: Vec<FallbackEvent>,
+}
+
+impl UpscaleLog {
+    pub fn write_to_file(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        write_json_atomic(self, path)
+    }
+}
+
+fn write_json_atomic<T: Serialize>(value: &T, path: &std::path::Path) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, &json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// Stats collected during stitch execution — returned alongside the stitched image.

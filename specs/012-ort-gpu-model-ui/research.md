@@ -130,6 +130,53 @@ file or CDN). Cached locally with 24-hour TTL. Schema:
 - Eviction: when 6th version downloaded → delete version with oldest `last_used_at`
   that is not the latest.
 
+**Published URL (T067)**: `https://thelastfantasy.github.io/jellyfin-suite/model-catalog.json`,
+served from the project's `gh-pages` branch (same hosting pattern as the existing plugin
+`manifest.json`). Model binaries themselves are NOT committed to git — they are uploaded as
+assets on the `models-v1` GitHub Release (tag deliberately not matching `v*.*.*` so it does
+not trigger `.github/workflows/release.yml`), and `downloadUrl` in the catalog points at
+`https://github.com/thelastfantasy/jellyfin-suite/releases/download/models-v1/<fileName>`.
+
+Initial v1 catalog contents (Real-ESRGAN / GFPGAN for the "提升画质" upscale feature, US7):
+
+| family | version | source repo | license |
+|---|---|---|---|
+| realesrgan | photo-x2 | wide-video/real-esrgan-v1.0.0 (HF) | BSD-3-Clause |
+| realesrgan | photo-x4 | universonic/RealESRGAN (HF) | BSD-3-Clause |
+| realesrgan | anime-x4 | universonic/RealESRGAN (HF) | BSD-3-Clause |
+| gfpgan | v1.4 | HowToSD/GFPGAN-ONNX (HF) | Apache-2.0 |
+
+`realesrgan/anime-x2` has no entry: the upstream xinntao Real-ESRGAN project never released
+that variant, and no credible community ONNX conversion was found either. Real-ESRGAN inputs
+must have dynamic H/W dimensions (frame-forge tiles at varying sizes); several candidate
+anime-x2 conversions found on Hugging Face had fixed input shapes (e.g. 64×64, 240×240) and
+were rejected for that reason rather than included to fill the slot.
+
+**anime-x2 fallback**: rather than leave the combination unavailable, `UpscaleService.cs`
+maps an `anime`+`x2` request onto the `anime-x4` model and asks frame-forge to downscale the
+x4 output by 0.5 afterward (`post_downscale_factor` on `MSG_UPSCALE`, applied in
+`server.rs::handle_upscale` after face-restore, via `upscale::upscale_image` → optional
+`DynamicImage::resize_exact` with `Lanczos3`). This stays within FR-021 (resolution/sharpness
+only) since downscaling discards detail rather than hallucinating it, and avoids depending on
+an unverified extra ONNX file. Usage/LRU is recorded against `anime-x4` (the model actually
+run), not a synthetic `anime-x2` catalog entry.
+
+**Updating the catalog** (adding/replacing a model variant):
+1. Source or convert the ONNX file; verify with `onnx.load(path, load_external_data=False)`
+   that `graph.input`/`graph.output` shapes match what the consuming Rust code expects
+   (dynamic H/W for Real-ESRGAN tiles; fixed 512×512 for GFPGAN — see `crates/frame-forge/src/upscale.rs`
+   and `crates/frame-forge/src/face_restore.rs`).
+2. `sha256sum <file>` and note the byte size.
+3. `gh release upload models-v1 <file>` (or `gh release create models-v1 <files...>` if the
+   release doesn't exist yet).
+4. Edit `model-catalog.json`, add/update the entry (`family`, `displayName`, `version` —
+   must match the `{modelStyle}-x{scale}` / `"latest"` convention `UpscaleService.cs` queries
+   by —, `fileName`, `downloadUrl`, `sha256`, `fileSizeBytes`, `releaseDate`).
+5. Push the updated `model-catalog.json` to the `gh-pages` branch root (e.g. via a throwaway
+   `git worktree add /tmp/gh-pages-worktree gh-pages`, copy the file in, commit, push, then
+   `git worktree remove`). `ModelCatalogService`'s 24h TTL means installs already in progress
+   may briefly see the old catalog; this is expected and harmless.
+
 **Alternatives considered**:
 - Static JSON bundled in plugin DLL: ruled out — new models require plugin update.
 
@@ -166,7 +213,7 @@ The C# task record stores this as `GenerationLog?` and exposes it via a new endp
 
 ## 6. Frontend Model Version Combobox
 
-**Decision**: Implement as a custom Preact combobox (not native `<select>`) to support
+**Decision**: Implement as a custom React combobox (not native `<select>`) to support
 per-item color coding. Use existing Popover component pattern in the codebase.
 
 **Version list composition**:
@@ -180,3 +227,101 @@ per-item color coding. Use existing Popover component pattern in the codebase.
 - `jfs_stitch_model_family`: "lightglue" | "efficient-loftr" | "disabled"
 - `jfs_stitch_model_version`: version string or "latest"
 - `jfs_stitch_ort_version`: ORT version string or "latest"
+
+---
+
+## 7. GPU Hang Findings — Blackwell CUDA EP + GPU-flavored ORT CPU Path
+
+Found and fixed while manually verifying GPU acceleration on an RTX 5060 (Blackwell,
+compute capability `sm_120`, driver 595.71, max supported CUDA 13.2) ahead of Phase 9.
+
+### 7a. ORT 1.26.0 standard `gpu` (CUDA 12) build hangs/silently-CPU-falls-back on Blackwell
+
+The standard Linux GPU asset (`onnxruntime-linux-x64-gpu-1.26.0.tgz`, built against CUDA 12)
+either hung indefinitely or silently executed on CPU while reporting the CUDA EP as
+registered, when running `build_ep_session("cuda", ...)` against a Blackwell GPU. Root
+cause: CUDA 12's nvcc does not emit SASS/PTX for `sm_120`; the CUDA 12 ORT build has no
+working Blackwell kernels.
+
+**Fix**: use the `gpu_cuda13` asset variant instead
+(`onnxruntime-linux-x64-gpu_cuda13-1.26.0.tgz`, built against CUDA 13). Verified: session
+build ~0.5-0.9s, real inference ~0.3-0.5s, 40/40 consecutive runs with zero hangs and zero
+`FallbackEvent`s, `nvidia-smi` showing real GPU utilization (up to 23%) and memory spikes
+(up to ~3.3GB) correlated with the test loop. Confirmed across both LightGlue v2 and
+EfficientLoFTR models, and across a full 7-scene `forge stitch --device cuda:0` run (see
+`tests/stitch-eval/run_demo_gpu.sh`, `mise run demo-stitch-gpu-linux`) — every scene
+reported `ep=cuda:0` with `fallback_events=[]`.
+
+Driver 595.71 (max CUDA 13.2) is forward-compatible with the CUDA 13.1 runtime bundled in
+the `gpu_cuda13` asset, so no separate CUDA toolkit install is needed on the host — only
+the matching userspace driver via `nvidia-container-toolkit` (CDI) for container GPU
+passthrough. **Implication for `OrtVersionService` (T033)**: the Linux asset-selection
+logic must distinguish `gpu` (CUDA 12) vs `gpu_cuda13` based on detected GPU compute
+capability — generic `"linux-x64-cuda"` is not specific enough once both variants exist
+upstream. ORT 1.27.0+ drops the CUDA 12 variant entirely per the 1.26.0 release notes, which
+simplifies this back down to one asset once the active ORT version is pinned ≥1.27.
+
+### 7b. GPU-flavored ORT build hangs on plain CPU session creation (separate bug)
+
+Independently of 7a: using the `gpu_cuda13` build's `libonnxruntime.so` to build a session
+with **no explicit execution provider** (`Session::builder().commit_from_file(path)`, the
+bare-default pattern previously used for `device_id == "cpu"` in `build_ep_session`'s
+`make_cpu` closure, and unconditionally in `LGlueV2::load`/`LGlue::load`/`ELoFTR::load`)
+hangs indefinitely — confirmed via `/proc/<pid>/stat` showing 0 utime/stime and
+`/proc/<pid>/task/*/wchan` showing `futex_do_wait` immediately after the call, i.e. it never
+even starts computing. This reproduced 100% (4/4) across both bundled models.
+
+**Fix**: explicitly register `CPUExecutionProvider` before `commit_from_file`, e.g.:
+```rust
+Session::builder()?
+    .with_execution_providers([ort::execution_providers::CPUExecutionProvider::default().build()])?
+    .commit_from_file(p)
+```
+This takes a different internal ORT code path and avoids the hang entirely (verified 4/4,
+session build ~0.2-0.5s). Applied in `crates/frame-forge/src/dl_match.rs`'s `make_cpu`
+closure inside `build_ep_session`.
+
+**Production relevance**: `server.rs` always calls the EP-aware `load_matcher_for_request` →
+`build_ep_session`, so this fix covers the production daemon path, including its own
+internal CUDA-EP-failed → CPU fallback (which reuses `make_cpu` and would otherwise have
+hung on the very environment where GPU init is least reliable). The CLI's `forge stitch`
+command previously used the *separate*, non-EP-aware singleton path (`load_matcher` via
+`loftr_guard()`), which has the same bare-default bug independent of `build_ep_session` —
+fixed by switching the CLI to also call `load_matcher_for_request` (now takes a `--device`
+flag; defaults to `cpu:0`), so there is exactly one session-construction code path for both
+the daemon and the CLI/demo.
+
+**Outstanding**: timeout protection (T036) is still warranted as defense-in-depth — this
+fix addresses the one reproduced cause, but does not prove no other GPU/driver/model
+combination can hang ORT's CPU EP for a different reason. T036 should wrap **all three**
+EP branches in `build_ep_session` (cuda, directml, and the cpu fallback), not just the GPU
+branches, given 7b shows the "safe" CPU path is not unconditionally safe. Because the
+abandoned worker thread in the diagnostic tool's timeout wrapper held an ORT-internal
+mutex during the 7b hang, and the *main* thread's PID kept existing (visible in `ps`) even
+after printing the "TIMED OUT" message and returning `Ok(())` from `main` — normal process
+exit runs shared-library static destructors (`atexit`/`__cxa_finalize` for `libonnxruntime.so`),
+which can block on the same mutex the abandoned thread holds. T036's production
+implementation should therefore call `std::process::exit()` (or equivalent immediate
+termination) rather than relying on a normal return from `main`/the request handler to
+guarantee the daemon doesn't hang on its own shutdown path after a timeout fires.
+
+### 7c. OpenVINO EP match arm added — untested on real Intel GPU hardware
+
+`build_ep_session` previously had no `"openvino"` match arm at all: a request for
+`device_id="openvino:0"` (e.g. Intel Arc A-series GPUs, common in NAS/iGPU hardware) fell
+through to the default `_ =>` branch — silently ran on CPU **with an empty
+`fallback_events: []`**, i.e. no warning and no record, which is strictly worse than the
+cuda/directml branches' explicit-failure logging. Added a symmetric `"openvino"` branch
+using `OpenVINOExecutionProvider::default().with_device_type("GPU").build()`, following the
+same try-GPU-then-CPU-fallback-with-FallbackEvent pattern.
+
+**This branch is unverified against real Intel GPU hardware** — this dev machine only has
+an NVIDIA GPU, so there was no way to confirm `OpenVINOExecutionProvider` actually engages
+the Intel GPU rather than its own internal CPU fallback (OpenVINO EP can itself silently
+choose CPU via `device_type=CPU` if GPU plugin init fails, which `.ok()` here cannot
+distinguish from "no device" — same blind spot as 7a/7b before they were empirically
+checked). Also, per the standard ORT release asset layout, OpenVINO EP is **not** bundled in
+the `gpu`/`gpu_cuda13` tarballs — Linux OpenVINO support ships as
+`onnxruntime-linux-x64-X.Y.Z.tgz` (the plain CPU build) plus a separate OpenVINO EP plugin/
+runtime install, which `OrtVersionService`'s asset selection (T033) does not yet account for.
+Needs real Arc/iGPU hardware to validate before this can be trusted the way 7a/7b are.

@@ -478,20 +478,261 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/JellyfinSuite/Stitch/Devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Devices */
+        get: operations["stitch_getDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Models */
+        get: operations["stitch_getModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Models/Download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download Model */
+        post: operations["stitch_downloadModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Models/DownloadProgress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Model Download Progress */
+        get: operations["stitch_getModelDownloadProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Models/{family}/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model */
+        delete: operations["stitch_deleteModel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/OrtVersions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ort Versions */
+        get: operations["stitch_getOrtVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/OrtVersions/Download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download Ort Version */
+        post: operations["stitch_downloadOrtVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/OrtVersions/Activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Ort Version */
+        post: operations["stitch_activateOrtVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/OrtVersions/DownloadProgress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ort Download Progress */
+        get: operations["stitch_getOrtDownloadProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Upscale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Upscale */
+        post: operations["stitch_startUpscale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Upscale/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Upscale Status */
+        get: operations["stitch_getUpscaleStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Upscale Result */
+        get: operations["stitch_getUpscaleResult"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Upscale Log */
+        get: operations["stitch_getUpscaleLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Upscale */
+        post: operations["stitch_cancelUpscale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         PrefetchRangeStreamRequest: {
             /** Format: int64 */
-            currentTimeMs: number;
+            currentTimeMs?: number | null;
+            /** Format: int64 */
+            currentFrameIndex?: number | null;
             /** Format: double */
-            beforeSeconds: number;
+            beforeSeconds?: number | null;
             /** Format: double */
-            afterSeconds: number;
+            afterSeconds?: number | null;
             includeCurrentFrame: boolean;
             /** Format: int32 */
             width: number;
+            prefetchSessionId: string;
         };
         PrefetchRequest: {
             /** Format: int32 */
@@ -548,6 +789,10 @@ export interface components {
             cropH?: number | null;
             /** Format: float */
             quality: number;
+            deviceId?: string | null;
+            modelFamily?: string | null;
+            modelVersion?: string | null;
+            ortVersion?: string | null;
         };
         GenerateResponse: {
             taskId: string;
@@ -735,6 +980,148 @@ export interface components {
             totalCount: number;
             /** Format: int32 */
             totalPages: number;
+        };
+        ComputeDeviceDto: {
+            id: string;
+            displayName: string;
+            deviceType: string;
+            vendor: string;
+            /** Format: int64 */
+            vramMb?: number | null;
+            isIntegrated: boolean;
+            isDefault: boolean;
+            computeCapability?: string | null;
+            modelName?: string | null;
+            devicePath?: string | null;
+        };
+        DeviceListDto: {
+            devices: components["schemas"]["ComputeDeviceDto"][];
+        };
+        ModelEntryDto: {
+            family: string;
+            displayName: string;
+            version: string;
+            fileName: string;
+            /** Format: int64 */
+            fileSizeBytes?: number | null;
+            sha256?: string | null;
+            downloadUrl?: string | null;
+            releaseDate?: string | null;
+            status: string;
+            localPath?: string | null;
+            lastUsedAt?: string | null;
+            isLatest: boolean;
+        };
+        ModelListDto: {
+            models: components["schemas"]["ModelEntryDto"][];
+            catalogFetchedAt?: string | null;
+            catalogStale: boolean;
+        };
+        ModelDownloadRequestDto: {
+            family: string;
+            version: string;
+        };
+        ModelDownloadProgressDto: {
+            family: string;
+            version: string;
+            /** Format: double */
+            percent: number;
+            status: string;
+            error?: string | null;
+        };
+        OrtAssetDto: {
+            url: string;
+            sha256: string;
+            /** Format: int64 */
+            sizeBytes: number;
+        };
+        OrtVersionDto: {
+            version: string;
+            releaseDate?: string | null;
+            isActive: boolean;
+            localDir?: string | null;
+            installedAt?: string | null;
+            assets?: {
+                [key: string]: components["schemas"]["OrtAssetDto"];
+            } | null;
+            status: string;
+        };
+        OrtVersionListDto: {
+            activeVersion?: string | null;
+            versions: components["schemas"]["OrtVersionDto"][];
+            /** Format: int32 */
+            maxRetainedVersions: number;
+        };
+        OrtDownloadRequestDto: {
+            version: string;
+        };
+        OrtActivateRequestDto: {
+            version: string;
+        };
+        OrtDownloadProgressDto: {
+            version: string;
+            /** Format: double */
+            percent: number;
+            status: string;
+            error?: string | null;
+        };
+        FallbackEventDto: {
+            type: string;
+            reason: string;
+            timestamp: string;
+        };
+        UpscaleLogDto: {
+            deviceName: string;
+            deviceType: string;
+            deviceId: string;
+            faceRestoreRequested: boolean;
+            faceRestoreSkippedNoFace: boolean;
+            fallbacks: components["schemas"]["FallbackEventDto"][];
+        };
+        UpscaleStartRequestDto: {
+            resultPath: string;
+            /** Format: int32 */
+            scale: number;
+            /** Format: int32 */
+            modelScale: number;
+            modelStyle: string;
+            faceRestore: boolean;
+            deviceId?: string | null;
+        };
+        UpscaleJobDto: {
+            jobId: string;
+            status: string;
+            /** Format: double */
+            percent: number;
+            error?: string | null;
+            originalUrl?: string | null;
+            resultUrl?: string | null;
+            /** Format: int32 */
+            originalWidth?: number | null;
+            /** Format: int32 */
+            originalHeight?: number | null;
+            /** Format: int32 */
+            resultWidth?: number | null;
+            /** Format: int32 */
+            resultHeight?: number | null;
+            /** Format: int64 */
+            originalSizeBytes?: number | null;
+            /** Format: int64 */
+            resultSizeBytes?: number | null;
+            faceRestoreSkippedNoFace: boolean;
+        };
+        UpscaleJobLogDto: {
+            jobId: string;
+            status: string;
+            error?: string | null;
+            /** Format: int32 */
+            scale: number;
+            modelStyle: string;
+            faceRestoreRequested: boolean;
+            deviceIdRequested?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            log?: components["schemas"]["UpscaleLogDto"] | null;
         };
         FontMetaRecord: {
             key: string;
@@ -1756,6 +2143,378 @@ export interface operations {
                 content?: never;
             };
             /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compute device list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceListDto"];
+                };
+            };
+        };
+    };
+    stitch_getModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelListDto"];
+                };
+            };
+        };
+    };
+    stitch_downloadModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDownloadRequestDto"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Version not found in catalog */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Already installed or in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getModelDownloadProgress: {
+        parameters: {
+            query: {
+                family: string;
+                version: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-Sent Events stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["ModelDownloadProgressDto"];
+                };
+            };
+        };
+    };
+    stitch_deleteModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getOrtVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ORT version list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrtVersionListDto"];
+                };
+            };
+        };
+    };
+    stitch_downloadOrtVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrtDownloadRequestDto"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Version not found in catalog */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_activateOrtVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrtActivateRequestDto"];
+            };
+        };
+        responses: {
+            /** @description Activated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Version not installed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getOrtDownloadProgress: {
+        parameters: {
+            query: {
+                version: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-Sent Events stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["OrtDownloadProgressDto"];
+                };
+            };
+        };
+    };
+    stitch_startUpscale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpscaleStartRequestDto"];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpscaleJobDto"];
+                };
+            };
+            /** @description Source result not found or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getUpscaleStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpscaleJobDto"];
+                };
+            };
+            /** @description Job not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getUpscaleResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Upscaled image (not yet confirmed) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Result not available */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_getUpscaleLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpscaleJobLogDto"];
+                };
+            };
+            /** @description Job not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stitch_cancelUpscale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Job not found */
             404: {
                 headers: {
                     [name: string]: unknown;

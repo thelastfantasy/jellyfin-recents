@@ -1,6 +1,19 @@
 ﻿// Binary protocol frame read/write functions for frame-forge daemon.
 // Follows the same pattern as seek-preview protocol.rs.
 
+// Sanity bounds on length-prefixed fields read directly off the wire (untrusted u32 LE).
+// Every read_*_req function below previously did `vec![0u8; len]` / `Vec::with_capacity(len)`
+// straight from the wire value with zero validation — a single byte-offset desync between the
+// C# writer and this reader (e.g. a field added/reordered on one side only) makes every
+// subsequent length field garbage, which can then demand a multi-GB allocation with no chance
+// to log anything first (the crash/OOM happens inside the allocator, before any of this
+// function's own log lines run). These caps turn that failure mode into an immediate, logged
+// `anyhow::bail!` instead of a silent resource-exhaustion crash — see investigation in the PR
+// that introduced this comment (two production OOM kills of frame-forge with zero application
+// log output, traced back to this file having no bounds anywhere).
+const MAX_STR_FIELD_LEN: usize = 1 << 20; // 1 MiB — generous for any path/id/family/version string
+const MAX_FRAME_COUNT: usize = 4096; // no real export UI ever submits anywhere near this many
+
 pub(crate) struct SingleFrameReq {
     pub request_id: u32,
     pub frame_idx: i64,
@@ -48,6 +61,9 @@ pub(crate) async fn read_single_frame_req(
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let path_len = u32::from_le_bytes(len_buf) as usize;
+    if path_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_single_frame_req: path_len {path_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
 
     let mut path_bytes = vec![0u8; path_len];
     stream.read_exact(&mut path_bytes).await?;
@@ -182,6 +198,9 @@ pub(crate) async fn read_animate_req(
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let tid_len = u32::from_le_bytes(len_buf) as usize;
+    if tid_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_animate_req: tid_len {tid_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let mut tid_bytes = vec![0u8; tid_len];
     stream.read_exact(&mut tid_bytes).await?;
     let task_id = String::from_utf8(tid_bytes)?;
@@ -190,6 +209,9 @@ pub(crate) async fn read_animate_req(
     let mut fc_buf = [0u8; 4];
     stream.read_exact(&mut fc_buf).await?;
     let frame_count = u32::from_le_bytes(fc_buf) as usize;
+    if frame_count > MAX_FRAME_COUNT {
+        anyhow::bail!("read_animate_req: frame_count {frame_count} exceeds {MAX_FRAME_COUNT} — likely a wire desync");
+    }
 
     let mut paths = Vec::with_capacity(frame_count);
     for _ in 0..frame_count {
@@ -200,6 +222,9 @@ pub(crate) async fn read_animate_req(
         let mut pl_buf = [0u8; 4];
         stream.read_exact(&mut pl_buf).await?;
         let path_len = u32::from_le_bytes(pl_buf) as usize;
+        if path_len > MAX_STR_FIELD_LEN {
+            anyhow::bail!("read_animate_req: path_len {path_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+        }
 
         let mut pbytes = vec![0u8; path_len];
         stream.read_exact(&mut pbytes).await?;
@@ -240,6 +265,9 @@ pub(crate) async fn read_animate_req(
     let mut preset_len_buf = [0u8; 4];
     stream.read_exact(&mut preset_len_buf).await?;
     let preset_len = u32::from_le_bytes(preset_len_buf) as usize;
+    if preset_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_animate_req: preset_len {preset_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let mut preset_bytes = vec![0u8; preset_len];
     stream.read_exact(&mut preset_bytes).await?;
     let resolution_preset = ResolutionPreset::from_str(&String::from_utf8(preset_bytes).unwrap_or_default());
@@ -248,9 +276,14 @@ pub(crate) async fn read_animate_req(
 }
 
 // ── STITCH request (0x12) ─────────────────────────────────────────────────────
-// Wire: same as AnimateReq, then two trailing length-prefixed UTF-8 fields:
-//   [device_id_len(4LE)][device_id(UTF-8)]   -- e.g. "cuda:0"; empty = default EP
-//   [log_path_len(4LE)] [log_path(UTF-8)]    -- absolute path for GenerationLog JSON; empty = skip
+// Wire: same as AnimateReq, then six trailing fields (spec 012 US2/US3):
+//   [device_id_len(4LE)][device_id(UTF-8)]       -- e.g. "cuda:0"; empty = default EP
+//   [log_path_len(4LE)] [log_path(UTF-8)]        -- absolute path for GenerationLog JSON; empty = skip
+//   [model_disabled(1)]                          -- 1 = skip DL matching entirely (AKAZE-only, FR-006)
+//   [model_family_len(4)][model_family(UTF-8)]   -- "lightglue" | "efficient-loftr" | "" (auto)
+//   [model_version_len(4)][model_version(UTF-8)] -- echoed verbatim into GenerationLog.model_version
+//   [model_path_len(4)][model_path(UTF-8)]       -- explicit absolute model file path; empty = let
+//                                                    dl_match auto-detect by family/canonical filename
 
 pub(crate) struct StitchReq {
     pub item_id: String,
@@ -260,6 +293,26 @@ pub(crate) struct StitchReq {
     pub quality: f32,
     pub device_id: String,
     pub log_path: String,
+    pub model_disabled: bool,
+    pub model_family: String,
+    pub model_version: String,
+    pub model_path: String,
+}
+
+async fn read_len_prefixed_string(stream: &mut tokio::net::UnixStream) -> anyhow::Result<String> {
+    use tokio::io::AsyncReadExt;
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len == 0 {
+        return Ok(String::new());
+    }
+    if len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_len_prefixed_string: len {len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
+    let mut bytes = vec![0u8; len];
+    stream.read_exact(&mut bytes).await?;
+    Ok(String::from_utf8(bytes)?)
 }
 
 pub(crate) async fn read_stitch_req(
@@ -270,28 +323,16 @@ pub(crate) async fn read_stitch_req(
     // Reuse the animate wire format for the base fields
     let base = read_animate_req(stream).await?;
 
-    // Trailing: device_id
-    let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).await?;
-    let device_id_len = u32::from_le_bytes(len_buf) as usize;
-    let device_id = if device_id_len > 0 {
-        let mut bytes = vec![0u8; device_id_len];
-        stream.read_exact(&mut bytes).await?;
-        String::from_utf8(bytes)?
-    } else {
-        String::new()
-    };
+    let device_id = read_len_prefixed_string(stream).await?;
+    let log_path = read_len_prefixed_string(stream).await?;
 
-    // Trailing: log_path
-    stream.read_exact(&mut len_buf).await?;
-    let log_path_len = u32::from_le_bytes(len_buf) as usize;
-    let log_path = if log_path_len > 0 {
-        let mut bytes = vec![0u8; log_path_len];
-        stream.read_exact(&mut bytes).await?;
-        String::from_utf8(bytes)?
-    } else {
-        String::new()
-    };
+    let mut disabled_buf = [0u8; 1];
+    stream.read_exact(&mut disabled_buf).await?;
+    let model_disabled = disabled_buf[0] != 0;
+
+    let model_family = read_len_prefixed_string(stream).await?;
+    let model_version = read_len_prefixed_string(stream).await?;
+    let model_path = read_len_prefixed_string(stream).await?;
 
     Ok(StitchReq {
         item_id: base.item_id,
@@ -301,6 +342,10 @@ pub(crate) async fn read_stitch_req(
         quality: base.quality,
         device_id,
         log_path,
+        model_disabled,
+        model_family,
+        model_version,
+        model_path,
     })
 }
 
@@ -319,6 +364,9 @@ pub(crate) async fn read_prefetch_range_req(
     let mut pl_buf = [0u8; 4];
     stream.read_exact(&mut pl_buf).await?;
     let path_len = u32::from_le_bytes(pl_buf) as usize;
+    if path_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_prefetch_range_req: path_len {path_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let mut pbytes = vec![0u8; path_len];
     stream.read_exact(&mut pbytes).await?;
     let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
@@ -418,6 +466,9 @@ pub(crate) async fn read_prefetch_range_stream_req(
     let mut pl_buf = [0u8; 4];
     stream.read_exact(&mut pl_buf).await?;
     let path_len = u32::from_le_bytes(pl_buf) as usize;
+    if path_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_prefetch_range_stream_req: path_len {path_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let mut pbytes = vec![0u8; path_len];
     stream.read_exact(&mut pbytes).await?;
     let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
@@ -449,6 +500,9 @@ pub(crate) async fn read_prefetch_range_stream_req(
     let mut sl_buf = [0u8; 4];
     stream.read_exact(&mut sl_buf).await?;
     let session_id_len = u32::from_le_bytes(sl_buf) as usize;
+    if session_id_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_prefetch_range_stream_req: session_id_len {session_id_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let session_id = if session_id_len > 0 {
         let mut sb = vec![0u8; session_id_len];
         stream.read_exact(&mut sb).await?;
@@ -486,6 +540,9 @@ pub(crate) async fn read_index_frames_stream_req(
     let mut pl_buf = [0u8; 4];
     stream.read_exact(&mut pl_buf).await?;
     let path_len = u32::from_le_bytes(pl_buf) as usize;
+    if path_len > MAX_STR_FIELD_LEN {
+        anyhow::bail!("read_index_frames_stream_req: path_len {path_len} exceeds {MAX_STR_FIELD_LEN} — likely a wire desync");
+    }
     let mut pbytes = vec![0u8; path_len];
     stream.read_exact(&mut pbytes).await?;
     let path = std::path::PathBuf::from(String::from_utf8(pbytes)?);
@@ -495,4 +552,91 @@ pub(crate) async fn read_index_frames_stream_req(
     let current_time_ms = i64::from_le_bytes(ct_buf);
 
     Ok(IndexFramesStreamReq { request_id, item_id, path, current_time_ms })
+}
+
+// ── MSG_UPSCALE (0x1B) ───────────────────────────────────────────────
+// Wire: [item_id(32)] [input_path_len(4)][input_path] [output_path_len(4)][output_path]
+//       [model_path_len(4)][model_path] [device_id_len(4)][device_id] [is_animation(1)]
+//       [face_restore_model_path_len(4)][face_restore_model_path] [log_path_len(4)][log_path]
+//       [post_downscale_factor(4, f32 LE)]
+// Note: tasks.md's spec text says "MSG_UPSCALE (0x1A)", but 0x1A is already MSG_DEBUG_DUMP
+// (see server.rs) — this uses 0x1B instead to avoid colliding with that existing handler.
+// Empty face_restore_model_path means face restoration is disabled for this job (FR-025).
+// log_path: absolute path for UpscaleLog JSON (fallbacks + face-restore outcome); empty = skip.
+// post_downscale_factor: applied to the model's native output size after upscaling (and after
+// face restore, which runs at the higher native resolution for better face crops). 1.0 = no-op;
+// e.g. 0.5 lets the caller request an effective x2 result from an x4 model when no native x2
+// variant of that style exists in the catalog (anime-x2 — see UpscaleService.cs).
+
+pub(crate) struct UpscaleReq {
+    pub item_id: String,
+    pub input_path: std::path::PathBuf,
+    pub output_path: std::path::PathBuf,
+    pub model_path: String,
+    pub device_id: String,
+    pub is_animation: bool,
+    pub face_restore_model_path: String,
+    pub log_path: String,
+    pub post_downscale_factor: f32,
+    /// C#-side UpscaleJobState.JobId — lets MSG_CANCEL_UPSCALE (sent on a separate connection,
+    /// since this one is busy running the job) target this exact job without ambiguity, rather
+    /// than reusing item_id (which doesn't uniquely identify a job if the same item is upscaled
+    /// more than once).
+    pub job_id: String,
+}
+
+pub(crate) async fn read_upscale_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<UpscaleReq> {
+    use tokio::io::AsyncReadExt;
+
+    let mut item_buf = [0u8; 32];
+    stream.read_exact(&mut item_buf).await?;
+    let item_id = String::from_utf8(item_buf.to_vec()).unwrap_or_default();
+
+    let input_path = std::path::PathBuf::from(read_len_prefixed_string(stream).await?);
+    let output_path = std::path::PathBuf::from(read_len_prefixed_string(stream).await?);
+    let model_path = read_len_prefixed_string(stream).await?;
+    let device_id = read_len_prefixed_string(stream).await?;
+
+    let mut anim_buf = [0u8; 1];
+    stream.read_exact(&mut anim_buf).await?;
+    let is_animation = anim_buf[0] != 0;
+
+    let face_restore_model_path = read_len_prefixed_string(stream).await?;
+    let log_path = read_len_prefixed_string(stream).await?;
+
+    let mut downscale_buf = [0u8; 4];
+    stream.read_exact(&mut downscale_buf).await?;
+    let post_downscale_factor = f32::from_le_bytes(downscale_buf);
+
+    let job_id = read_len_prefixed_string(stream).await?;
+
+    Ok(UpscaleReq {
+        item_id,
+        input_path,
+        output_path,
+        model_path,
+        device_id,
+        is_animation,
+        face_restore_model_path,
+        log_path,
+        post_downscale_factor,
+        job_id,
+    })
+}
+
+/// MSG_CANCEL_UPSCALE (0x1C): fire-and-forget — sent on a fresh connection (the one running the
+/// job is busy) to flag a running UPSCALE job's job_id for cooperative early-exit. No response
+/// is sent; the client already knows it cancelled (UpscaleService.Cancel sets job state
+/// independently) and only needs this to reclaim the daemon's CPU/GPU resources sooner.
+pub(crate) struct CancelUpscaleReq {
+    pub job_id: String,
+}
+
+pub(crate) async fn read_cancel_upscale_req(
+    stream: &mut tokio::net::UnixStream,
+) -> anyhow::Result<CancelUpscaleReq> {
+    let job_id = read_len_prefixed_string(stream).await?;
+    Ok(CancelUpscaleReq { job_id })
 }

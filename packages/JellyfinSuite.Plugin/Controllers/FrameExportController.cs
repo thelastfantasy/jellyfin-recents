@@ -18,6 +18,7 @@ public class FrameExportController : ControllerBase
     private readonly FrameExportService _frameExport;
     private readonly FrameExportTaskManager _taskManager;
     private readonly SeekPreviewService _seekPreview;
+    private readonly ModelCatalogService _modelCatalog;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<FrameExportController> _logger;
 
@@ -28,12 +29,14 @@ public class FrameExportController : ControllerBase
         FrameExportService frameExport,
         FrameExportTaskManager taskManager,
         SeekPreviewService seekPreview,
+        ModelCatalogService modelCatalog,
         ILibraryManager libraryManager,
         ILogger<FrameExportController> logger)
     {
         _frameExport = frameExport;
         _taskManager = taskManager;
         _seekPreview = seekPreview;
+        _modelCatalog = modelCatalog;
         _libraryManager = libraryManager;
         _logger = logger;
     }
@@ -215,6 +218,9 @@ public class FrameExportController : ControllerBase
         // Fire-and-forget: submit to Rust daemon
         _ = Task.Run(async () =>
         {
+            // Declared outside the try so the catch block below can also reach for it on an
+            // exception thrown mid-stitch (e.g. the daemon process dying — see usage further down).
+            string? stitchLogPath = req.Type == "stitch" ? Path.Combine(task.TempDir, "generation-log.json") : null;
             try
             {
                 var item = _libraryManager.GetItemById(req.ItemId);
@@ -258,7 +264,20 @@ public class FrameExportController : ControllerBase
                     "stitch" => await _frameExport.SubmitStitchTaskAsync(
                         task, req.ItemId, filePaths, frameIndices, req.Params.Format, req.Params.Quality,
                         deviceId: req.Params.DeviceId,
-                        logPath: Path.Combine(task.TempDir, "generation-log.json"),
+                        logPath: stitchLogPath,
+                        // "disabled" (FR-006) is encoded as a modelFamily value, not a separate
+                        // boolean, per data-model.md — translate it into the wire-level disabled
+                        // flag here so frame-forge never has to know about the sentinel string.
+                        modelDisabled: req.Params.ModelFamily == "disabled",
+                        modelFamily: req.Params.ModelFamily == "disabled" ? null : req.Params.ModelFamily,
+                        modelVersion: req.Params.ModelVersion,
+                        // GetInstalledModelPath addresses a *specific* installed version (the
+                        // catalog stores each version under its own file name); null family/version
+                        // (Advanced panel untouched) leaves modelPath empty so the daemon falls
+                        // back to its own canonical-filename auto-detection (FR-013).
+                        modelPath: (req.Params.ModelFamily != null && req.Params.ModelFamily != "disabled")
+                            ? _modelCatalog.GetInstalledModelPath(req.Params.ModelFamily, req.Params.ModelVersion ?? "latest")
+                            : null,
                         ct: task.Cts.Token),
                     _ => null
                 };
@@ -299,6 +318,7 @@ public class FrameExportController : ControllerBase
             {
                 task.Status = Services.TaskStatus.Error;
                 task.Error = ex.Message;
+                task.GenerationLog ??= Services.FrameExportService.TryReadOrphanGenerationLog(stitchLogPath);
                 task.ProgressChannel.Writer.TryWrite(new TaskProgress
                 {
                     TaskId = task.TaskId,
@@ -367,6 +387,31 @@ public class FrameExportController : ControllerBase
         Response.Headers["Content-Disposition"] = $"attachment; filename*=UTF-8''{safe}";
 
         return File(System.IO.File.ReadAllBytes(filePath), contentType);
+    }
+
+    /// <summary>GET /FrameExport/Result/{taskId}/generation-log.json</summary>
+    [HttpGet("Result/{taskId}/generation-log.json")]
+    public IActionResult GetGenerationLog(string taskId)
+    {
+        var task = _taskManager.GetTask(taskId);
+        if (task == null)
+            return NotFound(new { error = "Task not found" });
+
+        if (task.Type != "stitch")
+            return NotFound(new { error = "Generation log only available for stitch tasks" });
+
+        // Available for both Complete and Error (failures are exactly when this diagnostic is
+        // most wanted — see FrameExportService.TryReadOrphanGenerationLog's doc comment); any
+        // other status (Pending/Running/Cancelled) genuinely has nothing to read yet.
+        if (task.Status is not (Services.TaskStatus.Complete or Services.TaskStatus.Error))
+            return Conflict(new { error = $"Task not finished (status: {task.Status})" });
+
+        if (task.GenerationLog == null)
+            return NotFound(new { error = "Generation log not available for this task" });
+
+        var safe = Uri.EscapeDataString($"{task.ItemTitle}_{task.CreatedAt:yyyyMMddHHmmss}_{task.TaskId[..6]}_log.json");
+        Response.Headers["Content-Disposition"] = $"attachment; filename*=UTF-8''{safe}";
+        return new JsonResult(task.GenerationLog);
     }
 
     /// <summary>DELETE /FrameExport/Result/{taskId}</summary>

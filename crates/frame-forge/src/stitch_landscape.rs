@@ -279,8 +279,17 @@ pub fn warp_expand_blend(
 
     let off_x = (-min_x).max(0);
     let off_y = (-min_y).max(0);
-    let canvas_w = ((max_x-min_x+1).max(1) as u32).min(bw as u32 * 3);
-    let canvas_h = ((max_y-min_y+1).max(1) as u32).min(bh as u32 * 3);
+    // Cap basis is `cw`/`ch` (the incoming frame's own constant size), NOT `bw`/`bh` (the
+    // already-accumulated panorama, which grows every iteration of the caller's loop). The old
+    // `bw*3`/`bh*3` cap compounded multiplicatively across N merges (up to 3^N, not 3×N) because
+    // each iteration's "current size" became the next iteration's basis — a handful of frames
+    // could legitimately reach a canvas demanding tens of GB with nothing catching it until the
+    // OS OOM-killed the process. 20× a single frame's dimension is generous headroom for any
+    // realistic multi-frame panorama while staying additive (linear in frame count) instead of
+    // exponential.
+    let canvas_w = ((max_x-min_x+1).max(1) as u32).min(bw as u32 * 3).min(cw as u32 * 20);
+    let canvas_h = ((max_y-min_y+1).max(1) as u32).min(bh as u32 * 3).min(ch as u32 * 20);
+    eprintln!("[landscape] warp_expand_blend: base={bw}x{bh} curr={cw}x{ch} → canvas={canvas_w}x{canvas_h}");
 
     let mut canvas_base = RgbaImage::new(canvas_w, canvas_h);
     image::imageops::overlay(&mut canvas_base, base, off_x as i64, off_y as i64);
@@ -835,7 +844,7 @@ pub fn sift_translation_estimate(img1: &core::Mat, img2: &core::Mat) -> Option<(
     let mut gray2 = core::Mat::default();
     imgproc::cvt_color(img1, &mut gray1, imgproc::COLOR_RGBA2GRAY, 0).ok()?;
     imgproc::cvt_color(img2, &mut gray2, imgproc::COLOR_RGBA2GRAY, 0).ok()?;
-    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6).ok()?;
+    let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6, false).ok()?;
     let mut kp1 = core::Vector::<core::KeyPoint>::new();
     let mut kp2 = core::Vector::<core::KeyPoint>::new();
     let mut desc1 = core::Mat::default();
@@ -899,7 +908,7 @@ mod quality_tests {
         let a = image::open(dir.join("input_a.png")).expect("input_a.png");
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         let reference = image::open(dir.join("reference.png")).expect("reference.png");
-        let stitched = stitch_landscape(&[a, b]).expect("stitch_landscape failed");
+        let stitched = stitch_landscape(&[a, b], None).expect("stitch_landscape failed");
         let score = ssim(&stitched, &reference);
         assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
     }
@@ -914,10 +923,10 @@ mod quality_tests {
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(false).ok();
-        let cpu = stitch_landscape(&[a.clone(), b.clone()]).expect("CPU stitch");
+        let cpu = stitch_landscape(&[a.clone(), b.clone()], None).expect("CPU stitch");
         #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(true).ok();
-        let gpu = stitch_landscape(&[a, b]).expect("GPU stitch");
+        let gpu = stitch_landscape(&[a, b], None).expect("GPU stitch");
         let score = ssim(&cpu, &gpu);
         assert!(score >= 0.95, "CPU/GPU SSIM {:.3} < 0.95", score);
     }

@@ -36,6 +36,27 @@ static class JfsSpec
         // PlayHistory
         typeof(PlayHistoryEntry),
         typeof(PlayHistoryResponse),
+        // Stitch: device enumeration
+        typeof(ComputeDeviceDto),
+        typeof(DeviceListDto),
+        // Stitch: model catalog
+        typeof(ModelEntryDto),
+        typeof(ModelListDto),
+        typeof(ModelDownloadRequestDto),
+        typeof(ModelDownloadProgressDto),
+        // Stitch: ORT version management
+        typeof(OrtAssetDto),
+        typeof(OrtVersionDto),
+        typeof(OrtVersionListDto),
+        typeof(OrtDownloadRequestDto),
+        typeof(OrtActivateRequestDto),
+        typeof(OrtDownloadProgressDto),
+        // Stitch: upscale (US7)
+        typeof(FallbackEventDto),
+        typeof(UpscaleLogDto),
+        typeof(UpscaleStartRequestDto),
+        typeof(UpscaleJobDto),
+        typeof(UpscaleJobLogDto),
     ];
 
     public static Dictionary<string, object> Build()
@@ -56,6 +77,7 @@ static class JfsSpec
         AddSeekPreviewPaths(doc);
         AddFrameExportPaths(doc);
         AddPosterSheetPaths(doc);
+        AddStitchPaths(doc);
 
         return doc.Build();
     }
@@ -377,5 +399,85 @@ static class JfsSpec
             .PathParam("key")
             .ResNoContent(204, "No Content")
             .ResNoContent(400, "Bad Request").ResNoContent(404, "Not Found"));
+    }
+
+    // ── Stitch (device enumeration, model catalog, ORT versions, upscale) ──
+
+    static void AddStitchPaths(OaDoc doc)
+    {
+        doc.AddPath("/JellyfinSuite/Stitch/Devices", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getDevices")
+            .ResRef(200, "Compute device list", "DeviceListDto"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Models", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getModels")
+            .ResRef(200, "Model catalog", "ModelListDto"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Models/Download", "post", new OaOp()
+            .Tag("Stitch").OpId("stitch_downloadModel")
+            .Body("ModelDownloadRequestDto")
+            .ResNoContent(202, "Accepted")
+            .ResNoContent(404, "Version not found in catalog")
+            .ResNoContent(409, "Already installed or in progress"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Models/DownloadProgress", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getModelDownloadProgress")
+            .QueryParam("family", "string", required: true)
+            .QueryParam("version", "string", required: true)
+            .Sse(200, "ModelDownloadProgressDto"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Models/{family}/{version}", "delete", new OaOp()
+            .Tag("Stitch").OpId("stitch_deleteModel")
+            .PathParam("family").PathParam("version")
+            .ResNoContent(200, "Deleted").ResNoContent(409, "Conflict"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/OrtVersions", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getOrtVersions")
+            .ResRef(200, "ORT version list", "OrtVersionListDto"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/OrtVersions/Download", "post", new OaOp()
+            .Tag("Stitch").OpId("stitch_downloadOrtVersion")
+            .Body("OrtDownloadRequestDto")
+            .ResNoContent(202, "Accepted").ResNoContent(404, "Version not found in catalog"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/OrtVersions/Activate", "post", new OaOp()
+            .Tag("Stitch").OpId("stitch_activateOrtVersion")
+            .Body("OrtActivateRequestDto")
+            .ResNoContent(200, "Activated").ResNoContent(404, "Version not installed"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/OrtVersions/DownloadProgress", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getOrtDownloadProgress")
+            .QueryParam("version", "string", required: true)
+            .Sse(200, "OrtDownloadProgressDto"));
+
+        // ── Upscale (US7) ───────────────────────────────────────────────
+        doc.AddPath("/JellyfinSuite/Stitch/Upscale", "post", new OaOp()
+            .Tag("Stitch").OpId("stitch_startUpscale")
+            .Body("UpscaleStartRequestDto")
+            .ResRef(202, "Job accepted", "UpscaleJobDto")
+            .ResNoContent(404, "Source result not found or expired"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Upscale/{jobId}", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getUpscaleStatus")
+            .PathParam("jobId")
+            .ResRef(200, "Job status", "UpscaleJobDto")
+            .ResNoContent(404, "Job not found"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Upscale/{jobId}/Result", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getUpscaleResult")
+            .PathParam("jobId")
+            .ResBinary(200, "Upscaled image (not yet confirmed)")
+            .ResNoContent(404, "Result not available"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Upscale/{jobId}/Log", "get", new OaOp()
+            .Tag("Stitch").OpId("stitch_getUpscaleLog")
+            .PathParam("jobId")
+            .ResRef(200, "Job diagnostics", "UpscaleJobLogDto")
+            .ResNoContent(404, "Job not found"));
+
+        doc.AddPath("/JellyfinSuite/Stitch/Upscale/{jobId}/Cancel", "post", new OaOp()
+            .Tag("Stitch").OpId("stitch_cancelUpscale")
+            .PathParam("jobId")
+            .ResNoContent(200, "Cancelled").ResNoContent(404, "Job not found"));
     }
 }

@@ -30,9 +30,32 @@ export const suite = {
     taskProgress: (taskId: string) => `${base()}/JellyfinSuite/FrameExport/TaskProgress?taskId=${encodeURIComponent(taskId)}`,
     cancel:       (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Cancel/${encodeURIComponent(taskId)}`,
     result:       (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Result/${encodeURIComponent(taskId)}`,
+    generationLog: (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Result/${encodeURIComponent(taskId)}/generation-log.json`,
   },
 
   playerEnhancer: {
     config: () => `${base()}/JellyfinSuite/PlayerEnhancer/Config`,
+  },
+
+  stitch: {
+    devices:    () => `${base()}/JellyfinSuite/Stitch/Devices`,
+    models:     () => `${base()}/JellyfinSuite/Stitch/Models`,
+    ortVersions: () => `${base()}/JellyfinSuite/Stitch/OrtVersions`,
+
+    modelDownload: () => `${base()}/JellyfinSuite/Stitch/Models/Download`,
+    modelDownloadProgress: (family: string, version: string) =>
+      `${base()}/JellyfinSuite/Stitch/Models/DownloadProgress?family=${encodeURIComponent(family)}&version=${encodeURIComponent(version)}`,
+    modelDelete: (family: string, version: string) =>
+      `${base()}/JellyfinSuite/Stitch/Models/${encodeURIComponent(family)}/${encodeURIComponent(version)}`,
+
+    ortVersionDownload: () => `${base()}/JellyfinSuite/Stitch/OrtVersions/Download`,
+    ortVersionDownloadProgress: (version: string) =>
+      `${base()}/JellyfinSuite/Stitch/OrtVersions/DownloadProgress?version=${encodeURIComponent(version)}`,
+    ortVersionActivate: () => `${base()}/JellyfinSuite/Stitch/OrtVersions/Activate`,
+
+    upscale:        () => `${base()}/JellyfinSuite/Stitch/Upscale`,
+    upscaleStatus:  (jobId: string) => `${base()}/JellyfinSuite/Stitch/Upscale/${encodeURIComponent(jobId)}`,
+    upscaleCancel:  (jobId: string) => `${base()}/JellyfinSuite/Stitch/Upscale/${encodeURIComponent(jobId)}/Cancel`,
+    upscaleLog:     (jobId: string) => `${base()}/JellyfinSuite/Stitch/Upscale/${encodeURIComponent(jobId)}/Log`,
   },
 }

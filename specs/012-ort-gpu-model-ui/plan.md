@@ -14,14 +14,14 @@ localStorage; server provides VRAM-ranked defaults.
 
 ## Technical Context
 
-**Language/Version**: Rust (frame-forge, crates/frame-forge/), C# (.NET 8, packages/JellyfinSuite.Plugin/), TypeScript/Preact (apps/frontend/)
+**Language/Version**: Rust (frame-forge, crates/frame-forge/), C# (.NET 8, packages/JellyfinSuite.Plugin/), TypeScript/React (apps/frontend/)
 
 **Primary Dependencies**:
 - `ort` 2.0.0-rc.12 → switch from `download-binaries` to `load-dynamic` feature for runtime EP swapping
 - ORT EP Cargo features to add: `cuda` (Linux NVIDIA), `directml` (Windows), `openvino` (Intel iGPU Linux), `rocm` (AMD Linux, lower priority)
 - OpenCV already present via `opencv` Cargo feature
 - ASP.NET Core (already in use): add `StitchController`
-- Preact + existing Popover/combobox patterns in frontend
+- React + existing Popover/combobox patterns in frontend
 
 **Storage**:
 - `/config/plugins/JellyfinSuite/models/` — ONNX model files (existing)
@@ -98,15 +98,24 @@ packages/JellyfinSuite.Plugin/
 │   └── FrameExportDto.cs          ← extend GenerateParams with deviceId/modelFamily/modelVersion
 └── PluginServiceRegistrator.cs    ← register new services
 
-apps/frontend/src/
+apps/player-enhancer/src/
 ├── api/
-│   └── stitchApi.ts               ← new: typed wrappers for /Stitch/* endpoints
+│   ├── routes.ts                  ← extend: suite.stitch.devices()/models()/ortVersions()/upscale*()
+│   └── frameExportApi.ts          ← extend: fetchDevices()/fetchModels()/fetchOrtVersions(), getGenerationLog (done)
 ├── components/
-│   ├── StitchAdvancedPanel.tsx    ← new: device + model + ORT advanced options
-│   └── FrameExportJobRunner.tsx   ← extend: pass stitch config, show Download log button
-└── state/
-    └── stitchSettings.ts          ← new: localStorage helpers for stitch preferences
+│   ├── AdvancedPanel.tsx          ← new: device + model + ORT advanced options
+│   ├── ParamsPanel.tsx            ← extend: render <AdvancedPanel> below existing controls
+│   ├── ResultPage.tsx             ← extend: Download log button (done), Upscale trigger button
+│   └── UpscalePage.tsx            ← new: US7 upscale flow (options → processing → comparison → error)
+└── core/
+    └── state.ts                   ← extend: ExportSettings gets deviceId/modelFamily/modelVersion/ortVersion
 ```
+
+**Note**: the Advanced device/model/ORT panel and the Download-log/Upscale buttons all belong to
+the workshop modal, i.e. `apps/player-enhancer`, not `apps/frontend`. `apps/frontend`'s
+`FrameExportQueueWidget.tsx` is a separate persistent task-queue page with no log-download or
+upscale interaction by design. `FrameExportJobRunner.tsx` (also in `apps/player-enhancer`) is a
+headless SSE progress listener with no rendered UI — it does not own any result/download UI.
 
 ## Implementation Stages
 
@@ -244,11 +253,13 @@ curl -s "http://localhost:8600/JellyfinSuite/FrameExport/Result/$TASK/generation
 Download log button appears on stitch results.
 
 **Files changed**:
-- `apps/frontend/src/api/stitchApi.ts` — new: typed fetch for `/Stitch/Devices`,
-  `/Stitch/Models`, `/Stitch/OrtVersions`
-- `apps/frontend/src/state/stitchSettings.ts` — new: `getStitchSettings()`,
-  `setStitchSettings()` reading/writing `jfs_stitch_*` localStorage keys
-- `apps/frontend/src/components/StitchAdvancedPanel.tsx` — new:
+- `apps/player-enhancer/src/api/routes.ts` / `frameExportApi.ts` — extend: typed fetch for
+  `/Stitch/Devices`, `/Stitch/Models`, `/Stitch/OrtVersions`
+- `apps/player-enhancer/src/core/state.ts` — extend: `ExportSettings` gets optional
+  `deviceId`/`modelFamily`/`modelVersion`/`ortVersion` fields, persisted automatically via the
+  existing `loadSettingsOnce()`/`saveSettings()`/`updateSettings()` localStorage mechanism (no new
+  storage key)
+- `apps/player-enhancer/src/components/AdvancedPanel.tsx` — new, rendered from `ParamsPanel.tsx`:
   - Device combobox (populated from `/Stitch/Devices`)
   - Model name selector + version combobox (populated from `/Stitch/Models`)
     - "Latest" pinned at top
@@ -256,10 +267,15 @@ Download log button appears on stitch results.
     - Selecting uninstalled version triggers download prompt
   - ORT version display + "Update" / version switcher
   - "Advanced" collapsible section with "don't change unless you know what you're doing" warning
-- `apps/frontend/src/components/FrameExportJobRunner.tsx` — extend:
-  - Read `StitchAdvancedPanel` selections and pass to `GenerateRequest.params`
-  - For completed stitch tasks: show "Download log" button alongside "Download image"
-  - "Download log" fetches `GET /FrameExport/Result/{taskId}/generation-log.json`
+- `apps/player-enhancer/src/components/FrameExportModal.tsx` — extend: read `AdvancedPanel`
+  selections from `settingsAtom` and pass to `GenerateRequest.params` at the
+  `generateExportMutation()` call site
+- `apps/player-enhancer/src/components/ResultPage.tsx` — extend (not `apps/frontend`'s
+  `FrameExportQueueWidget.tsx`, a separate persistent task-queue page; not `FrameExportJobRunner.tsx`,
+  a headless SSE progress listener with no rendered UI):
+  - For completed stitch tasks: show "Download log" button alongside "Download image" — **done**
+  - "Download log" fetches `GET /FrameExport/Result/{taskId}/generation-log.json` via
+    `frameExportApi.ts`'s `getGenerationLog` — **done**
 
 **Verification**:
 ```bash

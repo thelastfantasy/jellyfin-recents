@@ -12,12 +12,17 @@ pub struct Thresholds {
     pub rmse_max: f32,
 }
 
+/// Loads the "proxy" threshold set — all three Rust unit tests that call this
+/// (landscape/seagull, liveaction, anime) compare a stitch against a reference that is
+/// itself (or close to) one of the inputs, not a true ground-truth panorama, matching
+/// score.py's `proxy` mode (see thresholds.json: `{"gt": {...}, "proxy": {...}}`).
 pub fn load_thresholds() -> Thresholds {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/stitch-eval/thresholds.json");
     let s = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("thresholds.json not found at {:?}", path));
     let v: serde_json::Value = serde_json::from_str(&s).expect("invalid thresholds.json");
+    let v = &v["proxy"];
     Thresholds {
         ssim_min:          v["ssim_min"].as_f64().unwrap() as f32,
         seam_grad_max:     v["seam_grad_max"].as_f64().unwrap() as f32,

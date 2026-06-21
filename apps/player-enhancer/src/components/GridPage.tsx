@@ -9,6 +9,7 @@ import {
   updateSettings,
 } from '../core/state'
 import { t } from '../lib/i18n'
+import { bsFirst, bsLast } from './FrameExportModal'
 import { FrameGrid } from './FrameGrid'
 import { FrameGridSkeleton } from './FrameGridSkeleton'
 import { ParamsPanel } from './ParamsPanel'
@@ -41,6 +42,28 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
     || (_fi.index
       ? _fi.maxIdx >= (_fi.index.length - 1)
       : (maxMs > 0 && _maxPosMs >= maxMs - frameInterval()))
+
+  // While the frame index is still streaming in (Queue B hasn't finished demuxing the whole
+  // file yet), "no frame in the next ~1s window" is inconclusive — it might just not have
+  // arrived yet, not a genuine gap/end-of-data. Disable rather than let the click silently (or
+  // now, via toast) fail on data that's seconds away from showing up on its own. Once
+  // indexComplete flips true, this stops applying and the button re-enables — if it's still
+  // empty at that point, it's a confirmed gap and the click goes through to the toast/diagnostic
+  // log in FrameExportModal instead of staying disabled forever (a real gap can be narrower than
+  // the video's full length; disabling permanently would trap the user behind it).
+  const fiIndex = _fi.index
+  const backPending = !atStart && !!fiIndex && !_fi.indexComplete && _frames.length > 0 && (() => {
+    const boundaryMs = _frames[0].posMs
+    const sliceEnd = bsLast(fiIndex, boundaryMs - 1)
+    const start = bsFirst(fiIndex, boundaryMs - 1000)
+    return sliceEnd < 0 || start > sliceEnd
+  })()
+  const forwardPending = !atEnd && !!fiIndex && !_fi.indexComplete && _frames.length > 0 && (() => {
+    const boundaryMs = _frames[_frames.length - 1].posMs
+    const sliceStart = bsFirst(fiIndex, boundaryMs + 1)
+    const end = bsLast(fiIndex, boundaryMs + 1000)
+    return sliceStart >= fiIndex.length || end < sliceStart
+  })()
   const countLabel = prefTotal > 0 && prefDone < prefTotal
     ? `${t('frameExport.loading')} ${prefDone}/${prefTotal}`
     : `${isMobile ? '' : t('frameExport.selected') + ' '}${selectedCount}/${visible.length}`
@@ -59,9 +82,22 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
   }
 
   function handleSparseChange(e: ChangeEvent<HTMLSelectElement>) {
-    const spacing = parseInt(e.target.value) || 0
-    if (spacing <= 0) return
-    setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % spacing === 0 }))
+    const raw = e.target.value
+    if (exportType === 'stitch') {
+      // Stitch needs overlap between neighboring frames for feature matching, so pick runs of
+      // `cluster` consecutive frames separated by `gap` skipped frames, rather than isolated
+      // single frames every Nth — isolated frames have no shared content to match against.
+      const [clusterStr, gapStr] = raw.split(':')
+      const cluster = parseInt(clusterStr) || 0
+      const gap = parseInt(gapStr) || 0
+      if (cluster <= 0) return
+      const period = cluster + gap
+      setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % period < cluster }))
+    } else {
+      const spacing = parseInt(raw) || 0
+      if (spacing <= 0) return
+      setFrames(_frames.map((f, i) => f.removed ? f : { ...f, selected: i % spacing === 0 }))
+    }
     ;(e.target as HTMLSelectElement).value = '0'
   }
 
@@ -86,10 +122,20 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
         </select>
         <select id="jfs-fe-sparse" className="jfs-fe-sel" title={t('grid.sparseTitle')} style={{ minWidth: '0' }} onChange={handleSparseChange}>
           <option value="0">{t('grid.sparse')}</option>
-          <option value="1">全</option>
-          <option value="2">½</option>
-          <option value="3">⅓</option>
-          <option value="4">¼</option>
+          {exportType === 'stitch' ? (
+            <>
+              <option value="3:20">3+20</option>
+              <option value="4:20">4+20</option>
+              <option value="5:25">5+25</option>
+            </>
+          ) : (
+            <>
+              <option value="1">全</option>
+              <option value="2">½</option>
+              <option value="3">⅓</option>
+              <option value="4">¼</option>
+            </>
+          )}
         </select>
         <button id="jfs-fe-params-toggle" className="jfs-fe-btn g" onClick={() => { sParamsOpen.value = !sParamsOpen.value }}>
           {paramsOpen ? `${t('grid.params')} ▾` : `${t('grid.params')} ▴`}
@@ -107,11 +153,11 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
             </button>
           )}
         </span>
-        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart} onClick={onExpandBack}>
-          {atStart ? t('frameExport.atStart') : t('frameExport.loadPrev')}
+        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart || backPending} onClick={onExpandBack}>
+          {atStart ? t('frameExport.atStart') : backPending ? t('frameExport.loading') : t('frameExport.loadPrev')}
         </button>
-        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd} onClick={onExpandForward}>
-          {atEnd ? t('frameExport.atEnd') : t('frameExport.loadNext')}
+        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd || forwardPending} onClick={onExpandForward}>
+          {atEnd ? t('frameExport.atEnd') : forwardPending ? t('frameExport.loading') : t('frameExport.loadNext')}
         </button>
         <button id="jfs-fe-generate" className="jfs-fe-btn p" disabled={!canGenerate} onClick={onGenerate}>
           {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}

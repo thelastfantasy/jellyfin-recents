@@ -1280,6 +1280,436 @@
           }
         }
       }
+    },
+    "/JellyfinSuite/Stitch/Devices": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getDevices",
+        "summary": "Get Devices",
+        "responses": {
+          "200": {
+            "description": "Compute device list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getModels",
+        "summary": "Get Models",
+        "responses": {
+          "200": {
+            "description": "Model catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/Download": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_downloadModel",
+        "summary": "Download Model",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelDownloadRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "Version not found in catalog"
+          },
+          "409": {
+            "description": "Already installed or in progress"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/DownloadProgress": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getModelDownloadProgress",
+        "summary": "Get Model Download Progress",
+        "parameters": [
+          {
+            "name": "family",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDownloadProgressDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/ModelDownloadProgressDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Models/{family}/{version}": {
+      "delete": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_deleteModel",
+        "summary": "Delete Model",
+        "parameters": [
+          {
+            "name": "family",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getOrtVersions",
+        "summary": "Get Ort Versions",
+        "responses": {
+          "200": {
+            "description": "ORT version list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrtVersionListDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/Download": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_downloadOrtVersion",
+        "summary": "Download Ort Version",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrtDownloadRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "Version not found in catalog"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/Activate": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_activateOrtVersion",
+        "summary": "Activate Ort Version",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrtActivateRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activated"
+          },
+          "404": {
+            "description": "Version not installed"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/OrtVersions/DownloadProgress": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getOrtDownloadProgress",
+        "summary": "Get Ort Download Progress",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrtDownloadProgressDto"
+                },
+                "itemSchema": {
+                  "type": "string",
+                  "contentMediaType": "application/json",
+                  "contentSchema": {
+                    "$ref": "#/components/schemas/OrtDownloadProgressDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_startUpscale",
+        "summary": "Start Upscale",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpscaleStartRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source result not found or expired"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleStatus",
+        "summary": "Get Upscale Status",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Result": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleResult",
+        "summary": "Get Upscale Result",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Upscaled image (not yet confirmed)",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Result not available"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Log": {
+      "get": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_getUpscaleLog",
+        "summary": "Get Upscale Log",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpscaleJobLogDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
+    },
+    "/JellyfinSuite/Stitch/Upscale/{jobId}/Cancel": {
+      "post": {
+        "tags": [
+          "Stitch"
+        ],
+        "operationId": "stitch_cancelUpscale",
+        "summary": "Cancel Upscale",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled"
+          },
+          "404": {
+            "description": "Job not found"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1288,15 +1718,31 @@
         "type": "object",
         "properties": {
           "currentTimeMs": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "currentFrameIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64"
           },
           "beforeSeconds": {
-            "type": "number",
+            "type": [
+              "number",
+              "null"
+            ],
             "format": "double"
           },
           "afterSeconds": {
-            "type": "number",
+            "type": [
+              "number",
+              "null"
+            ],
             "format": "double"
           },
           "includeCurrentFrame": {
@@ -1305,14 +1751,15 @@
           "width": {
             "type": "integer",
             "format": "int32"
+          },
+          "prefetchSessionId": {
+            "type": "string"
           }
         },
         "required": [
-          "currentTimeMs",
-          "beforeSeconds",
-          "afterSeconds",
           "includeCurrentFrame",
-          "width"
+          "width",
+          "prefetchSessionId"
         ]
       },
       "PrefetchRequest": {
@@ -1497,6 +1944,30 @@
           "quality": {
             "type": "number",
             "format": "float"
+          },
+          "deviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelFamily": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ortVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -2181,6 +2652,579 @@
           "entries",
           "totalCount",
           "totalPages"
+        ]
+      },
+      "ComputeDeviceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "vramMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "isIntegrated": {
+            "type": "boolean"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "computeCapability": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "devicePath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "deviceType",
+          "vendor",
+          "isIntegrated",
+          "isDefault"
+        ]
+      },
+      "DeviceListDto": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComputeDeviceDto"
+            }
+          }
+        },
+        "required": [
+          "devices"
+        ]
+      },
+      "ModelEntryDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "downloadUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "localPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isLatest": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "family",
+          "displayName",
+          "version",
+          "fileName",
+          "status",
+          "isLatest"
+        ]
+      },
+      "ModelListDto": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelEntryDto"
+            }
+          },
+          "catalogFetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalogStale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "models",
+          "catalogStale"
+        ]
+      },
+      "ModelDownloadRequestDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "version"
+        ]
+      },
+      "ModelDownloadProgressDto": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "family",
+          "version",
+          "percent",
+          "status"
+        ]
+      },
+      "OrtAssetDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "url",
+          "sha256",
+          "sizeBytes"
+        ]
+      },
+      "OrtVersionDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "releaseDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "localDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assets": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OrtAssetDto"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "isActive",
+          "status"
+        ]
+      },
+      "OrtVersionListDto": {
+        "type": "object",
+        "properties": {
+          "activeVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrtVersionDto"
+            }
+          },
+          "maxRetainedVersions": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "versions",
+          "maxRetainedVersions"
+        ]
+      },
+      "OrtDownloadRequestDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "OrtActivateRequestDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "OrtDownloadProgressDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "percent",
+          "status"
+        ]
+      },
+      "FallbackEventDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "reason",
+          "timestamp"
+        ]
+      },
+      "UpscaleLogDto": {
+        "type": "object",
+        "properties": {
+          "deviceName": {
+            "type": "string"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "faceRestoreRequested": {
+            "type": "boolean"
+          },
+          "faceRestoreSkippedNoFace": {
+            "type": "boolean"
+          },
+          "fallbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FallbackEventDto"
+            }
+          }
+        },
+        "required": [
+          "deviceName",
+          "deviceType",
+          "deviceId",
+          "faceRestoreRequested",
+          "faceRestoreSkippedNoFace",
+          "fallbacks"
+        ]
+      },
+      "UpscaleStartRequestDto": {
+        "type": "object",
+        "properties": {
+          "resultPath": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelScale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelStyle": {
+            "type": "string"
+          },
+          "faceRestore": {
+            "type": "boolean"
+          },
+          "deviceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "resultPath",
+          "scale",
+          "modelScale",
+          "modelStyle",
+          "faceRestore"
+        ]
+      },
+      "UpscaleJobDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originalUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originalWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "originalHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "resultWidth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "resultHeight": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "originalSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "resultSizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "faceRestoreSkippedNoFace": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "jobId",
+          "status",
+          "percent",
+          "faceRestoreSkippedNoFace"
+        ]
+      },
+      "UpscaleJobLogDto": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scale": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelStyle": {
+            "type": "string"
+          },
+          "faceRestoreRequested": {
+            "type": "boolean"
+          },
+          "deviceIdRequested": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "log": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UpscaleLogDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "jobId",
+          "status",
+          "scale",
+          "modelStyle",
+          "faceRestoreRequested",
+          "createdAt"
         ]
       },
       "FontMetaRecord": {

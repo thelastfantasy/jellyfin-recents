@@ -24,4 +24,12 @@ export interface ExportParams {
   /** @nullable */
   cropH?: number | null;
   quality: number;
+  /** @nullable */
+  deviceId?: string | null;
+  /** @nullable */
+  modelFamily?: string | null;
+  /** @nullable */
+  modelVersion?: string | null;
+  /** @nullable */
+  ortVersion?: string | null;
 }

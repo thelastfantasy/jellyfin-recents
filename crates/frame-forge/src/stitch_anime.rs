@@ -241,6 +241,7 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 { anyhow::bail!("need at least 2 frames"); }
 
     let (fw, fh) = (frames[0].width() as i32, frames[0].height() as i32);
+    eprintln!("[stitch] stitch_anime: {} frames, {fw}x{fh}", frames.len());
 
     // Compute offsets; low-quality pairs don't extend the canvas.
     let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];
@@ -264,6 +265,23 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     let max_y = offsets.iter().map(|o| o.1 + fh).max().unwrap_or(fh);
     let cw = (max_x - min_x) as u32;
     let ch = (max_y - min_y) as u32;
+    eprintln!("[stitch] canvas {cw}x{ch} (offsets span x=[{min_x},{max_x}] y=[{min_y},{max_y}])");
+
+    // Sanity cap: each pair contributes at most half a frame dimension (phase_correlate's
+    // wraparound correction bounds |dx|,|dy| <= w/2, h/2 — see its doc comment), so N frames
+    // can never *legitimately* need a canvas larger than roughly N times the source frame size.
+    // No bound existed here before — a single anomalous-but-passing-quality pair (plausible on
+    // flat-color/repetitive anime backgrounds, where FFT phase correlation can lock onto a
+    // spurious-but-strong peak) had nothing stopping its offset from compounding into a canvas
+    // demanding tens of GB, with zero log output before the OS OOM-killed the process.
+    let max_dim = fw.max(fh).max(1) as u64;
+    let cap = (frames.len() as u64 + 1) * max_dim * 2;
+    if cw as u64 > cap || ch as u64 > cap {
+        anyhow::bail!(
+            "stitch_anime: computed canvas {cw}x{ch} exceeds sanity cap {cap}px \
+             (likely a spurious phase-correlation offset) — aborting instead of allocating"
+        );
+    }
 
     let mut canvas = image::RgbImage::new(cw, ch);
 

@@ -4,6 +4,10 @@ shell commands, and other important information, read the current plan
 at specs/012-ort-gpu-model-ui/plan.md
 <!-- SPECKIT END -->
 
+## 沟通语言（必须遵守）
+
+**与用户的所有交流（回复、分析报告、commit message 摘要说明等）必须使用中文。** 代码、命令、文件路径、标识符等技术内容保持原样（英文/代码本身不翻译）。
+
 ## 部署工作流程（必须遵守）
 
 **先测试，再部署，部署前必须征得用户同意。**

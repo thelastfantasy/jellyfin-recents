@@ -80,8 +80,9 @@ packages/JellyfinSuite.Plugin/poster-gen-win-x64.exe
 # seek-preview 编译产物
 packages/JellyfinSuite.Plugin/seek-preview-linux-x64
 
-# frame-forge 编译产物
+# frame-forge 编译产物（含精简版 OpenCV .so 依赖闭包，见 scripts/build-frame-forge-linux.sh）
 packages/JellyfinSuite.Plugin/frame-forge-linux-x64
+packages/JellyfinSuite.Plugin/native-linux/
 
 # Vite 构建缓存
 apps/frontend/.vite/
@@ -100,6 +101,9 @@ apps/frontend/.vite/
 # 拼接测试
 stitch-source/
 
+# jellyfin-dev 测试媒体库（从局域网传输的真实媒体文件，体积大且可能有版权，不入库）
+/demo/
+
 # stitch-eval：下载的第三方素材（可能有版权）和生成产物，不入库
 tests/stitch-eval/downloads/
 tests/stitch-eval/seagull-src/
@@ -107,6 +111,9 @@ tests/stitch-eval/demo-output/
 tests/stitch-eval/demo-output-py/
 tests/stitch-eval/demo-output-legacy/
 tests/stitch-eval/demo-output-loftr/
+tests/stitch-eval/demo-output-gpu/
+# GPU 验证 pass 缓存的 ORT cuda13 build（~190MB，运行时下载，不入库）
+.cache/ort-gpu-cuda13/
 tests/stitch-eval/__pycache__/
 tests/stitch-eval/report.html
 

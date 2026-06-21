@@ -6,9 +6,15 @@
  */
 
 export interface PrefetchRangeStreamRequest {
-  currentTimeMs: number;
-  beforeSeconds: number;
-  afterSeconds: number;
+  /** @nullable */
+  currentTimeMs?: number | null;
+  /** @nullable */
+  currentFrameIndex?: number | null;
+  /** @nullable */
+  beforeSeconds?: number | null;
+  /** @nullable */
+  afterSeconds?: number | null;
   includeCurrentFrame: boolean;
   width: number;
+  prefetchSessionId: string;
 }
