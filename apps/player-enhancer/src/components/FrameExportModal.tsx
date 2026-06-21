@@ -16,6 +16,7 @@ import {
   _maxPosMs,
   _minPosMs,
   _savedState,
+  cropOpenAtom,
   framesAtom,
   lightboxIdxAtom,
   modalMinimizedAtom,
@@ -48,6 +49,7 @@ import {
   sSettings,
 } from "../core/state";
 import { setGesturesSuspended } from "../hooks/useGestures";
+import { useSwipeToClose } from "../hooks/useSwipeToClose";
 import { bench } from "../lib/bench";
 import { t } from "../lib/i18n";
 import { CropPopover } from "./CropPopover";
@@ -590,6 +592,13 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     closeModal(null);
   }, [closeModal]);
 
+  // Disabled while the crop popover or the full-frame lightbox is open — both already have
+  // their own drag/swipe gestures (resize handles, prev/next), so a competing whole-modal
+  // dismiss gesture there would either misfire mid-drag or fight the more specific one.
+  const cropOpen = useAtomValue(cropOpenAtom);
+  const lightboxIdx = useAtomValue(lightboxIdxAtom);
+  const swipeToCloseHandlers = useSwipeToClose(handleClose, !cropOpen && lightboxIdx === null);
+
   const handleMinimize = useCallback(() => {
     setGesturesSuspended(false);
     setBodyModalOpen(false);
@@ -625,6 +634,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
           tabIndex={-1}
           onKeyDown={onKeyDown}
           onWheel={e => e.stopPropagation()}
+          {...swipeToCloseHandlers}
           style={{
             position: "fixed",
             bottom: 12,

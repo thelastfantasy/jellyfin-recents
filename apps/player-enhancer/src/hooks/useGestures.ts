@@ -79,6 +79,7 @@ export function useGestures(videoEl: HTMLVideoElement | null, getItemId: () => s
     // ── Double-tap seek ───────────────────────────────────────────────────────
     document.body.addEventListener('touchend', (e: TouchEvent) => {
       if (!videoEl.isConnected) return
+      if (_suspended) return
       if (isOsdControl(e.target)) return
       const touch = e.changedTouches[0]
       if (!touch) return
