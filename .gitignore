@@ -45,6 +45,7 @@ Thumbs.db
 
 # IDE
 .idea/
+.vscode/
 *.swp
 apps/frontend/node_modules/
 apps/frontend/dist/
@@ -123,4 +124,11 @@ __pycache__/
 
 # ONNX 模型文件（运行时下载，二进制大文件，不入库）
 models/
+
+# podman/docker context 元数据，曾被某次 CLI 调用误写到仓库根目录（应在 ~/.config/containers 下）
+/contexts/
+
+# 手动调试编译产物（非 Makefile 标准产物，临时 cargo build 输出）
+forge-test-noopt
+forge-dbg
 
