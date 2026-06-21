@@ -64,7 +64,7 @@ public sealed class ModelCatalogService : BackgroundService
     {
         _appPaths = appPaths;
         _logger = logger;
-        _pluginDir = Path.Combine(appPaths.PluginsPath, "JellyfinSuite");
+        _pluginDir = Path.GetDirectoryName(typeof(ModelCatalogService).Assembly.Location)!;
         _modelsDir = Path.Combine(_pluginDir, "models");
         _metaPath = Path.Combine(_modelsDir, "metadata.json");
         _catalogPath = Path.Combine(_pluginDir, "model-catalog.json");

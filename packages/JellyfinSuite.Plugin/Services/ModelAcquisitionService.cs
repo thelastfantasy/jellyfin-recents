@@ -13,9 +13,13 @@ namespace Jellyfin.Plugin.JellyfinSuite.Services;
 /// remote file has changed.  If the network is unreachable the cached model
 /// continues to be used.
 ///
-/// Cache directory: /config/plugins/JellyfinSuite/models/
-/// This is the third path searched by frame-forge's find_model(), so the Rust
-/// binary picks it up automatically without any extra configuration.
+/// Cache directory: {plugin install dir}/models/ — the actual on-disk plugin directory,
+/// resolved via this assembly's own Assembly.Location rather than a hardcoded name (Jellyfin's
+/// plugin loader names the install dir after meta.json's "name" + version, e.g.
+/// "Jellyfin Suite_2.0.0.0", not a fixed "JellyfinSuite"). This is the second path searched by
+/// frame-forge's find_model() (`<binary_dir>/models/<name>`, since frame-forge's own binary lives
+/// in this same install dir), so the Rust binary picks it up automatically without any extra
+/// configuration.
 ///
 /// Model selection (FRAME_FORGE_MATCHER env var in frame-forge):
 ///   "lightglue"       → superpoint_lightglue.onnx  (SuperPoint + LightGlue fused)
@@ -70,7 +74,8 @@ public class ModelAcquisitionService : IHostedService
 
     private async Task AcquireModelsAsync(CancellationToken ct)
     {
-        var modelsDir = Path.Combine(_appPaths.PluginsPath, "JellyfinSuite", "models");
+        var dir = Path.GetDirectoryName(typeof(ModelAcquisitionService).Assembly.Location)!;
+        var modelsDir = Path.Combine(dir, "models");
         Directory.CreateDirectory(modelsDir);
 
         // Download both models in parallel — they are independent.
