@@ -464,6 +464,9 @@ public class FrameExportController : ControllerBase
             Error     = t.Error,
             CreatedAt = new DateTimeOffset(t.CreatedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
             Upscaled  = t.Upscaled,
+            UpscaledResultUrl = t.UpscaledResultUrl,
+            UpscaledFileSize  = t.UpscaledFileSize,
+            UpscaledMimeType  = t.UpscaledMimeType,
         });
         return Ok(tasks);
     }

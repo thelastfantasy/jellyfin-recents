@@ -24,6 +24,9 @@ export interface FrameExportTaskDto {
   error: string | null
   createdAt: number
   upscaled: boolean
+  upscaledResultUrl: string | null
+  upscaledFileSize: number | null
+  upscaledMimeType: string | null
 }
 
 export async function listTasks(): Promise<FrameExportTaskDto[]> {
@@ -42,6 +45,9 @@ export async function listTasks(): Promise<FrameExportTaskDto[]> {
       error:     d.error     ?? null,
       createdAt: d.createdAt ?? 0,
       upscaled:  d.upscaled  ?? false,
+      upscaledResultUrl: d.upscaledResultUrl ?? null,
+      upscaledFileSize:  d.upscaledFileSize  ?? null,
+      upscaledMimeType:  d.upscaledMimeType  ?? null,
     }))
   } catch {
     return []

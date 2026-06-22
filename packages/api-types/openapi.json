@@ -2108,6 +2108,25 @@
           },
           "upscaled": {
             "type": "boolean"
+          },
+          "upscaledResultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upscaledFileSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "upscaledMimeType": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

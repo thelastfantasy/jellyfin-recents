@@ -21,6 +21,18 @@ function extFromUrl(url: string): string {
   return seg.toUpperCase()
 }
 
+const MIME_EXT: Record<string, string> = {
+  'image/gif': 'gif', 'image/webp': 'webp', 'image/png': 'png', 'video/mp4': 'mp4',
+}
+
+// The upscaled route (`/Stitch/Upscale/{jobId}/Result`) carries no file extension of its own —
+// unlike the original FrameExport route, whose path segment is at least real (just not used by
+// the server, see safeFileName below) — so derive both the displayed format badge and the
+// video/image branch from the server-reported MIME type instead.
+function extFromMime(mime: string): string {
+  return (MIME_EXT[mime] ?? 'bin').toUpperCase()
+}
+
 // task.resultUrl's path segment is always the literal placeholder "output.{ext}" (the server
 // route doesn't read it — the real filename comes back via the Content-Disposition header on
 // the actual download), so build a per-item name from the title instead of trusting the URL.
@@ -75,6 +87,49 @@ function QueueVideoThumb({ url }: { url: string }) {
   )
 }
 
+// Renders one downloadable preview (original or upscaled) — extracted so a completed+upscaled
+// task can show both side by side instead of the upscaled copy silently replacing the original.
+function ResultVariant({ label, downloadLabel, url, itemTitle, fileSize, mimeType, onImageClick }: {
+  label?: string
+  downloadLabel: string
+  url: string
+  itemTitle: string
+  fileSize?: number | null
+  mimeType?: string | null
+  onImageClick: (url: string) => void
+}) {
+  const authedUrl = withAuth(url)
+  const ext = mimeType ? extFromMime(mimeType) : extFromUrl(url)
+  const isVideo = mimeType ? mimeType.startsWith('video/') : url.endsWith('.mp4')
+  const filename = safeFileName(itemTitle, ext)
+  return (
+    <div className="jfs-queue-popover__variant">
+      {label && (
+        <div className="jfs-queue-popover__variant-label">
+          {label}
+          <span className="jfs-export-type-badge jfs-export-type-badge--fmt">{ext}</span>
+          {fileSize != null && (
+            <span className="jfs-export-type-badge jfs-export-type-badge--size">{formatSize(fileSize)}</span>
+          )}
+        </div>
+      )}
+      {isVideo ? (
+        <QueueVideoThumb url={authedUrl} />
+      ) : (
+        <img
+          src={authedUrl}
+          alt={itemTitle}
+          className="jfs-queue-popover__thumb"
+          onClick={() => onImageClick(authedUrl)}
+        />
+      )}
+      <button className="jfs-export-download-btn" onClick={() => { downloadBlob(authedUrl, filename).catch(() => {}) }}>
+        {downloadLabel}
+      </button>
+    </div>
+  )
+}
+
 export function FrameExportQueueWidget() {
   const { t } = useLocale()
   const [tasks, setTasks] = useState<ExportTaskEntry[]>(getTasks)
@@ -82,12 +137,18 @@ export function FrameExportQueueWidget() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [lightboxTaskId, setLightboxTaskId] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Picks up tasks the server knows about but this page hasn't seen yet, and — for tasks already
+  // complete — refreshes server-only fields (upscaled/upscaledResultUrl) that never arrive via the
+  // local SSE progress stream. Deliberately leaves percent/status alone for already-known
+  // running tasks so it doesn't fight with FrameExportJobRunner's live SSE updates.
+  function syncFromServer() {
     listTasks().then(serverTasks => {
       const localIds = new Set(getTasks().map(e => e.taskId))
       for (const st of serverTasks) {
-        if (localIds.has(st.taskId)) continue
-        addTask(st.taskId, st.itemId, st.itemTitle, st.type, st.createdAt || undefined)
+        const isNew = !localIds.has(st.taskId)
+        if (isNew) addTask(st.taskId, st.itemId, st.itemTitle, st.type, st.createdAt || undefined)
+        if (!isNew && st.status !== 'complete') continue
+
         updateTask(st.taskId, {
           status: (st.status === 'pending' || st.status === 'running') ? 'running'
             : st.status as ExportTaskEntry['status'],
@@ -96,10 +157,20 @@ export function FrameExportQueueWidget() {
           fileSize:  st.fileSize  ?? undefined,
           error:     st.error     ?? undefined,
           upscaled:  st.upscaled,
+          upscaledResultUrl: st.upscaledResultUrl ?? undefined,
+          upscaledFileSize:  st.upscaledFileSize  ?? undefined,
+          upscaledMimeType:  st.upscaledMimeType  ?? undefined,
         })
       }
     })
-  }, [])
+  }
+
+  useEffect(syncFromServer, [])
+
+  // The upscale flow runs in a separate app/bundle (player-enhancer) with no shared JS state, so
+  // there's no local event to react to when it finishes — re-pull from the server every time the
+  // popover is opened instead, which is the only way this page learns about it at all.
+  useEffect(() => { if (open) syncFromServer() }, [open])
 
   useEffect(() => {
     function handler() { setTasks(getTasks()) }
@@ -159,7 +230,9 @@ export function FrameExportQueueWidget() {
                 </div>
                 <div className="jfs-queue-popover__badges">
                   <span className="jfs-export-type-badge">{task.type.toUpperCase()}</span>
-                  {task.resultUrl && (
+                  {/* Once there's an upscaled version too, each ResultVariant below carries its
+                      own fmt/size label — showing them here as well would just duplicate it. */}
+                  {task.resultUrl && !task.upscaledResultUrl && (
                     <>
                       <span className="jfs-export-type-badge jfs-export-type-badge--fmt">
                         {extFromUrl(task.resultUrl)}
@@ -197,26 +270,31 @@ export function FrameExportQueueWidget() {
                 )}
 
                 {task.status === 'complete' && task.resultUrl && (() => {
-                  const url = withAuth(task.resultUrl)
-                  const ext = extFromUrl(task.resultUrl)
-                  const filename = safeFileName(task.itemTitle, ext)
-                  const isVideo = task.resultUrl.endsWith('.mp4')
+                  const resultUrl = task.resultUrl
+                  const upscaledResultUrl = task.upscaledResultUrl
+                  const onImageClick = (u: string) => { setLightboxSrc(u); setLightboxTaskId(task.taskId) }
                   return (
-                    <>
-                      {isVideo ? (
-                        <QueueVideoThumb url={url} />
-                      ) : (
-                        <img
-                          src={url}
-                          alt={task.itemTitle}
-                          className="jfs-queue-popover__thumb"
-                          onClick={() => { setLightboxSrc(url); setLightboxTaskId(task.taskId) }}
+                    <div className={upscaledResultUrl ? 'jfs-queue-popover__variants' : undefined}>
+                      <ResultVariant
+                        label={upscaledResultUrl ? t.exportQueueOriginal : undefined}
+                        downloadLabel={t.exportQueueDownload}
+                        url={resultUrl}
+                        itemTitle={task.itemTitle}
+                        fileSize={task.fileSize}
+                        onImageClick={onImageClick}
+                      />
+                      {upscaledResultUrl && (
+                        <ResultVariant
+                          label={t.exportQueueUpscaledLabel}
+                          downloadLabel={t.exportQueueDownload}
+                          url={upscaledResultUrl}
+                          itemTitle={task.itemTitle}
+                          fileSize={task.upscaledFileSize}
+                          mimeType={task.upscaledMimeType}
+                          onImageClick={onImageClick}
                         />
                       )}
-                      <button className="jfs-export-download-btn" onClick={() => { downloadBlob(url, filename).catch(() => {}) }}>
-                        {t.exportQueueDownload}
-                      </button>
-                    </>
+                    </div>
                   )
                 })()}
               </div>

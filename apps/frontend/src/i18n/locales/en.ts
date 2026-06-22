@@ -143,6 +143,8 @@ export const en: Translations = {
   exportQueueRemove: 'Remove',
   exportQueueDownload: 'Download',
   exportQueueUpscaled: 'Upscaled',
+  exportQueueOriginal: 'Original',
+  exportQueueUpscaledLabel: 'Upscaled',
   clipWorkshopQueue: 'Clip Workshop Queue',
   exportFormat: 'Format',
   exportSize: 'Size',

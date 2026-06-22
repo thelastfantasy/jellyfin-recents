@@ -29,7 +29,10 @@ internal sealed class UpscaleJobState
     public string TempDir { get; init; } = "";
     public string OutputExt { get; init; } = ".png";
     public CancellationTokenSource Cts { get; } = new();
-    public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+    // Mutable (not init-only) — reset to the completion time on success so a slow multi-frame
+    // upscale doesn't inherit a TTL window that's already half (or fully) elapsed since the job
+    // started; see the reset in RunJobAsync.
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int Scale { get; init; }
     public int ModelScale { get; init; }
     public string ModelStyle { get; init; } = "";
@@ -224,7 +227,16 @@ public sealed class UpscaleService : IDisposable
             job.FaceRestoreSkippedNoFace = result.Log?.FaceRestoreSkippedNoFace ?? false;
             job.Percent = 100;
             job.Status = UpscaleJobStatus.Succeeded;
-            _taskManager.MarkUpscaled(job.SourceTaskId);
+            // Restart this job's own 5-minute cleanup window from completion rather than from
+            // when it started — a full animation upscale has taken ~17 minutes in testing, which
+            // would otherwise already be most/all the way through the window by the time there's
+            // anything to download.
+            job.CreatedAt = DateTime.UtcNow;
+            _taskManager.MarkUpscaled(
+                job.SourceTaskId,
+                $"/JellyfinSuite/Stitch/Upscale/{job.JobId}/Result",
+                job.ResultSizeBytes ?? 0,
+                MimeTypeFor(job.OutputExt));
 
             // Model identity is known up-front here (unlike stitch's auto-detected model), so
             // record LRU usage directly instead of round-tripping it through the daemon's log.

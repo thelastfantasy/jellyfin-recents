@@ -10,6 +10,9 @@ export interface ExportTaskEntry {
   error?: string
   addedAt: number
   upscaled?: boolean
+  upscaledResultUrl?: string
+  upscaledFileSize?: number
+  upscaledMimeType?: string
 }
 
 const _tasks = new Map<string, ExportTaskEntry>()

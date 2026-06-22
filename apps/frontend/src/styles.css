@@ -2041,6 +2041,24 @@ a.jfs-card__series-name:hover {
   display: block;
   cursor: zoom-in;
 }
+.jfs-queue-popover__variants {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.jfs-queue-popover__variant {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.jfs-queue-popover__variant-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
+}
 
 /* ── Frame Export Queue Widget ───────────────────────────────────────────── */
 

@@ -833,6 +833,10 @@ export interface components {
             /** Format: int64 */
             createdAt: number;
             upscaled: boolean;
+            upscaledResultUrl?: string | null;
+            /** Format: int64 */
+            upscaledFileSize?: number | null;
+            upscaledMimeType?: string | null;
         };
         FrameInfoDto: {
             /** Format: int64 */

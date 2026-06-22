@@ -14,4 +14,7 @@ public class FrameExportTaskListItemDto
     [JsonPropertyName("error")]     public string? Error     { get; set; }
     [JsonPropertyName("createdAt")] public long    CreatedAt { get; set; }
     [JsonPropertyName("upscaled")]  public bool    Upscaled  { get; set; }
+    [JsonPropertyName("upscaledResultUrl")]  public string? UpscaledResultUrl  { get; set; }
+    [JsonPropertyName("upscaledFileSize")]   public long?   UpscaledFileSize   { get; set; }
+    [JsonPropertyName("upscaledMimeType")]   public string? UpscaledMimeType   { get; set; }
 }
