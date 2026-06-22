@@ -1,5 +1,5 @@
 import { Lightbox } from '@jfs/common-ui'
-import { useCallback,useEffect, useState } from 'react'
+import { useCallback,useEffect, useRef, useState } from 'react'
 import { MdGif } from 'react-icons/md'
 
 import { deleteTask, listTasks, withAuth } from '../api/frameExportQueueApi'
@@ -29,9 +29,51 @@ function safeFileName(title: string, ext: string): string {
   return `${clean || 'export'}.${ext.toLowerCase()}`
 }
 
-// Hover-to-preview only makes sense where "hover" exists; touch devices get autoplay+loop
-// instead since there's no hover state to trigger off of.
+// Hover-to-preview only makes sense where "hover" exists; touch devices play instead based on
+// viewport visibility (see QueueVideoThumb) since there's no hover state to trigger off of.
 const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
+
+// PC: hover plays, leaving resets to frame 0 so the resting "cover" is always the first frame
+// rather than whatever frame playback happened to stop on. Touch: no hover concept, so instead
+// play only while the thumb is fully (100%) scrolled into view, pause otherwise — avoids every
+// queued clip in a long list auto-playing/decoding at once off-screen.
+function QueueVideoThumb({ url }: { url: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (!isTouchDevice) return
+    const video = videoRef.current
+    if (!video) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.intersectionRatio >= 0.999) video.play().catch(() => {})
+        else video.pause()
+      },
+      { threshold: 1.0 },
+    )
+    observer.observe(video)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <video
+      ref={videoRef}
+      src={url}
+      className="jfs-queue-popover__thumb"
+      muted
+      playsInline
+      loop
+      preload="metadata"
+      onMouseEnter={e => { if (!isTouchDevice) e.currentTarget.play().catch(() => {}) }}
+      onMouseLeave={e => {
+        if (isTouchDevice) return
+        const v = e.currentTarget
+        v.pause()
+        v.currentTime = 0
+      }}
+    />
+  )
+}
 
 export function FrameExportQueueWidget() {
   const { t } = useLocale()
@@ -162,16 +204,7 @@ export function FrameExportQueueWidget() {
                   return (
                     <>
                       {isVideo ? (
-                        <video
-                          src={url}
-                          className="jfs-queue-popover__thumb"
-                          muted
-                          playsInline
-                          loop
-                          autoPlay={isTouchDevice}
-                          onMouseEnter={e => { if (!isTouchDevice) e.currentTarget.play() }}
-                          onMouseLeave={e => { if (!isTouchDevice) e.currentTarget.pause() }}
-                        />
+                        <QueueVideoThumb url={url} />
                       ) : (
                         <img
                           src={url}
