@@ -159,10 +159,39 @@ impl FrameIndexManager {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+/// Default of 4 balances real wall-clock speedup against CPU oversubscription — each permit can
+/// cover one `decode_and_encode`/`decode_range` call, and each of those gives ffmpeg up to 2
+/// threads (see jfs_common::decoder), so 4 permits tops out around 8 decode threads.
+fn frame_decode_concurrency() -> usize {
+    std::env::var("FRAME_FORGE_DECODE_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &usize| n > 0)
+        .unwrap_or(4)
+}
+
 pub struct State {
     pub ram: Mutex<LruCache<RamKey, Vec<u8>>>,
     pub disk: Arc<DiskCache>,
+    /// Gates `handle_prefetch_range_stream` sessions to exactly one at a time — held for the
+    /// *whole* function, not just the decode step, because `cancel_flag`/`current_session_id`
+    /// below are single process-wide fields that assume only one such session can be mutating
+    /// them at once (a new session sets `cancel_flag` to interrupt whichever session currently
+    /// holds this permit, then waits for it to free up). Raising this past 1 would let multiple
+    /// sessions race on those shared fields — see `frame_decode_sem` below for the throttle that
+    /// actually governs how many frames decode in parallel.
     decode_sem: Arc<Semaphore>,
+    /// Bounds how many actual frame decodes run concurrently across the whole daemon — shared by
+    /// `handle_single_frame`, `handle_prefetch_stream`, and the per-chunk workers spawned inside
+    /// a single `handle_prefetch_range_stream` session's Pass 2 (decode_range's own internal walk
+    /// is single-threaded by design — see its doc comment — so splitting one session's misses
+    /// into `frame_decode_concurrency` independent decode_range chunks, each pulling a permit
+    /// here, is what actually makes one bulk "+5s" prefetch render multiple frames at once
+    /// instead of crawling out one at a time; 2026-06-23 production report). Deliberately a
+    /// separate semaphore from `decode_sem` above: this one is a pure CPU throttle with no
+    /// correctness coupling, safe to raise independently.
+    frame_decode_sem: Arc<Semaphore>,
+    frame_decode_concurrency: usize,
     cancel_flag: Arc<AtomicBool>,
     current_session_id: std::sync::Mutex<Option<String>>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
@@ -180,10 +209,13 @@ impl State {
     pub fn new() -> Arc<Self> {
         let disk = DiskCache::new("jellyfin-suite-frame-forge");
         let (tx, rx) = mpsc::channel(PREFETCH_QUEUE_CAP);
+        let frame_decode_concurrency = frame_decode_concurrency();
         let state = Arc::new(Self {
             ram: Mutex::new(LruCache::new(NonZeroUsize::new(RAM_CACHE_CAP).unwrap())),
             disk,
             decode_sem: Arc::new(Semaphore::new(1)),
+            frame_decode_sem: Arc::new(Semaphore::new(frame_decode_concurrency)),
+            frame_decode_concurrency,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             current_session_id: std::sync::Mutex::new(None),
             prefetch_tx: tx,
@@ -423,7 +455,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
     let state_clone = state.clone();
     let ck = ram_key.clone();
 
-    let _permit = state.decode_sem.clone().acquire_owned().await?;
+    let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
     let result = tokio::task::spawn_blocking(move || {
         jfs_common::decode_and_encode(&path, pos_ms, width)
     })
@@ -1886,7 +1918,7 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
         let item_id_c = item_id.clone();
         let ram_state = state.clone();
 
-        let _permit = state.decode_sem.clone().acquire_owned().await?;
+        let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
         let result = tokio::task::spawn_blocking(move || {
             jfs_common::decode_and_encode(&path_c, pos_ms, width)
         }).await;
@@ -2130,28 +2162,51 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
     }
 
-    // Pass 2: sequential decode for remaining misses — one file open, progressive via channel.
+    // Pass 2: decode remaining misses. decode_range itself walks one file sequentially by design
+    // (one seek, decode forward — see its doc comment), so a single call here would always
+    // deliver frameReady events strictly in order no matter how many sockets/connections sit in
+    // front of it — confirmed against a real EventStream capture showing exactly that pattern
+    // for a single "+5s" expand (2026-06-23). Splitting `misses` into up to
+    // `frame_decode_concurrency` contiguous chunks and decoding each in its own decode_range call
+    // (own ffmpeg session, own seek) lets several chunks progress in parallel, so frameReady
+    // events for one bulk prefetch genuinely interleave instead of crawling out one at a time —
+    // at the cost of `chunk_count` seeks instead of one. Each chunk still pulls a permit from
+    // `frame_decode_sem` so total concurrent decode work stays bounded daemon-wide.
     // T012: channel carries write-success bool so receiver can accurately count failed frames.
     if !misses.is_empty() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
-        let path_c    = path.clone();
-        let item_id_c = item_id.clone();
-        let disk_c    = state.disk.clone();
-        let cancel_c  = Arc::clone(&state.cancel_flag);
 
-        tokio::task::spawn_blocking(move || {
-            let result = jfs_common::decode_range(&path_c, &misses, width, cancel_c, |fi_idx, pos_ms, webp_thumb, webp_orig| {
-                if !webp_orig.is_empty() {
-                    disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0, &webp_orig);
+        let chunk_count = state.frame_decode_concurrency.min(misses.len()).max(1);
+        let chunk_size = misses.len().div_ceil(chunk_count);
+        for chunk in misses.chunks(chunk_size).map(|c| c.to_vec()) {
+            let path_c    = path.clone();
+            let item_id_c = item_id.clone();
+            let disk_c    = state.disk.clone();
+            let cancel_c  = Arc::clone(&state.cancel_flag);
+            let sem_c     = Arc::clone(&state.frame_decode_sem);
+            let tx_c      = tx.clone();
+
+            tokio::spawn(async move {
+                let _permit = match sem_c.acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => return,
+                };
+                let result = tokio::task::spawn_blocking(move || {
+                    jfs_common::decode_range(&path_c, &chunk, width, cancel_c, |fi_idx, pos_ms, webp_thumb, webp_orig| {
+                        if !webp_orig.is_empty() {
+                            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0, &webp_orig);
+                        }
+                        let wrote_thumb = disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
+                        tx_c.blocking_send((wrote_thumb, fi_idx, pos_ms, webp_thumb, webp_orig))
+                            .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
+                    })
+                }).await;
+                if let Ok(Err(e)) = result {
+                    log::warn!("[jellyfin-suite-frame-forge] chunked prefetch error: {e}");
                 }
-                let wrote_thumb = disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
-                tx.blocking_send((wrote_thumb, fi_idx, pos_ms, webp_thumb, webp_orig))
-                    .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
             });
-            if let Err(e) = result {
-                log::warn!("[jellyfin-suite-frame-forge] sequential prefetch error: {e}");
-            }
-        });
+        }
+        drop(tx); // each chunk task owns a clone; rx closes once every chunk has finished
 
         while let Some((wrote, fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
             if wrote {
