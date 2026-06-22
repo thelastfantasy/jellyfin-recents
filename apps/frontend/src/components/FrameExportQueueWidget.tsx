@@ -87,10 +87,9 @@ function QueueVideoThumb({ url }: { url: string }) {
   )
 }
 
-// Renders one downloadable preview (original or upscaled) — extracted so a completed+upscaled
-// task can show both side by side instead of the upscaled copy silently replacing the original.
-function ResultVariant({ label, downloadLabel, url, itemTitle, fileSize, mimeType, onImageClick }: {
-  label?: string
+// Renders one downloadable preview (original or upscaled, whichever the toggle above it has
+// selected) — extracted so switching between the two doesn't need two near-duplicate JSX blocks.
+function ResultVariant({ downloadLabel, url, itemTitle, fileSize, mimeType, onImageClick }: {
   downloadLabel: string
   url: string
   itemTitle: string
@@ -104,15 +103,12 @@ function ResultVariant({ label, downloadLabel, url, itemTitle, fileSize, mimeTyp
   const filename = safeFileName(itemTitle, ext)
   return (
     <div className="jfs-queue-popover__variant">
-      {label && (
-        <div className="jfs-queue-popover__variant-label">
-          {label}
-          <span className="jfs-export-type-badge jfs-export-type-badge--fmt">{ext}</span>
-          {fileSize != null && (
-            <span className="jfs-export-type-badge jfs-export-type-badge--size">{formatSize(fileSize)}</span>
-          )}
-        </div>
-      )}
+      <div className="jfs-queue-popover__variant-label">
+        <span className="jfs-export-type-badge jfs-export-type-badge--fmt">{ext}</span>
+        {fileSize != null && (
+          <span className="jfs-export-type-badge jfs-export-type-badge--size">{formatSize(fileSize)}</span>
+        )}
+      </div>
       {isVideo ? (
         <QueueVideoThumb url={authedUrl} />
       ) : (
@@ -136,6 +132,10 @@ export function FrameExportQueueWidget() {
   const [open, setOpen] = useState(false)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [lightboxTaskId, setLightboxTaskId] = useState<string | null>(null)
+  // Which version a given (upscaled) task is currently showing — defaults to the upscaled result
+  // since that's the one the user almost certainly came back to check on, with the toggle there
+  // to flip back to the original for comparison.
+  const [showOriginal, setShowOriginal] = useState<Record<string, boolean>>({})
 
   // Picks up tasks the server knows about but this page hasn't seen yet, and — for tasks already
   // complete — refreshes server-only fields (upscaled/upscaledResultUrl) that never arrive via the
@@ -273,28 +273,31 @@ export function FrameExportQueueWidget() {
                   const resultUrl = task.resultUrl
                   const upscaledResultUrl = task.upscaledResultUrl
                   const onImageClick = (u: string) => { setLightboxSrc(u); setLightboxTaskId(task.taskId) }
+                  const viewingOriginal = !upscaledResultUrl || (showOriginal[task.taskId] ?? false)
+                  const activeUrl = !viewingOriginal && upscaledResultUrl ? upscaledResultUrl : resultUrl
                   return (
-                    <div className={upscaledResultUrl ? 'jfs-queue-popover__variants' : undefined}>
+                    <>
+                      {upscaledResultUrl && (
+                        <div className="jfs-queue-popover__variant-toggle">
+                          <button
+                            className={`jfs-export-type-badge jfs-export-type-badge--toggle${viewingOriginal ? ' active' : ''}`}
+                            onClick={() => setShowOriginal(s => ({ ...s, [task.taskId]: true }))}
+                          >{t.exportQueueOriginal}</button>
+                          <button
+                            className={`jfs-export-type-badge jfs-export-type-badge--toggle${!viewingOriginal ? ' active' : ''}`}
+                            onClick={() => setShowOriginal(s => ({ ...s, [task.taskId]: false }))}
+                          >{t.exportQueueUpscaledLabel}</button>
+                        </div>
+                      )}
                       <ResultVariant
-                        label={upscaledResultUrl ? t.exportQueueOriginal : undefined}
-                        downloadLabel={t.exportQueueDownload}
-                        url={resultUrl}
+                        downloadLabel={`${t.exportQueueDownload} · ${viewingOriginal ? t.exportQueueOriginal : t.exportQueueUpscaledLabel}`}
+                        url={activeUrl}
                         itemTitle={task.itemTitle}
-                        fileSize={task.fileSize}
+                        fileSize={viewingOriginal ? task.fileSize : task.upscaledFileSize}
+                        mimeType={viewingOriginal ? undefined : task.upscaledMimeType}
                         onImageClick={onImageClick}
                       />
-                      {upscaledResultUrl && (
-                        <ResultVariant
-                          label={t.exportQueueUpscaledLabel}
-                          downloadLabel={t.exportQueueDownload}
-                          url={upscaledResultUrl}
-                          itemTitle={task.itemTitle}
-                          fileSize={task.upscaledFileSize}
-                          mimeType={task.upscaledMimeType}
-                          onImageClick={onImageClick}
-                        />
-                      )}
-                    </div>
+                    </>
                   )
                 })()}
               </div>

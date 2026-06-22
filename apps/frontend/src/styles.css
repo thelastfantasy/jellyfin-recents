@@ -2041,11 +2041,6 @@ a.jfs-card__series-name:hover {
   display: block;
   cursor: zoom-in;
 }
-.jfs-queue-popover__variants {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
 .jfs-queue-popover__variant {
   display: flex;
   flex-direction: column;
@@ -2058,6 +2053,20 @@ a.jfs-card__series-name:hover {
   font-size: 0.7rem;
   font-weight: 600;
   color: rgba(255,255,255,0.6);
+}
+.jfs-queue-popover__variant-toggle {
+  display: flex;
+  gap: 4px;
+}
+.jfs-export-type-badge--toggle {
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+}
+.jfs-export-type-badge--toggle.active {
+  opacity: 1;
+  background: rgba(139,92,246,0.4);
+  color: #fff;
 }
 
 /* ── Frame Export Queue Widget ───────────────────────────────────────────── */
