@@ -18,6 +18,10 @@ public class TaskState
     public string? OutputPath { get; set; }
     public long? OutputSize { get; set; }
     public string? Error { get; set; }
+    public bool Upscaled { get; set; }
+    public string? UpscaledResultUrl { get; set; }
+    public long? UpscaledFileSize { get; set; }
+    public string? UpscaledMimeType { get; set; }
     public string TempDir { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
@@ -151,7 +155,30 @@ public sealed class FrameExportTaskManager : IDisposable
 
     public IEnumerable<TaskState> GetAllTasks() => _tasks.Values;
 
-    private void CleanupExpired()
+    /// <summary>Records a task's upscale result (so the queue widget can offer both the original
+    /// and the upscaled version side by side) — called by <see cref="UpscaleService"/> once its
+    /// (otherwise fully separate) job dictionary reports success. Best-effort: silently no-ops
+    /// once the source task has already expired out of <see cref="_tasks"/> (5min TTL), since
+    /// there's nothing left to flag at that point.</summary>
+    public void MarkUpscaled(string taskId, string upscaledResultUrl, long upscaledFileSize, string upscaledMimeType)
+    {
+        if (!_tasks.TryGetValue(taskId, out var state)) return;
+        state.Upscaled = true;
+        state.UpscaledResultUrl = upscaledResultUrl;
+        state.UpscaledFileSize = upscaledFileSize;
+        state.UpscaledMimeType = upscaledMimeType;
+        // A multi-frame animation upscale can itself run well past the original 5-minute TTL
+        // window (observed up to ~17 minutes for a full mp4/webp animation) — refresh the clock
+        // from "just upscaled" rather than "originally created", or the result could be swept on
+        // the very next cleanup tick before the queue widget ever gets a chance to show it.
+        state.CreatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>Removes completed/errored/cancelled tasks older than 5 minutes, plus their temp
+    /// dirs. Runs on an internal 5-minute <see cref="Timer"/> as a self-healing fallback, and is
+    /// also exposed here so <see cref="Tasks.CleanFrameExportTempTask"/> can surface the same
+    /// logic as a visible, manually-triggerable Jellyfin scheduled task.</summary>
+    public void CleanupExpired()
     {
         var now = DateTime.UtcNow;
         var expired = new List<string>();

@@ -16,6 +16,7 @@ import {
   _maxPosMs,
   _minPosMs,
   _savedState,
+  cropOpenAtom,
   framesAtom,
   lightboxIdxAtom,
   modalMinimizedAtom,
@@ -48,6 +49,7 @@ import {
   sSettings,
 } from "../core/state";
 import { setGesturesSuspended } from "../hooks/useGestures";
+import { useSwipeToClose } from "../hooks/useSwipeToClose";
 import { bench } from "../lib/bench";
 import { t } from "../lib/i18n";
 import { CropPopover } from "./CropPopover";
@@ -451,18 +453,19 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
 
   // ── 7. Callbacks ────────────────────────────────────────────────────────────
 
-  const expandBack = useCallback(() => {
+  const expandBack = useCallback((seconds = 1) => {
     if (!_fi.index || _frames.length === 0) return;
     const firstFrame = _frames[0];
     const boundaryMs = firstFrame.posMs;
+    const windowMs = seconds * 1000;
     const sliceEnd = bsLast(_fi.index, boundaryMs - 1); // last frame with ms < boundaryMs
-    const start = bsFirst(_fi.index, boundaryMs - 1000);
+    const start = bsFirst(_fi.index, boundaryMs - windowMs);
     if (sliceEnd < 0 || start > sliceEnd) {
-      // No frame-index entry in the requested ~1s window (e.g. a stretch of source frames
+      // No frame-index entry in the requested window (e.g. a stretch of source frames
       // that failed to decode/index) — without this the button just looks unresponsive,
       // indistinguishable from a hang. bench.mark so it shows up in the same diagnostic
       // stream as expand_back itself.
-      bench.mark('expand_back_no_frames', { boundaryMs });
+      bench.mark('expand_back_no_frames', { boundaryMs, seconds });
       logIndexGap(_fi.index, sliceEnd, start, boundaryMs);
       showToast(t('frameExport.expandGap'));
       return;
@@ -471,6 +474,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
       addingFiIdxRange: [start, sliceEnd],
       anchorFiIdx: _fi.index[start].frameIndex,
       framesBefore: _frames.length,
+      seconds,
     });
     const addedFiIdxs = new Set(_fi.index.slice(start, sliceEnd + 1).map(e => e.frameIndex));
     setFrames([..._fi.index.slice(start, sliceEnd + 1).map(makeEntry), ..._frames]);
@@ -478,7 +482,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     setMinPosMs(_fi.index[start].ms);
     const controller = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
+      { currentFrameIndex: firstFrame.fiIdx, beforeSeconds: seconds, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_back', { fiIdx }); },
       () => { bench.mark('expand_back_prefetch_done'); expandAbortControllersRef.current.delete(controller); },
       () => { bench.mark('expand_back_prefetch_error'); expandAbortControllersRef.current.delete(controller); markFiIdxsError(addedFiIdxs); },
@@ -487,14 +491,15 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     expandAbortControllersRef.current.add(controller);
   }, [itemId, markFrameReady, markFrameError, markFiIdxsError]);
 
-  const expandForward = useCallback(() => {
+  const expandForward = useCallback((seconds = 1) => {
     if (!_fi.index || _frames.length === 0) return;
     const lastFrame = _frames[_frames.length - 1];
     const boundaryMs = lastFrame.posMs;
+    const windowMs = seconds * 1000;
     const sliceStart = bsFirst(_fi.index, boundaryMs + 1); // first frame with ms > boundaryMs
-    const end = bsLast(_fi.index, boundaryMs + 1000);
+    const end = bsLast(_fi.index, boundaryMs + windowMs);
     if (sliceStart >= _fi.index.length || end < sliceStart) {
-      bench.mark('expand_forward_no_frames', { boundaryMs });
+      bench.mark('expand_forward_no_frames', { boundaryMs, seconds });
       logIndexGap(_fi.index, end, sliceStart, boundaryMs);
       showToast(t('frameExport.expandGap'));
       return;
@@ -503,6 +508,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
       addingFiIdxRange: [sliceStart, end],
       anchorFiIdx: _fi.index[sliceStart].frameIndex,
       framesBefore: _frames.length,
+      seconds,
     });
     const addedFiIdxs = new Set(_fi.index.slice(sliceStart, end + 1).map(e => e.frameIndex));
     setFrames([..._frames, ..._fi.index.slice(sliceStart, end + 1).map(makeEntry)]);
@@ -510,7 +516,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     setMaxPosMs(_fi.index[end].ms);
     const controller = openPrefetchRangeStream(
       itemId,
-      { currentFrameIndex: lastFrame.fiIdx, afterSeconds: 1, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
+      { currentFrameIndex: lastFrame.fiIdx, afterSeconds: seconds, includeCurrentFrame: false, width: 320, prefetchSessionId: `${itemId}:${Math.round(posMsRef.current / 5000) * 5000}` },
       (fiIdx) => { const idx = _frames.findIndex(f => f.fiIdx === fiIdx); if (idx >= 0) markFrameReady(idx); else bench.mark('prefetch_no_match_fwd', { fiIdx }); },
       () => { bench.mark('expand_forward_prefetch_done'); expandAbortControllersRef.current.delete(controller); },
       () => { bench.mark('expand_forward_prefetch_error'); expandAbortControllersRef.current.delete(controller); markFiIdxsError(addedFiIdxs); },
@@ -524,6 +530,10 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     const settings = sSettings.value;
     const selected = _frames.filter((f) => f.selected && !f.removed);
     if (
+      // Stitch output size is bounded by the panorama's canvas extent, not frame count (and
+      // pHash-dedups near-duplicates anyway) — animate is the mode where every selected frame
+      // becomes one frame in the output, so file size actually scales with selection size.
+      exportType === 'animate' &&
       selected.length > 240 &&
       !confirm(t("export.largeWarning").replace("{n}", String(selected.length)))
     )
@@ -590,6 +600,13 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
     closeModal(null);
   }, [closeModal]);
 
+  // Disabled while the crop popover or the full-frame lightbox is open — both already have
+  // their own drag/swipe gestures (resize handles, prev/next), so a competing whole-modal
+  // dismiss gesture there would either misfire mid-drag or fight the more specific one.
+  const cropOpen = useAtomValue(cropOpenAtom);
+  const lightboxIdx = useAtomValue(lightboxIdxAtom);
+  const swipeToCloseHandlers = useSwipeToClose(handleClose, !cropOpen && lightboxIdx === null);
+
   const handleMinimize = useCallback(() => {
     setGesturesSuspended(false);
     setBodyModalOpen(false);
@@ -625,6 +642,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
           tabIndex={-1}
           onKeyDown={onKeyDown}
           onWheel={e => e.stopPropagation()}
+          {...swipeToCloseHandlers}
           style={{
             position: "fixed",
             bottom: 12,
@@ -653,6 +671,7 @@ const FrameExportModalInner = memo(function FrameExportModalInner({
               onClose={handleClose}
               onMinimize={handleMinimize}
               onResult={(url, size) => {
+                setActiveTaskId(sProgressTaskId.value);
                 sResultUrl.value = url;
                 sFileSize.value = size;
                 sPage.value = "result";

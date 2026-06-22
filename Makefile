@@ -217,6 +217,14 @@ test-frontend:
 	cd apps/frontend && bun test ../../tests/frontend/
 
 test-csharp:
+	# dotnet's CopyToOutputDirectory=PreserveNewest sometimes hardlinks rather than copies
+	# poster-gen-linux-x64/seek-preview-linux-x64/frame-forge-linux-x64 into the test project's
+	# bin dir; after a Rust rebuild replaces the source inode, the stale hardlinked copy is left
+	# behind read-only and `dotnet test` fails trying to overwrite it. Removing it first forces
+	# a fresh copy every run instead of relying on the (broken) up-to-date check.
+	rm -f tests/JellyfinSuite.Tests/bin/Debug/net9.0/poster-gen-linux-x64 \
+	      tests/JellyfinSuite.Tests/bin/Debug/net9.0/seek-preview-linux-x64 \
+	      tests/JellyfinSuite.Tests/bin/Debug/net9.0/frame-forge-linux-x64
 	dotnet test tests/JellyfinSuite.Tests
 
 # Run all test suites sequentially; fail fast on first error
@@ -255,6 +263,7 @@ build-poster-gen-linux:
 		cargo build -p poster-gen --release
 	cp target/release/poster-gen \
 		packages/JellyfinSuite.Plugin/poster-gen-linux-x64
+	chmod u+w packages/JellyfinSuite.Plugin/poster-gen-linux-x64
 
 build-seek-preview-linux:
 	$(_CRUN) volume create seek-cargo-home > /dev/null 2>&1 || true

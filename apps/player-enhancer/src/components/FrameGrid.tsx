@@ -20,6 +20,42 @@ function cardIdxAt(x: number, y: number): number {
   return (isNaN(index) || !_frames[index]) ? -1 : index
 }
 
+// Two distinct "loadError" causes need different retries:
+// - jpegUrl already set: a transient browser-side <img> load failure on an otherwise-good
+//   URL (e.g. a server restart broke the page's keep-alive sockets mid-session) — clearing
+//   loadError re-mounts the <img> against the same src, which is enough.
+// - jpegUrl still "": the backend itself never produced a thumbnail (decode failed server-side,
+//   see frameFailed SSE event) — there is no URL to retry, so re-issue a fresh single-frame
+//   prefetch and only clear loadError once the server actually confirms it's ready.
+function retryFrame(idx: number): void {
+  const f = _frames[idx]; if (!f) return
+  if (f.jpegUrl) { _frames[idx] = { ...f, loadError: false }; setFrames([..._frames]); return }
+  openPrefetchRangeStream(
+    _itemId,
+    { currentFrameIndex: f.fiIdx, beforeSeconds: 0, afterSeconds: 0, includeCurrentFrame: true, width: 320, prefetchSessionId: `${_itemId}:retry:${f.fiIdx}` },
+    (fiIdx) => {
+      const i = _frames.findIndex(fr => fr.fiIdx === fiIdx)
+      if (i < 0) return
+      _frames[i] = { ..._frames[i], jpegUrl: frameUrl(_itemId, _frames[i].fiIdx, _frames[i].posMs, 320), loadError: false }
+      setFrames([..._frames])
+    },
+    () => {},
+    () => {},
+    (fiIdx) => {
+      const i = _frames.findIndex(fr => fr.fiIdx === fiIdx)
+      if (i < 0) return
+      _frames[i] = { ..._frames[i], loadError: true }
+      setFrames([..._frames])
+    },
+  )
+}
+
+/** Bulk recovery for mass thumbnail failures (e.g. a server restart mid-session breaks every
+ * open <img> socket at once) — retrying hundreds of frames one card at a time isn't practical. */
+export function retryAllFailed(): void {
+  _frames.forEach((f, i) => { if (f.loadError) retryFrame(i) })
+}
+
 export function FrameGrid() {
   const frames  = useAtomValue(framesAtom)
   const phase   = useAtomValue(modalPhaseAtom)
@@ -169,34 +205,7 @@ export function FrameGrid() {
     triggerDownload(frameUrl(_itemId, f.fiIdx, f.posMs, 0), `jellyfin-frame-${title}-${stamp}.webp`)
   }, [])
   const handleRemove    = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], removed: true, selected: false }; setFrames([..._frames]) } }, [])
-  // Two distinct "loadError" causes need different retries:
-  // - jpegUrl already set: a transient browser-side <img> load failure on an otherwise-good
-  //   URL — clearing loadError re-mounts the <img> against the same src, which is enough.
-  // - jpegUrl still "": the backend itself never produced a thumbnail (decode failed server-side,
-  //   see frameFailed SSE event) — there is no URL to retry, so re-issue a fresh single-frame
-  //   prefetch and only clear loadError once the server actually confirms it's ready.
-  const handleRetry     = useCallback((idx: number) => {
-    const f = _frames[idx]; if (!f) return
-    if (f.jpegUrl) { _frames[idx] = { ...f, loadError: false }; setFrames([..._frames]); return }
-    openPrefetchRangeStream(
-      _itemId,
-      { currentFrameIndex: f.fiIdx, beforeSeconds: 0, afterSeconds: 0, includeCurrentFrame: true, width: 320, prefetchSessionId: `${_itemId}:retry:${f.fiIdx}` },
-      (fiIdx) => {
-        const i = _frames.findIndex(fr => fr.fiIdx === fiIdx)
-        if (i < 0) return
-        _frames[i] = { ..._frames[i], jpegUrl: frameUrl(_itemId, _frames[i].fiIdx, _frames[i].posMs, 320), loadError: false }
-        setFrames([..._frames])
-      },
-      () => {},
-      () => {},
-      (fiIdx) => {
-        const i = _frames.findIndex(fr => fr.fiIdx === fiIdx)
-        if (i < 0) return
-        _frames[i] = { ..._frames[i], loadError: true }
-        setFrames([..._frames])
-      },
-    )
-  }, [])
+  const handleRetry     = useCallback((idx: number) => retryFrame(idx), [])
   const handleToggle    = useCallback((idx: number, v: boolean) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], selected: v }; setFrames([..._frames]) } }, [])
   const handleLoadError = useCallback((idx: number) => { if (_frames[idx]) { _frames[idx] = { ..._frames[idx], loadError: true }; setFrames([..._frames]) } }, [])
 

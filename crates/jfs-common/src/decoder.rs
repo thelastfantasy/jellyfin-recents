@@ -304,6 +304,73 @@ pub struct DecodeResult {
     pub fps_den:   i64,
 }
 
+/// Decode every video frame in `path` sequentially as packed RGBA bytes at native
+/// resolution. Returns (frames as (rgba_bytes, width, height), fps).
+///
+/// Intended for short clips only (e.g. re-decoding an already-generated result file
+/// for upscaling) — loads every frame into memory at once, unlike `decode_range`'s
+/// callback-driven streaming.
+pub fn decode_all_frames_rgba(path: &Path) -> Result<(Vec<(Vec<u8>, u32, u32)>, f64)> {
+    use ffmpeg_next as ff;
+    use ffmpeg_next::threading;
+
+    let mut ictx = ff::format::input(path)
+        .with_context(|| format!("cannot open {:?}", path))?;
+
+    let stream_idx;
+    let fps: f64;
+    let codec_ctx;
+
+    {
+        let stream = ictx
+            .streams()
+            .best(ff::media::Type::Video)
+            .context("no video stream")?;
+        stream_idx = stream.index();
+        let rate = stream.avg_frame_rate();
+        fps = if rate.1 > 0 { rate.0 as f64 / rate.1 as f64 } else { 24.0 };
+        codec_ctx = ff::codec::context::Context::from_parameters(stream.parameters())?;
+    }
+
+    let thread_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2)
+        .min(4);
+
+    let mut decoder = {
+        let mut ctx = codec_ctx;
+        ctx.set_threading(threading::Config {
+            kind: threading::Type::Slice,
+            count: thread_count,
+        });
+        ctx.decoder().video()?
+    };
+
+    let mut frames = Vec::new();
+    for (s, pkt) in ictx.packets() {
+        if s.index() != stream_idx { continue; }
+        if decoder.send_packet(&pkt).is_err() { continue; }
+        loop {
+            let mut frame = ff::frame::Video::empty();
+            match decoder.receive_frame(&mut frame) {
+                Ok(_) => frames.push(frame_to_rgba(&frame, 0)?),
+                Err(_) => break,
+            }
+        }
+    }
+    let _ = decoder.send_eof();
+    loop {
+        let mut frame = ff::frame::Video::empty();
+        match decoder.receive_frame(&mut frame) {
+            Ok(_) => frames.push(frame_to_rgba(&frame, 0)?),
+            Err(_) => break,
+        }
+    }
+
+    anyhow::ensure!(!frames.is_empty(), "no video frames decoded from {:?}", path);
+    Ok((frames, fps))
+}
+
 /// Enumerate all video frame timestamps by demuxing (no decoding).
 /// Calls `on_frame(frame_index, pts_ms, is_keyframe)` for each frame as it is read.
 /// Returns (total_frame_count, fps_num, fps_den).

@@ -18,4 +18,11 @@ export interface FrameExportTaskListItemDto {
   /** @nullable */
   error?: string | null;
   createdAt: number;
+  upscaled: boolean;
+  /** @nullable */
+  upscaledResultUrl?: string | null;
+  /** @nullable */
+  upscaledFileSize?: number | null;
+  /** @nullable */
+  upscaledMimeType?: string | null;
 }

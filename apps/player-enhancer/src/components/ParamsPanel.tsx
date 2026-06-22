@@ -24,6 +24,7 @@ function computeAutoDim(video: HTMLVideoElement | null, crop: { w: number; h: nu
 export function ParamsPanel() {
   const st      = useAtomValue(settingsAtom)
   const isAnim  = useAtomValue(exportTypeAtom) === 'animate'
+  const isMp4   = isAnim && st.animateFormat === 'mp4'
   const curQuality  = isAnim ? st.animateQuality : st.stitchQuality
   const isLossless  = curQuality <= 0
   const presets     = ['original', '1080p', '720p', '480p', '360p']
@@ -116,11 +117,17 @@ export function ParamsPanel() {
     else        updateSettings({ stitchQuality:  v })
   }
 
-  const qualityOptions = [
-    { v: 0.85, label: t('params.quality85') },
-    { v: 0.75, label: t('params.quality75') },
-    { v: 0.60, label: t('params.quality60') },
-  ]
+  const qualityOptions = isMp4
+    ? [
+        { v: 0.85, label: t('params.quality85Mp4') },
+        { v: 0.75, label: t('params.quality75Mp4') },
+        { v: 0.60, label: t('params.quality60Mp4') },
+      ]
+    : [
+        { v: 0.85, label: t('params.quality85') },
+        { v: 0.75, label: t('params.quality75') },
+        { v: 0.60, label: t('params.quality60') },
+      ]
   const qualVal = isLossless ? 0.75 : curQuality
 
   return (
@@ -202,7 +209,7 @@ export function ParamsPanel() {
         <div className="jfs-fe-pgroup-body">
           <label className="jfs-fe-lbl">
             <input type="checkbox" checked={isLossless} onChange={handleLosslessChange} style={{ cursor: 'pointer' }} />
-            {t('params.lossless')}
+            {isMp4 ? t('params.losslessMp4') : t('params.lossless')}
           </label>
           <select className="jfs-fe-sel" disabled={isLossless} value={String(qualVal)} onChange={handleQualityChange}>
             {qualityOptions.map(o => <option key={o.v} value={String(o.v)}>{o.label}</option>)}

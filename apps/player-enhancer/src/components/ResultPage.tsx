@@ -19,6 +19,16 @@ export function ResultPage({ onBack, onClose, onUpscale }: {
   const fileSize  = useAtomValue(fileSizeAtom)
   const [rotation, setRotation] = useState(0)
   const [gpuFallback, setGpuFallback] = useState<string | null>(null)
+  // Read straight off the decoded media element instead of asking the backend — the browser
+  // already knows the true pixel dimensions for free once the preview loads.
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  // Reset dims when resultUrl changes without an extra effect-driven render — the "adjusting
+  // state when a prop changes" pattern (https://react.dev/learn/you-might-not-need-an-effect).
+  const [prevResultUrl, setPrevResultUrl] = useState(resultUrl)
+  if (resultUrl !== prevResultUrl) {
+    setPrevResultUrl(resultUrl)
+    setDims(null)
+  }
   const isAnimation = sExportType.value === 'animate'
   // 动图提升画质需要 NVIDIA GPU（见 UpscaleService.StartJob 同名校验）；没有的话直接不显示按钮，
   // 比点进去再被拒绝体验更好。设备查询失败时 fail-open，仍交给后端兜底拒绝。
@@ -34,9 +44,12 @@ export function ResultPage({ onBack, onClose, onUpscale }: {
   }, [isAnimation])
 
   const fullUrl = buildResultUrl('', resultUrl)
+  const isVideo = resultUrl.endsWith('.mp4')
   const sizeStr = fileSize > 1024 * 1024
     ? `${(fileSize / 1024 / 1024).toFixed(1)} MB`
     : `${(fileSize / 1024).toFixed(0)} KB`
+  const formatStr = (resultUrl.split('.').pop() ?? '').toUpperCase()
+  const titleStr = [formatStr, dims ? `${dims.w}×${dims.h}` : null, sizeStr].filter(Boolean).join(' · ')
   const deleteMut = useMutation(deleteResultMutation())
 
   function handleDelete() {
@@ -70,20 +83,34 @@ export function ResultPage({ onBack, onClose, onUpscale }: {
       <div className="jfs-fe-row sep-b">
         <button className="jfs-fe-btn g" style={{ flex: '0 0 auto' }} onClick={onBack}>{t('result.back')}</button>
         <div style={{ flex: '1' }} />
-        <span className="jfs-fe-title">{t('result.preview').replace('{size}', sizeStr)}</span>
+        <span className="jfs-fe-title">{t('result.preview').replace('{size}', titleStr)}</span>
         <div style={{ flex: '1' }} />
         <button className="jfs-fe-btn g" style={{ flex: '0 0 auto', padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>
       <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
-        <img
-          src={fullUrl}
-          style={{
-            maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
-            transform: `rotate(${rotation}deg)`,
-          }}
-          alt="result"
-        />
+        {isVideo ? (
+          <video
+            src={fullUrl}
+            autoPlay loop muted playsInline controls
+            onLoadedMetadata={e => setDims({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+            style={{
+              maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
+              transform: `rotate(${rotation}deg)`,
+            }}
+          />
+        ) : (
+          <img
+            src={fullUrl}
+            onLoad={e => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            style={{
+              maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
+              transform: `rotate(${rotation}deg)`,
+            }}
+            alt="result"
+          />
+        )}
       </div>
       <div className="jfs-fe-row sep-t" style={{ flexWrap: 'wrap', gap: '6px' }}>
         <button className="jfs-fe-btn g" onClick={() => setRotation(r => r - 5)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 5°' }} />

@@ -213,6 +213,7 @@ public sealed class UpscaleJobDto
     [JsonPropertyName("error")]                    public string? Error                    { get; set; }
     [JsonPropertyName("originalUrl")]               public string? OriginalUrl              { get; set; }
     [JsonPropertyName("resultUrl")]                 public string? ResultUrl                { get; set; }
+    [JsonPropertyName("resultMimeType")]             public string? ResultMimeType           { get; set; }
     [JsonPropertyName("originalWidth")]             public int?    OriginalWidth            { get; set; }
     [JsonPropertyName("originalHeight")]            public int?    OriginalHeight           { get; set; }
     [JsonPropertyName("resultWidth")]                public int?    ResultWidth              { get; set; }

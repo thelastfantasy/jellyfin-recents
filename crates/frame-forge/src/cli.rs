@@ -43,14 +43,14 @@ fn main() -> anyhow::Result<()> {
         Some("gpu-test") => cmd_gpu_test(&args[2..]),
         Some("upscale") => cmd_upscale(&args[2..]),
         _ => {
-            eprintln!("Usage:");
-            eprintln!("  forge stitch --input file1.png file2.png ... --output out.png [--model auto|lightglue|efficient-loftr|disabled] [--no-model] [--device cuda:0|directml:0|cpu:0] (opencv feature required for --device)");
-            eprintln!("  forge stitch-landscape --input a.png b.png --output out.png  (opencv feature required)");
-            eprintln!("  forge stitch-liveaction --input a.png b.png --output out.png (opencv feature required)");
-            eprintln!("  forge animate --json frames.json");
-            eprintln!("  forge animate --input f1.webp f2.webp ... --output out.gif --height 200 [--fps 5] [--timestamps ms1 ms2 ...]");
-            eprintln!("  forge gpu-test --device cuda:0|directml:0|cpu:0 --model models/<name>.onnx [--timeout-secs 60] (opencv feature required)");
-            eprintln!("  forge upscale --input in.png --output out.png --model models/<realesrgan>.onnx --device cuda:0|directml:0|cpu:0 [--face-restore-model models/<gfpgan>.onnx] (opencv feature required)");
+            log::info!("Usage:");
+            log::info!("  forge stitch --input file1.png file2.png ... --output out.png [--model auto|lightglue|efficient-loftr|disabled] [--no-model] [--device cuda:0|directml:0|cpu:0] (opencv feature required for --device)");
+            log::info!("  forge stitch-landscape --input a.png b.png --output out.png  (opencv feature required)");
+            log::info!("  forge stitch-liveaction --input a.png b.png --output out.png (opencv feature required)");
+            log::info!("  forge animate --json frames.json");
+            log::info!("  forge animate --input f1.webp f2.webp ... --output out.gif --height 200 [--fps 5] [--timestamps ms1 ms2 ...]");
+            log::info!("  forge gpu-test --device cuda:0|directml:0|cpu:0 --model models/<name>.onnx [--timeout-secs 60] (opencv feature required)");
+            log::info!("  forge upscale --input in.png --output out.png --model models/<realesrgan>.onnx --device cuda:0|directml:0|cpu:0 [--face-restore-model models/<gfpgan>.onnx] (opencv feature required)");
             Ok(())
         }
     }
@@ -78,7 +78,7 @@ fn parse_kv(args: &[String]) -> Vec<(&str, Vec<&str>)> {
 
 fn load_images(paths: &[&str]) -> anyhow::Result<Vec<DynamicImage>> {
     paths.iter().map(|p| {
-        eprintln!("  Loading: {p}");
+        log::info!("  Loading: {p}");
         image::open(p).with_context(|| format!("failed to open {p}"))
     }).collect()
 }
@@ -98,7 +98,7 @@ fn cmd_gpu_test(args: &[String]) -> anyhow::Result<()> {
     let device = kv.iter().find(|(k, _)| *k == "device").and_then(|(_, v)| v.first()).copied().unwrap_or("cpu:0").to_string();
     let model = kv.iter().find(|(k, _)| *k == "model").and_then(|(_, v)| v.first()).copied().unwrap_or("models/eloftr_640x480.onnx").to_string();
     let timeout_secs: u64 = kv.iter().find(|(k, _)| *k == "timeout-secs").and_then(|(_, v)| v.first()).and_then(|s| s.parse().ok()).unwrap_or(15);
-    eprintln!("[gpu-test] device={device} model={model} timeout={timeout_secs}s pid={}", std::process::id());
+    log::info!("[gpu-test] device={device} model={model} timeout={timeout_secs}s pid={}", std::process::id());
 
     let (tx, rx) = std::sync::mpsc::channel();
     let is_eloftr = model.contains("eloftr");
@@ -141,9 +141,9 @@ fn cmd_gpu_test(args: &[String]) -> anyhow::Result<()> {
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         match rx.recv_timeout(remaining) {
-            Ok(msg) => eprintln!("[gpu-test] {msg}"),
+            Ok(msg) => log::info!("[gpu-test] {msg}"),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                eprintln!("[gpu-test] TIMED OUT after {timeout_secs}s — worker thread leaked (process will exit anyway)");
+                log::info!("[gpu-test] TIMED OUT after {timeout_secs}s — worker thread leaked (process will exit anyway)");
                 break;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -181,39 +181,39 @@ fn cmd_upscale(args: &[String]) -> anyhow::Result<()> {
         const TILE: u32 = 256;
         const OVERLAP: u32 = 32;
 
-        eprintln!("[forge] upscale device={device} model={model} face_restore_model={face_restore_model:?} repeat={repeat}");
+        log::info!("[jellyfin-suite-forge] upscale device={device} model={model} face_restore_model={face_restore_model:?} repeat={repeat}");
         let img = image::open(input).with_context(|| format!("failed to open {input}"))?;
 
         // No job-cancellation concept for the one-shot CLI — always-false flag is a no-op.
         let no_cancel = std::sync::atomic::AtomicBool::new(false);
         let memory_limit_bytes = dl_match::cuda_memory_limit_bytes_upscale(device);
         let (mut session, fallbacks) = dl_match::build_ep_session(std::path::Path::new(model), device, memory_limit_bytes)?;
-        eprintln!("[forge] fallback_events={fallbacks:?}");
+        log::info!("[jellyfin-suite-forge] fallback_events={fallbacks:?}");
 
         let mut result = None;
         for i in 0..repeat.max(1) {
             let t0 = std::time::Instant::now();
             result = Some(upscale::upscale_image(&mut session, &img, TILE, OVERLAP, &no_cancel)?);
-            eprintln!("[forge] upscale_image call #{i} took {:.2}s", t0.elapsed().as_secs_f64());
+            log::info!("[jellyfin-suite-forge] upscale_image call #{i} took {:.2}s", t0.elapsed().as_secs_f64());
         }
         let mut result = result.expect("repeat.max(1) >= 1 guarantees at least one iteration");
 
         if std::env::var("FRAME_FORGE_ORT_VERBOSE").as_deref() == Ok("1") {
             if let Ok(path) = session.end_profiling() {
-                eprintln!("[forge] ORT profile written to {path}");
+                log::info!("[jellyfin-suite-forge] ORT profile written to {path}");
             }
         }
 
         if let Some(fr_model) = face_restore_model {
             let (mut fr_session, fr_fallbacks) = dl_match::build_ep_session(std::path::Path::new(fr_model), device, memory_limit_bytes)?;
-            eprintln!("[forge] face_restore fallback_events={fr_fallbacks:?}");
+            log::info!("[jellyfin-suite-forge] face_restore fallback_events={fr_fallbacks:?}");
             let (restored, face_count) = face_restore::restore_faces(&mut fr_session, &result, &no_cancel)?;
-            eprintln!("[forge] face_restore faces_found={face_count}");
+            log::info!("[jellyfin-suite-forge] face_restore faces_found={face_count}");
             result = restored;
         }
 
         result.save(output)?;
-        eprintln!("Saved: {output} ({}x{})", result.width(), result.height());
+        log::info!("Saved: {output} ({}x{})", result.width(), result.height());
         Ok(())
     }
 }
@@ -248,13 +248,13 @@ fn cmd_stitch(args: &[String]) -> anyhow::Result<()> {
             .map(|img| (img.width() as f64 * img.height() as f64) / 1_000_000.0)
             .unwrap_or(0.0);
         let (matcher, fallbacks) = dl_match::load_matcher_for_request(device, choice, images.len(), resolution_mp);
-        eprintln!("[forge] device={device} model={choice:?} fallback_events={fallbacks:?}");
+        log::info!("[jellyfin-suite-forge] device={device} model={choice:?} fallback_events={fallbacks:?}");
         matcher
     };
 
-    eprintln!("Classifying scene...");
+    log::info!("Classifying scene...");
     let class = scene_classifier::classify(&images);
-    eprintln!("Scene: {:?}  Edge: {:.3}  Entropy: {:.1}",
+    log::info!("Scene: {:?}  Edge: {:.3}  Entropy: {:.1}",
         class.category, class.edge_density, class.color_entropy);
 
     #[cfg(feature = "opencv")]
@@ -262,7 +262,7 @@ fn cmd_stitch(args: &[String]) -> anyhow::Result<()> {
     #[cfg(not(feature = "opencv"))]
     let result = stitch_routed(&class, &images)?;
     result.save(output)?;
-    eprintln!("Saved: {output} ({}x{})", result.width(), result.height());
+    log::info!("Saved: {output} ({}x{})", result.width(), result.height());
     Ok(())
 }
 
@@ -275,15 +275,15 @@ fn stitch_routed(
     use scene_classifier::SceneCategory;
     match class.category {
         SceneCategory::LiveAction => {
-            eprintln!("Auto-routing: liveaction (OpenCV Stitcher)");
+            log::info!("Auto-routing: liveaction (OpenCV Stitcher)");
             stitch_liveaction::stitch_liveaction(images, per_req_matcher)
         }
         SceneCategory::Landscape => {
-            eprintln!("Auto-routing: landscape (SIFT + Laplacian)");
+            log::info!("Auto-routing: landscape (SIFT + Laplacian)");
             stitch_landscape::stitch_landscape(images, per_req_matcher)
         }
         SceneCategory::Anime => {
-            eprintln!("Auto-routing: anime (Phase Correlation)");
+            log::info!("Auto-routing: anime (Phase Correlation)");
             stitch_anime::stitch_anime(images)
         }
     }
@@ -291,7 +291,7 @@ fn stitch_routed(
 
 #[cfg(not(feature = "opencv"))]
 fn stitch_routed(_class: &scene_classifier::SceneClass, images: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
-    eprintln!("Auto-routing: Phase Correlation (opencv unavailable)");
+    log::info!("Auto-routing: Phase Correlation (opencv unavailable)");
     stitch_anime::stitch_anime(images)
 }
 
@@ -309,7 +309,7 @@ fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
         let output = m.output.as_deref().unwrap_or("output.webp");
         let height = m.height.unwrap_or(200);
         let fps = m.fps.unwrap_or(5);
-        eprintln!("Loading {} frames from manifest...", paths.len());
+        log::info!("Loading {} frames from manifest...", paths.len());
         let images = load_images(&paths)?;
         encode_and_save(&images, &timestamps, output, height, fps)
     } else {
@@ -327,7 +327,7 @@ fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn encode_and_save(images: &[DynamicImage], timestamps: &[u64], output: &str, height: u32, fps: u16) -> anyhow::Result<()> {
-    eprintln!("Scaling to {height}px height...");
+    log::info!("Scaling to {height}px height...");
     let scaled: Vec<DynamicImage> = images.iter().map(|img| {
         let ratio = height as f64 / img.height() as f64;
         let w = (img.width() as f64 * ratio).max(1.0) as u32;
@@ -351,7 +351,7 @@ fn encode_and_save(images: &[DynamicImage], timestamps: &[u64], output: &str, he
         }
     };
     std::fs::write(output, &encoded)?;
-    eprintln!("Saved: {output} ({} bytes)", encoded.len());
+    log::info!("Saved: {output} ({} bytes)", encoded.len());
     Ok(())
 }
 
@@ -369,13 +369,13 @@ fn cmd_stitch_opencv(args: &[String], mode: &str) -> anyhow::Result<()> {
             anyhow::bail!("stitch-{mode} requires at least 2 --input images");
         }
         let images = load_images(&input)?;
-        eprintln!("Stitching {} frames with {mode} algorithm...", images.len());
+        log::info!("Stitching {} frames with {mode} algorithm...", images.len());
         let result = match mode {
             "liveaction" => stitch_liveaction::stitch_liveaction(&images, None)?,
             _ => stitch_landscape::stitch_landscape(&images, None)?,
         };
         result.save(output)?;
-        eprintln!("Saved: {output} ({}x{})", result.width(), result.height());
+        log::info!("Saved: {output} ({}x{})", result.width(), result.height());
         Ok(())
     }
 }

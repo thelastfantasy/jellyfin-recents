@@ -69,12 +69,12 @@ async fn run() -> Result<()> {
         let has_ocl = opencv::core::ocl::have_open_cl().unwrap_or(false);
         let n_platforms = opencv::core::ocl::Platform::list()
             .map(|v| v.len()).unwrap_or(0);
-        log::info!("[frame-forge] OpenCL available={has_ocl}, platforms={n_platforms}");
+        log::info!("[jellyfin-suite-frame-forge] OpenCL available={has_ocl}, platforms={n_platforms}");
     }
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;
-    log::info!("[frame-forge] listening on {sock_path}");
+    log::info!("[jellyfin-suite-frame-forge] listening on {sock_path}");
 
     let state = server::State::new();
 
@@ -83,7 +83,7 @@ async fn run() -> Result<()> {
             Ok((stream, _)) => {
                 tokio::spawn(server::handle_conn(stream, state.clone()));
             }
-            Err(e) => log::error!("[frame-forge] accept error: {e}"),
+            Err(e) => log::error!("[jellyfin-suite-frame-forge] accept error: {e}"),
         }
     }
 }

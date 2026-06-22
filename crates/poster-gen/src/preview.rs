@@ -216,7 +216,7 @@ pub fn run_preview(args: PreviewArgs) -> Result<(), String> {
 
     let abs_path = std::fs::canonicalize(&args.output)
         .unwrap_or_else(|_| std::path::PathBuf::from(&args.output));
-    println!("DONE {}", abs_path.display());
+    crate::ipc::emit_done(&abs_path);
 
     Ok(())
 }

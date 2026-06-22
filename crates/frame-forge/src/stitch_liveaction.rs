@@ -59,7 +59,7 @@ pub fn stitch_liveaction(
                 out
             }
             Err(e) => {
-                eprintln!("[liveaction] stitch_pair_motion_filtered FAILED: {e}");
+                log::warn!("[liveaction] stitch_pair_motion_filtered FAILED: {e}");
                 let mat_prev = crate::stitch_landscape::image_to_mat(&prev);
                 let mat_curr = crate::stitch_landscape::image_to_mat(curr);
                 let (pw_i, ph_i) = (mat_prev.cols(), mat_prev.rows());
@@ -80,7 +80,7 @@ pub fn stitch_liveaction(
                         let ov_h = (1.0 - h02 / pw_i as f64).max(0.0);
                         let ov_v = (1.0 - h12 / ph_i as f64).max(0.0);
                         let good = (ov_h >= 0.08 && ov_h <= 0.95) || (ov_v >= 0.08 && ov_v <= 0.95);
-                        if !good { eprintln!("[liveaction] match rejected: ov_h={ov_h:.2} ov_v={ov_v:.2} (repetitive texture)"); }
+                        if !good { log::warn!("[liveaction] match rejected: ov_h={ov_h:.2} ov_v={ov_v:.2} (repetitive texture)"); }
                         good
                     });
                 // Validate the canvas after DL warp:
@@ -96,11 +96,11 @@ pub fn stitch_liveaction(
                     // Excessive height growth indicates perspective distortion from a false match.
                     let max_h   = (ph_i.max(ch_i) as f64 * 1.05) as u32;
                     if stitched.width() >= min_w && stitched.height() <= max_h {
-                        eprintln!("[liveaction] landscape feature-match OK → warp_expand_blend ({}×{})",
+                        log::warn!("[liveaction] landscape feature-match OK → warp_expand_blend ({}×{})",
                             stitched.width(), stitched.height());
                         Some(stitched)
                     } else {
-                        eprintln!("[liveaction] match rejected: canvas {}×{} (min_w={} max_h={}) → OpenCV Stitcher",
+                        log::warn!("[liveaction] match rejected: canvas {}×{} (min_w={} max_h={}) → OpenCV Stitcher",
                             stitched.width(), stitched.height(), min_w, max_h);
                         None
                     }
@@ -113,32 +113,32 @@ pub fn stitch_liveaction(
                 match stitch_with_opencv_panorama(&mat_prev, &mat_curr) {
                     Ok(stitched) => stitched,
                     Err(e2) => {
-                        eprintln!("[liveaction] OpenCV Stitcher FAILED: {e2} → feature fallback");
+                        log::warn!("[liveaction] OpenCV Stitcher FAILED: {e2} → feature fallback");
                         // Strategy 2: EfficientLoFTR/AKAZE homography (no motion filtering).
                         match crate::stitch_landscape::estimate_homography(&mat_prev, &mat_curr, None) {
                             Ok(homo) => {
-                                eprintln!("[liveaction] feature-match homography OK");
+                                log::warn!("[liveaction] feature-match homography OK");
                                 crate::stitch_landscape::warp_expand_blend(
                                     &result, &mat_curr, &homo, pw_i, ph_i, cw_i, ch_i,
                                 )
                             }
                             Err(e3) => {
-                                eprintln!("[liveaction] feature-match homography FAILED: {e3} → dominant_translation");
+                                log::warn!("[liveaction] feature-match homography FAILED: {e3} → dominant_translation");
                                 // Strategy 3: dominant translation (NCC + SIFT cluster)
                                 let (dx, dy) = dominant_translation(&mat_prev, &mat_curr, 5.0, 6)
                                     .unwrap_or_else(|| {
                                         let (pdx, pdy, pc_q) = crate::stitch_anime::phase_correlate(&prev, curr);
-                                        eprintln!("[liveaction] dominant_translation failed → phase q={pc_q:.4} dx={pdx} dy={pdy}");
+                                        log::warn!("[liveaction] dominant_translation failed → phase q={pc_q:.4} dx={pdx} dy={pdy}");
                                         if pc_q >= 0.02 {
                                             (pdx, pdy)
                                         } else {
                                             let sift = crate::stitch_landscape::sift_translation_estimate(&mat_prev, &mat_curr);
-                                            eprintln!("[liveaction] SIFT fallback: {sift:?}");
+                                            log::warn!("[liveaction] SIFT fallback: {sift:?}");
                                             sift.unwrap_or((pdx, pdy))
                                         }
                                     });
 
-                                eprintln!("[liveaction] using translation dx={dx} dy={dy}");
+                                log::warn!("[liveaction] using translation dx={dx} dy={dy}");
 
                                 let blend_result = (|| -> Option<RgbaImage> {
                                     let mut h = core::Mat::zeros(3, 3, core::CV_64F).ok()?.to_mat().ok()?;
@@ -224,7 +224,7 @@ fn stitch_pair_motion_filtered(
         !a_mot && !b_mot
     }).collect();
 
-    eprintln!("[liveaction] DL matches: {}/{} survive motion-mask filter", bg_matches.len(), all_count);
+    log::warn!("[liveaction] DL matches: {}/{} survive motion-mask filter", bg_matches.len(), all_count);
 
     if bg_matches.len() < crate::dl_match::MIN_INLIERS {
         anyhow::bail!("too few background matches after motion-mask filter ({})", bg_matches.len());
@@ -282,7 +282,7 @@ pub fn stitch_with_opencv_panorama(
         anyhow::bail!("Stitcher failed: {status:?}");
     }
 
-    eprintln!("[liveaction] OpenCV Stitcher OK: {}×{}", result_mat.cols(), result_mat.rows());
+    log::warn!("[liveaction] OpenCV Stitcher OK: {}×{}", result_mat.cols(), result_mat.rows());
 
     // Convert BGR result to RGBA
     let mut rgba_mat = core::Mat::default();
@@ -321,7 +321,7 @@ fn dominant_translation(
         return Some(r);
     }
 
-    eprintln!("[liveaction] dominant_translation: NCC failed -> full-image SIFT + ratio test");
+    log::warn!("[liveaction] dominant_translation: NCC failed -> full-image SIFT + ratio test");
 
     // Phase 2: Full-image SIFT + Lowe ratio test
     let mut sift = features2d::SIFT::create(0, 3, 0.04, 10.0, 1.6, false).ok()?;
@@ -335,7 +335,7 @@ fn dominant_translation(
     if kp_a.len() < 4 || kp_b.len() < 4 { return None; }
 
     let disps = sift_ratio_disps(&desc_a, &desc_b, &kp_a, &kp_b, 0.75)?;
-    eprintln!("[liveaction] full-image ratio test: {} matches", disps.len());
+    log::warn!("[liveaction] full-image ratio test: {} matches", disps.len());
 
     best_displacement_cluster(&disps, px_threshold, min_inliers)
 }
@@ -394,7 +394,7 @@ fn ncc_template_match(gray_a: &core::Mat, gray_b: &core::Mat) -> Option<(i32, i3
         let dx = strip_x - max_loc.x;
         let dy = v_margin - max_loc.y;
 
-        eprintln!("[liveaction] NCC strip={:.0}% ({strip_w}px): ncc={:.3} peak=({},{}) dx={} dy={}",
+        log::warn!("[liveaction] NCC strip={:.0}% ({strip_w}px): ncc={:.3} peak=({},{}) dx={} dy={}",
                   strip_frac * 100.0, max_val, max_loc.x, max_loc.y, dx, dy);
 
         if max_val > best_ncc {
@@ -405,17 +405,17 @@ fn ncc_template_match(gray_a: &core::Mat, gray_b: &core::Mat) -> Option<(i32, i3
 
         // Accept early if NCC is convincingly high
         if max_val >= 0.55 {
-            eprintln!("[liveaction] NCC accepted at {:.0}%: dx={} dy={}", strip_frac * 100.0, dx, dy);
+            log::warn!("[liveaction] NCC accepted at {:.0}%: dx={} dy={}", strip_frac * 100.0, dx, dy);
             return Some((dx, dy));
         }
     }
 
     if best_ncc >= 0.35 {
-        eprintln!("[liveaction] NCC best ({:.3}): dx={} dy={}", best_ncc, best_dx, best_dy);
+        log::warn!("[liveaction] NCC best ({:.3}): dx={} dy={}", best_ncc, best_dx, best_dy);
         return Some((best_dx, best_dy));
     }
 
-    eprintln!("[liveaction] NCC all strips too low (best={:.3}), skipping", best_ncc);
+    log::warn!("[liveaction] NCC all strips too low (best={:.3}), skipping", best_ncc);
     None
 }
 
@@ -472,7 +472,7 @@ fn best_displacement_cluster(
         }
     }
 
-    eprintln!("[liveaction] cluster: dx={:.1} dy={:.1} inliers={}/{}", best_dx, best_dy, best_n, disps.len());
+    log::warn!("[liveaction] cluster: dx={:.1} dy={:.1} inliers={}/{}", best_dx, best_dy, best_n, disps.len());
 
     if best_n >= min_inliers {
         Some((best_dx.round() as i32, best_dy.round() as i32))

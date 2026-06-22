@@ -2,7 +2,7 @@ pub mod decoder;
 pub mod disk_cache;
 pub mod fps_utils;
 
-pub use decoder::{decode_and_encode, decode_range, DecodeResult, index_frames, demux_frames};
+pub use decoder::{decode_all_frames_rgba, decode_and_encode, decode_range, DecodeResult, index_frames, demux_frames};
 pub use disk_cache::DiskCache;
 pub use fps_utils::compute_frame_idx;
 

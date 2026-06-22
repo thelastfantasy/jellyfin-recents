@@ -2105,6 +2105,28 @@
           "createdAt": {
             "type": "integer",
             "format": "int64"
+          },
+          "upscaled": {
+            "type": "boolean"
+          },
+          "upscaledResultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upscaledFileSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "upscaledMimeType": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -2113,7 +2135,8 @@
           "itemTitle",
           "type",
           "status",
-          "createdAt"
+          "createdAt",
+          "upscaled"
         ]
       },
       "FrameInfoDto": {
@@ -3114,6 +3137,12 @@
             ]
           },
           "resultUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultMimeType": {
             "type": [
               "string",
               "null"

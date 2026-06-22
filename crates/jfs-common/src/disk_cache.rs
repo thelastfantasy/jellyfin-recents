@@ -39,7 +39,7 @@ impl DiskCache {
         sweep_legacy_dirs(&cache_dir, &index_file);
         sweep_legacy_jpgs(&cache_dir);
         let index = load_index(&cache_dir, &index_file).unwrap_or_else(|_| rebuild_index(label, &cache_dir, &index_file));
-        eprintln!(
+        log::debug!(
             "[{label}] disk cache: {:.1} MB used / {:.0} MB cap ({} entries)",
             index.total_bytes as f64 / 1e6,
             CAP_BYTES as f64 / 1e6,
@@ -188,7 +188,7 @@ impl DiskCache {
             }
         }
 
-        eprintln!(
+        log::debug!(
             "[{}] disk cache cleanup: {:.1} MB remaining ({} entries)",
             self.label,
             idx.total_bytes as f64 / 1e6,
@@ -346,6 +346,6 @@ fn rebuild_index(label: &str, cache_dir: &Path, index_file: &Path) -> Index {
         }
     }
 
-    eprintln!("[{label}] rebuilt disk index: {:.1} MB ({} entries)", total_bytes as f64 / 1e6, entries.len());
+    log::debug!("[{label}] rebuilt disk index: {:.1} MB ({} entries)", total_bytes as f64 / 1e6, entries.len());
     Index { entries, total_bytes }
 }

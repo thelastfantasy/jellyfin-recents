@@ -153,6 +153,9 @@ export interface Translations {
   exportQueue: string
   exportQueueRemove: string
   exportQueueDownload: string
+  exportQueueUpscaled: string
+  exportQueueOriginal: string
+  exportQueueUpscaledLabel: string
   clipWorkshopQueue: string
   exportFormat: string
   exportSize: string

@@ -61,6 +61,8 @@ export const FrameCard = memo(function FrameCard({
         <img
           src={frame.jpegUrl}
           alt={formatTime(frame.posMs)}
+          draggable={false}
+          onContextMenu={e => e.preventDefault()}
           onError={() => onLoadError(idx)}
           onLoad={() => bench.mark('img_loaded', { frameIndex: frame.fiIdx, posMs: frame.posMs })}
         />

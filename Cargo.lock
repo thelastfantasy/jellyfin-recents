@@ -809,6 +809,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tempfile",
  "tokio",
  "webpx",
  "xz2",
@@ -1621,7 +1622,9 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "clap",
+ "env_logger",
  "image",
+ "log",
  "qrcode",
  "rayon",
  "resvg",
@@ -2034,7 +2037,9 @@ name = "seek-preview"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "env_logger",
  "jfs-common",
+ "log",
  "lru",
  "tokio",
 ]
@@ -2645,8 +2650,6 @@ dependencies = [
 [[package]]
 name = "webpx"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b28247f4d01528a87716eccf25edac8d3787ce4da26f7f5893b790615f2832d"
 dependencies = [
  "enough",
  "imgref",

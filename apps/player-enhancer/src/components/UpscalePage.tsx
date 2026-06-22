@@ -1,8 +1,7 @@
+import type { UpscaleJobDto } from '@jfs/api-types'
 import { useMutation } from '@tanstack/react-query'
 import { useAtomValue } from 'jotai'
 import { useEffect, useRef, useState } from 'react'
-
-import type { UpscaleJobDto } from '@jfs/api-types'
 
 import {
   buildResultUrl,
@@ -355,14 +354,32 @@ export function UpscalePage({ onBack, onClose }: {
         </div>
       )}
 
-      {phase === 'success' && job && (
+      {phase === 'success' && job && (() => {
+        const previewUrl = (showAfter ? job.resultUrl : job.originalUrl) ?? ''
+        // resultUrl is a job-id-based endpoint with no file extension of its own — resultMimeType
+        // is the server's authoritative answer (same switch GetResultBytes uses for the actual
+        // Content-Type header), so both preview branches go by that instead of sniffing the URL.
+        const isVideo = (job.resultMimeType ?? '').startsWith('video/')
+        return (
         <>
           <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
-            <img
-              src={buildResultUrl('', (showAfter ? job.resultUrl : job.originalUrl) ?? '')}
-              style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
-              alt={showAfter ? t('upscale.after') : t('upscale.before')}
-            />
+            {isVideo ? (
+              <video
+                key={previewUrl}
+                src={buildResultUrl('', previewUrl)}
+                style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+                controls
+                autoPlay
+                loop
+                muted
+              />
+            ) : (
+              <img
+                src={buildResultUrl('', previewUrl)}
+                style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+                alt={showAfter ? t('upscale.after') : t('upscale.before')}
+              />
+            )}
           </div>
           <div className="jfs-fe-row" style={{ justifyContent: 'center', gap: '8px' }}>
             <button className={`jfs-fe-btn${showAfter ? '' : ' p'}`} onClick={() => setShowAfter(false)}>{t('upscale.before')}</button>
@@ -391,20 +408,21 @@ export function UpscalePage({ onBack, onClose }: {
             </div>
           )}
           <div className="jfs-fe-row sep-t" style={{ gap: '8px' }}>
-            <button className="jfs-fe-btn g" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>
+            <button className="jfs-fe-btn" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>
             <div className="jfs-fe-spacer" />
-            <button className="jfs-fe-btn g" onClick={handleDownloadOriginal}>{t('upscale.downloadOriginal')}</button>
+            <button className="jfs-fe-btn" onClick={handleDownloadOriginal}>{t('upscale.downloadOriginal')}</button>
             <button className="jfs-fe-btn p" onClick={handleDownloadImage}>{t('upscale.download')}</button>
           </div>
         </>
-      )}
+        )
+      })()}
 
       {phase === 'error' && (
         <div className="jfs-fe-row" style={{ flexDirection: 'column', gap: '10px', padding: '20px 12px' }}>
           <span style={{ color: '#f87171' }}>{t('upscale.failed').replace('{msg}', errorMsg)}</span>
           <div className="jfs-fe-row" style={{ gap: '8px' }}>
             <button className="jfs-fe-btn" onClick={onBack}>{t('upscale.back')}</button>
-            {job?.jobId && <button className="jfs-fe-btn g" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>}
+            {job?.jobId && <button className="jfs-fe-btn" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>}
           </div>
         </div>
       )}

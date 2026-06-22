@@ -119,12 +119,20 @@ pub(crate) async fn write_ack(
 pub(crate) enum AnimFormat {
     Gif,
     WebP,
+    Mp4,
 }
 
 impl AnimFormat {
     pub fn from_u16(v: u16) -> Self {
-        if v == 0x02 { Self::WebP } else { Self::Gif }
+        match v {
+            0x02 => Self::WebP,
+            0x03 => Self::Mp4,
+            _ => Self::Gif,
+        }
     }
+    // StitchReq reuses this enum but only ever sends WebP or Gif-as-"png" (never Mp4) — kept
+    // as a binary helper for that one two-way call site; ANIMATE's three-way dispatch matches
+    // on the enum directly instead.
     pub fn is_webp(self) -> bool { matches!(self, Self::WebP) }
 }
 
@@ -289,7 +297,7 @@ pub(crate) struct StitchReq {
     pub item_id: String,
     pub task_id: String,
     pub paths: Vec<(std::path::PathBuf, i64)>,
-    pub format: AnimFormat,
+    pub format: AnimFormat, // WebP or Gif-as-"png" only — stitch never produces Mp4
     pub quality: f32,
     pub device_id: String,
     pub log_path: String,
