@@ -2054,18 +2054,22 @@ a.jfs-card__series-name:hover {
   font-weight: 600;
   color: rgba(255,255,255,0.6);
 }
-.jfs-queue-popover__variant-toggle {
-  display: flex;
-  gap: 4px;
-}
-.jfs-export-type-badge--toggle {
-  border: none;
+.jfs-queue-popover__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(139,92,246,0.5);
+  border-radius: 4px;
+  background: rgba(139,92,246,0.25);
+  color: #c4b5fd;
   cursor: pointer;
-  opacity: 0.5;
+  flex-shrink: 0;
+  padding: 0;
 }
-.jfs-export-type-badge--toggle.active {
-  opacity: 1;
-  background: rgba(139,92,246,0.4);
+.jfs-queue-popover__toggle-btn:hover {
+  background: rgba(139,92,246,0.45);
   color: #fff;
 }
 

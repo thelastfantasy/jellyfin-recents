@@ -10,6 +10,10 @@ import { downloadBlob } from '../utils/download'
 import { FrameExportJobRunner } from './FrameExportJobRunner'
 import { Popover } from './Popover'
 
+// "Swap horizontal" glyph for the original/upscaled toggle — an icon-only button reads as a
+// control without needing label text wide enough to push the badges row onto a second line.
+const ICON_SWAP = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h12l-3.5-3.5"/><path d="M17 17H5l3.5 3.5"/></svg>`
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -215,7 +219,10 @@ export function FrameExportQueueWidget() {
             <button className="jfs-queue-popover__header-close" onClick={() => setOpen(false)}>✕</button>
           </div>
           <div className="jfs-queue-popover__list">
-            {[...tasks].sort((a, b) => b.addedAt - a.addedAt).map(task => (
+            {[...tasks].sort((a, b) => b.addedAt - a.addedAt).map(task => {
+              const upscaledResultUrl = task.upscaledResultUrl
+              const viewingOriginal = !upscaledResultUrl || (showOriginal[task.taskId] ?? false)
+              return (
               <div
                 key={task.taskId}
                 className={`jfs-queue-popover__item jfs-queue-popover__item--${
@@ -234,9 +241,9 @@ export function FrameExportQueueWidget() {
                 </div>
                 <div className="jfs-queue-popover__badges">
                   <span className="jfs-export-type-badge">{task.type.toUpperCase()}</span>
-                  {/* Once there's an upscaled version too, each ResultVariant below carries its
-                      own fmt/size label — showing them here as well would just duplicate it. */}
-                  {task.resultUrl && !task.upscaledResultUrl && (
+                  {/* Once there's an upscaled version too, the icon button + ResultVariant below
+                      carry their own fmt/size label — showing them here too would just duplicate it. */}
+                  {task.resultUrl && !upscaledResultUrl && (
                     <>
                       <span className="jfs-export-type-badge jfs-export-type-badge--fmt">
                         {extFromUrl(task.resultUrl)}
@@ -252,6 +259,15 @@ export function FrameExportQueueWidget() {
                     <span className="jfs-export-type-badge jfs-export-type-badge--upscaled">
                       {t.exportQueueUpscaled}
                     </span>
+                  )}
+                  {upscaledResultUrl && (
+                    <button
+                      className="jfs-queue-popover__toggle-btn"
+                      onClick={() => setShowOriginal(s => ({ ...s, [task.taskId]: !viewingOriginal }))}
+                      title={viewingOriginal ? t.exportQueueUpscaledLabel : t.exportQueueOriginal}
+                      aria-label={viewingOriginal ? t.exportQueueUpscaledLabel : t.exportQueueOriginal}
+                      dangerouslySetInnerHTML={{ __html: ICON_SWAP }}
+                    />
                   )}
                 </div>
 
@@ -275,38 +291,23 @@ export function FrameExportQueueWidget() {
 
                 {task.status === 'complete' && task.resultUrl && (() => {
                   const resultUrl = task.resultUrl
-                  const upscaledResultUrl = task.upscaledResultUrl
                   const onImageClick = (u: string) => { setLightboxSrc(u); setLightboxTaskId(task.taskId) }
-                  const viewingOriginal = !upscaledResultUrl || (showOriginal[task.taskId] ?? false)
                   const activeUrl = !viewingOriginal && upscaledResultUrl ? upscaledResultUrl : resultUrl
                   return (
-                    <>
-                      {upscaledResultUrl && (
-                        <div className="jfs-queue-popover__variant-toggle">
-                          <button
-                            className={`jfs-export-type-badge jfs-export-type-badge--toggle${viewingOriginal ? ' active' : ''}`}
-                            onClick={() => setShowOriginal(s => ({ ...s, [task.taskId]: true }))}
-                          >{t.exportQueueOriginal}</button>
-                          <button
-                            className={`jfs-export-type-badge jfs-export-type-badge--toggle${!viewingOriginal ? ' active' : ''}`}
-                            onClick={() => setShowOriginal(s => ({ ...s, [task.taskId]: false }))}
-                          >{t.exportQueueUpscaledLabel}</button>
-                        </div>
-                      )}
-                      <ResultVariant
-                        downloadLabel={`${t.exportQueueDownload} · ${viewingOriginal ? t.exportQueueOriginal : t.exportQueueUpscaledLabel}`}
-                        url={activeUrl}
-                        itemTitle={task.itemTitle}
-                        fileSize={viewingOriginal ? task.fileSize : task.upscaledFileSize}
-                        mimeType={viewingOriginal ? undefined : task.upscaledMimeType}
-                        filenameSuffix={viewingOriginal ? undefined : 'upscale'}
-                        onImageClick={onImageClick}
-                      />
-                    </>
+                    <ResultVariant
+                      downloadLabel={`${t.exportQueueDownload} · ${viewingOriginal ? t.exportQueueOriginal : t.exportQueueUpscaledLabel}`}
+                      url={activeUrl}
+                      itemTitle={task.itemTitle}
+                      fileSize={viewingOriginal ? task.fileSize : task.upscaledFileSize}
+                      mimeType={viewingOriginal ? undefined : task.upscaledMimeType}
+                      filenameSuffix={viewingOriginal ? undefined : 'upscale'}
+                      onImageClick={onImageClick}
+                    />
                   )
                 })()}
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </Popover>
