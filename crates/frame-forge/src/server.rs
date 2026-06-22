@@ -1014,15 +1014,18 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     #[cfg(feature = "opencv")]
     crate::dl_match::reset_match_stats();
 
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(image::DynamicImage, u32, u64)> {
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+
+    let mut handle = tokio::task::spawn_blocking(move || -> anyhow::Result<(image::DynamicImage, u32, u64)> {
+        let report = |done: usize, total: usize| { let _ = progress_tx.send((done, total)); };
         let image = match class.category {
-            crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images),
+            crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher),
+            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher),
+            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(not(feature = "opencv"))]
-            _ => crate::stitch_anime::stitch_anime(&images),
+            _ => crate::stitch_anime::stitch_anime(&images, Some(&report as &dyn Fn(usize, usize))),
         }?;
         // Must read the thread-local stats here, on the same blocking-pool thread that
         // just ran the stitch — see dl_match::take_match_stats doc comment.
@@ -1031,7 +1034,27 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         #[cfg(not(feature = "opencv"))]
         let (match_count, inference_ms) = (0u32, 0u64);
         Ok((image, match_count, inference_ms))
-    }).await??;
+    });
+
+    // The blocking closure above reports per-frame-pair progress through `progress_tx` as the
+    // matching/stitching algorithm runs — previously this whole step reported a single static
+    // 40% at the start and jumped straight to 85% on completion no matter how long the actual
+    // (often multi-second) matching work took, making the modal's progress bar crawl through
+    // decode/dedup/classify (all sub-second, but each step still ticks the bar) then appear to
+    // freeze at 40% before snapping straight to done (2026-06-23 production report). Relay each
+    // increment to the client, scaled into the 40-85% band reserved for this phase, while still
+    // waiting for the blocking task itself to finish.
+    let result = loop {
+        tokio::select! {
+            Some((done, total)) = progress_rx.recv() => {
+                let frac = if total > 0 { done as f64 / total as f64 } else { 1.0 };
+                send_progress(stream, "running", "matching", done as u32, total as u32, 40.0 + frac * 45.0).await?;
+            }
+            res = &mut handle => {
+                break res??;
+            }
+        }
+    };
     let (result, dl_match_count, dl_inference_ms) = result;
 
     let total_ms = stitch_start.elapsed().as_millis() as u64;

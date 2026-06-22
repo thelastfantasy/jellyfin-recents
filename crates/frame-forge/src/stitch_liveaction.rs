@@ -17,6 +17,7 @@ use opencv::{core, features2d, imgproc, stitching};
 pub fn stitch_liveaction(
     frames: &[DynamicImage],
     mut per_req_matcher: Option<crate::dl_match::AnyMatcher>,
+    progress: Option<&dyn Fn(usize, usize)>,
 ) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 {
         anyhow::bail!("need at least 2 frames");
@@ -170,6 +171,7 @@ pub fn stitch_liveaction(
                 }
             }
         };
+        if let Some(p) = progress { p(i, frames.len() - 1); }
     }
 
     Ok(DynamicImage::ImageRgba8(result))
@@ -584,7 +586,7 @@ mod quality_tests {
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         let reference = image::open(dir.join("reference.png")).expect("reference.png");
 
-        let stitched = stitch_liveaction(&[a, b], None).expect("stitch_liveaction failed");
+        let stitched = stitch_liveaction(&[a, b], None, None).expect("stitch_liveaction failed");
         let score = ssim(&stitched, &reference);
         assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
     }

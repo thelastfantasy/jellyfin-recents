@@ -16,6 +16,7 @@ use opencv::{calib3d, core, features2d, imgproc};
 pub fn stitch_landscape(
     frames: &[DynamicImage],
     mut per_req_matcher: Option<crate::dl_match::AnyMatcher>,
+    progress: Option<&dyn Fn(usize, usize)>,
 ) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 {
         anyhow::bail!("need at least 2 frames");
@@ -97,6 +98,7 @@ pub fn stitch_landscape(
                 }
             }
         }
+        if let Some(p) = progress { p(i, images.len() - 1); }
     }
 
     Ok(DynamicImage::ImageRgba8(result))
@@ -908,7 +910,7 @@ mod quality_tests {
         let a = image::open(dir.join("input_a.png")).expect("input_a.png");
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         let reference = image::open(dir.join("reference.png")).expect("reference.png");
-        let stitched = stitch_landscape(&[a, b], None).expect("stitch_landscape failed");
+        let stitched = stitch_landscape(&[a, b], None, None).expect("stitch_landscape failed");
         let score = ssim(&stitched, &reference);
         assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
     }
@@ -923,10 +925,10 @@ mod quality_tests {
         let b = image::open(dir.join("input_b.png")).expect("input_b.png");
         #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(false).ok();
-        let cpu = stitch_landscape(&[a.clone(), b.clone()], None).expect("CPU stitch");
+        let cpu = stitch_landscape(&[a.clone(), b.clone()], None, None).expect("CPU stitch");
         #[cfg(feature = "opencl")]
         opencv::core::ocl::set_use_open_cl(true).ok();
-        let gpu = stitch_landscape(&[a, b], None).expect("GPU stitch");
+        let gpu = stitch_landscape(&[a, b], None, None).expect("GPU stitch");
         let score = ssim(&cpu, &gpu);
         assert!(score >= 0.95, "CPU/GPU SSIM {:.3} < 0.95", score);
     }
