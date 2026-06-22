@@ -832,6 +832,7 @@ export interface components {
             error?: string | null;
             /** Format: int64 */
             createdAt: number;
+            upscaled: boolean;
         };
         FrameInfoDto: {
             /** Format: int64 */
@@ -1096,6 +1097,7 @@ export interface components {
             error?: string | null;
             originalUrl?: string | null;
             resultUrl?: string | null;
+            resultMimeType?: string | null;
             /** Format: int32 */
             originalWidth?: number | null;
             /** Format: int32 */

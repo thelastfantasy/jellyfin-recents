@@ -1984,6 +1984,12 @@ a.jfs-card__series-name:hover {
   text-overflow: ellipsis;
   flex: 1;
 }
+.jfs-queue-popover__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
 .jfs-queue-popover__delete {
   background: none;
   border: none;
@@ -2118,14 +2124,17 @@ a.jfs-card__series-name:hover {
 }
 .jfs-export-download-btn {
   display: block;
+  width: 100%;
   text-align: center;
   font-size: 0.8rem;
   color: #c4b5fd;
   background: rgba(139,92,246,0.15);
+  border: none;
   border-radius: 4px;
   padding: 4px 8px;
   text-decoration: none;
   margin-top: 4px;
+  cursor: pointer;
 }
 .jfs-export-download-btn:hover { background: rgba(139,92,246,0.3); }
 

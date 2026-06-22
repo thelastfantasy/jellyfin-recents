@@ -16,6 +16,8 @@ export interface UpscaleJobDto {
   /** @nullable */
   resultUrl?: string | null;
   /** @nullable */
+  resultMimeType?: string | null;
+  /** @nullable */
   originalWidth?: number | null;
   /** @nullable */
   originalHeight?: number | null;

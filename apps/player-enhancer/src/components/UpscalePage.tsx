@@ -1,8 +1,7 @@
+import type { UpscaleJobDto } from '@jfs/api-types'
 import { useMutation } from '@tanstack/react-query'
 import { useAtomValue } from 'jotai'
 import { useEffect, useRef, useState } from 'react'
-
-import type { UpscaleJobDto } from '@jfs/api-types'
 
 import {
   buildResultUrl,
@@ -357,7 +356,10 @@ export function UpscalePage({ onBack, onClose }: {
 
       {phase === 'success' && job && (() => {
         const previewUrl = (showAfter ? job.resultUrl : job.originalUrl) ?? ''
-        const isVideo = previewUrl.endsWith('.mp4')
+        // resultUrl is a job-id-based endpoint with no file extension of its own — resultMimeType
+        // is the server's authoritative answer (same switch GetResultBytes uses for the actual
+        // Content-Type header), so both preview branches go by that instead of sniffing the URL.
+        const isVideo = (job.resultMimeType ?? '').startsWith('video/')
         return (
         <>
           <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>

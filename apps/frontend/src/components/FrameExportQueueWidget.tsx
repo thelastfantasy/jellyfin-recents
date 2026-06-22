@@ -21,6 +21,18 @@ function extFromUrl(url: string): string {
   return seg.toUpperCase()
 }
 
+// task.resultUrl's path segment is always the literal placeholder "output.{ext}" (the server
+// route doesn't read it — the real filename comes back via the Content-Disposition header on
+// the actual download), so build a per-item name from the title instead of trusting the URL.
+function safeFileName(title: string, ext: string): string {
+  const clean = title.replace(/[\\/:*?"<>|]/g, '_').trim()
+  return `${clean || 'export'}.${ext.toLowerCase()}`
+}
+
+// Hover-to-preview only makes sense where "hover" exists; touch devices get autoplay+loop
+// instead since there's no hover state to trigger off of.
+const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
+
 export function FrameExportQueueWidget() {
   const { t } = useLocale()
   const [tasks, setTasks] = useState<ExportTaskEntry[]>(getTasks)
@@ -95,24 +107,6 @@ export function FrameExportQueueWidget() {
               >
                 <div className="jfs-queue-popover__item-header">
                   <span className="jfs-queue-popover__title" title={task.itemTitle}>
-                    <span className="jfs-export-type-badge">{task.type.toUpperCase()}</span>
-                    {task.resultUrl && (
-                      <>
-                        <span className="jfs-export-type-badge jfs-export-type-badge--fmt">
-                          {extFromUrl(task.resultUrl)}
-                        </span>
-                        {task.fileSize != null && (
-                          <span className="jfs-export-type-badge jfs-export-type-badge--size">
-                            {formatSize(task.fileSize)}
-                          </span>
-                        )}
-                      </>
-                    )}
-                    {task.upscaled && (
-                      <span className="jfs-export-type-badge jfs-export-type-badge--upscaled">
-                        {t.exportQueueUpscaled}
-                      </span>
-                    )}
                     {task.itemTitle}
                   </span>
                   <button
@@ -120,6 +114,26 @@ export function FrameExportQueueWidget() {
                     onClick={() => handleDelete(task)}
                     title={t.exportQueueRemove}
                   >✕</button>
+                </div>
+                <div className="jfs-queue-popover__badges">
+                  <span className="jfs-export-type-badge">{task.type.toUpperCase()}</span>
+                  {task.resultUrl && (
+                    <>
+                      <span className="jfs-export-type-badge jfs-export-type-badge--fmt">
+                        {extFromUrl(task.resultUrl)}
+                      </span>
+                      {task.fileSize != null && (
+                        <span className="jfs-export-type-badge jfs-export-type-badge--size">
+                          {formatSize(task.fileSize)}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {task.upscaled && (
+                    <span className="jfs-export-type-badge jfs-export-type-badge--upscaled">
+                      {t.exportQueueUpscaled}
+                    </span>
+                  )}
                 </div>
 
                 {task.status === 'running' && (
@@ -142,7 +156,8 @@ export function FrameExportQueueWidget() {
 
                 {task.status === 'complete' && task.resultUrl && (() => {
                   const url = withAuth(task.resultUrl)
-                  const filename = task.resultUrl.split('/').pop() ?? 'output'
+                  const ext = extFromUrl(task.resultUrl)
+                  const filename = safeFileName(task.itemTitle, ext)
                   const isVideo = task.resultUrl.endsWith('.mp4')
                   return (
                     <>
@@ -150,8 +165,12 @@ export function FrameExportQueueWidget() {
                         <video
                           src={url}
                           className="jfs-queue-popover__thumb"
-                          controls
                           muted
+                          playsInline
+                          loop
+                          autoPlay={isTouchDevice}
+                          onMouseEnter={e => { if (!isTouchDevice) e.currentTarget.play() }}
+                          onMouseLeave={e => { if (!isTouchDevice) e.currentTarget.pause() }}
                         />
                       ) : (
                         <img
@@ -161,9 +180,9 @@ export function FrameExportQueueWidget() {
                           onClick={() => { setLightboxSrc(url); setLightboxTaskId(task.taskId) }}
                         />
                       )}
-                      <a href={url} download={filename} className="jfs-export-download-btn">
+                      <button className="jfs-export-download-btn" onClick={() => { downloadBlob(url, filename).catch(() => {}) }}>
                         {t.exportQueueDownload}
-                      </a>
+                      </button>
                     </>
                   )
                 })()}

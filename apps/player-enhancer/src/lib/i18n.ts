@@ -72,6 +72,7 @@ const TRANSLATIONS = {
     'grid.sparse':              'Sparse▾',
     'grid.params':              'Params',
     'grid.restore':             'Restore {n} frames',
+    'grid.retryAllFailed':      'Retry {n} failed',
     'grid.generate.animate':    'Generate',
     'grid.generate.stitch':     'Export stitch',
     // ── Progress page ─────────────────────────────────────────────────────────
@@ -210,6 +211,7 @@ const TRANSLATIONS = {
     'grid.sparse':              '稀疏▾',
     'grid.params':              '参数',
     'grid.restore':             '还原 {n} 帧',
+    'grid.retryAllFailed':      '重试 {n} 个失败帧',
     'grid.generate.animate':    '生成动画',
     'grid.generate.stitch':     '导出全景图',
     'progress.generating':      '生成中',
@@ -342,6 +344,7 @@ const TRANSLATIONS = {
     'grid.sparse':              '間引き▾',
     'grid.params':              'パラメータ',
     'grid.restore':             '{n}フレームを復元',
+    'grid.retryAllFailed':      '失敗した{n}フレームを再試行',
     'grid.generate.animate':    '生成',
     'grid.generate.stitch':     'パノラマ出力',
     'progress.generating':      '生成中',

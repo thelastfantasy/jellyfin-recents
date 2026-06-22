@@ -10,7 +10,7 @@ import {
 } from '../core/state'
 import { t } from '../lib/i18n'
 import { bsFirst, bsLast } from './FrameExportModal'
-import { FrameGrid } from './FrameGrid'
+import { FrameGrid, retryAllFailed } from './FrameGrid'
 import { FrameGridSkeleton } from './FrameGridSkeleton'
 import { ParamsPanel } from './ParamsPanel'
 
@@ -32,6 +32,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
   const selectedCount = visible.filter(f => f.selected).length
   const allSel       = visible.length > 0 && selectedCount === visible.length
   const removedCount = frames.filter(f => f.removed).length
+  const failedCount  = visible.filter(f => f.loadError).length
   const isMobile     = window.innerWidth < 600
 
   const dur    = _videoEl?.duration ?? 0
@@ -150,6 +151,11 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
           {removedCount > 0 && (
             <button className="jfs-fe-btn" style={{ fontSize: '11px', padding: '2px 7px', marginLeft: '4px', background: 'rgba(239,68,68,0.75)' }} onClick={handleRestore}>
               {t('grid.restore').replace('{n}', String(removedCount))}
+            </button>
+          )}
+          {failedCount > 0 && (
+            <button className="jfs-fe-btn" style={{ fontSize: '11px', padding: '2px 7px', marginLeft: '4px', background: 'rgba(239,68,68,0.75)' }} onClick={retryAllFailed}>
+              {t('grid.retryAllFailed').replace('{n}', String(failedCount))}
             </button>
           )}
         </span>

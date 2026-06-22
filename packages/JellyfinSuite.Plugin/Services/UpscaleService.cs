@@ -316,15 +316,20 @@ public sealed class UpscaleService : IDisposable
             || job.ResultPath is null || !File.Exists(job.ResultPath))
             return null;
 
-        var contentType = job.OutputExt switch
-        {
-            ".gif" => "image/gif",
-            ".webp" => "image/webp",
-            ".mp4" => "video/mp4",
-            _ => "image/png",
-        };
-        return (File.ReadAllBytes(job.ResultPath), contentType);
+        return (File.ReadAllBytes(job.ResultPath), MimeTypeFor(job.OutputExt));
     }
+
+    /// <summary>Single source of truth for OutputExt → MIME type, shared by <see cref="GetResultBytes"/>
+    /// (sets the actual HTTP response header) and <see cref="ToDto"/> (tells the client whether to
+    /// render the comparison preview as a &lt;video&gt; or &lt;img&gt; — resultUrl is a job-id-based
+    /// endpoint with no file extension of its own, so the client can't sniff this from the URL).</summary>
+    private static string MimeTypeFor(string outputExt) => outputExt switch
+    {
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".mp4" => "video/mp4",
+        _ => "image/png",
+    };
 
 
     public bool Cancel(string jobId)
@@ -377,6 +382,7 @@ public sealed class UpscaleService : IDisposable
         ResultUrl = job.Status == UpscaleJobStatus.Succeeded
             ? $"/JellyfinSuite/Stitch/Upscale/{job.JobId}/Result"
             : null,
+        ResultMimeType = job.Status == UpscaleJobStatus.Succeeded ? MimeTypeFor(job.OutputExt) : null,
         OriginalWidth = job.OriginalWidth,
         OriginalHeight = job.OriginalHeight,
         ResultWidth = job.ResultWidth,
