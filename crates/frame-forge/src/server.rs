@@ -2201,11 +2201,28 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     for batch in misses.chunks(state.frame_decode_concurrency.max(1)) {
         let mut handles = Vec::with_capacity(batch.len());
         for &(fi_idx, pos_ms) in batch {
-            let path_c = path.clone();
-            let sem_c  = Arc::clone(&state.frame_decode_sem);
+            let path_c   = path.clone();
+            let sem_c    = Arc::clone(&state.frame_decode_sem);
+            let cancel_c = Arc::clone(&state.cancel_flag);
             handles.push((fi_idx, pos_ms, tokio::spawn(async move {
                 let _permit = sem_c.acquire_owned().await.map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
-                tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path_c, pos_ms, width))
+                tokio::task::spawn_blocking(move || -> anyhow::Result<jfs_common::DecodeResult> {
+                    // decode_range (not decode_and_encode) on purpose, even for a single target:
+                    // its ±2-frame PTS-proximity matching (BTreeMap range lookup, see its doc
+                    // comment) tolerates B-frame DTS/PTS reordering near the *end* of a decode
+                    // window — decode_and_encode's "best frame at-or-before target_pts" search has
+                    // no such tolerance, and intermittently missed exactly the last frame of a
+                    // batch when this loop briefly used it directly (2026-06-23 report: the final
+                    // grid cell stayed blank, reproducing only sometimes — consistent with a
+                    // tolerance/timing-dependent miss, not a hard out-of-range position).
+                    let mut found: Option<(Vec<u8>, Vec<u8>)> = None;
+                    jfs_common::decode_range(&path_c, &[(fi_idx, pos_ms)], width, cancel_c, |_fi, _pos, webp_thumb, webp_orig| {
+                        found = Some((webp_thumb, webp_orig));
+                        Ok(())
+                    })?;
+                    let (webp, webp_orig) = found.ok_or_else(|| anyhow::anyhow!("no frame matched pos_ms={pos_ms}"))?;
+                    Ok(jfs_common::DecodeResult { webp, webp_orig, pts_ms: pos_ms, fps_num: 0, fps_den: 0 })
+                })
                     .await
                     .map_err(|e| anyhow::anyhow!("decode task panicked: {e}"))?
             })));
