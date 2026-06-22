@@ -2185,75 +2185,76 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
     }
 
-    // Pass 2: decode remaining misses. decode_range itself walks one file sequentially by design
-    // (one seek, decode forward — see its doc comment), so a single call here would always
-    // deliver frameReady events strictly in order no matter how many sockets/connections sit in
-    // front of it — confirmed against a real EventStream capture showing exactly that pattern
-    // for a single "+5s" expand (2026-06-23). Splitting `misses` into up to
-    // `frame_decode_concurrency` contiguous chunks and decoding each in its own decode_range call
-    // (own ffmpeg session, own seek) lets several chunks progress in parallel, so frameReady
-    // events for one bulk prefetch genuinely interleave instead of crawling out one at a time —
-    // at the cost of `chunk_count` seeks instead of one. Each chunk still pulls a permit from
-    // `frame_decode_sem` so total concurrent decode work stays bounded daemon-wide.
-    // T012: channel carries write-success bool so receiver can accurately count failed frames.
-    if !misses.is_empty() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
-
-        let chunk_count = state.frame_decode_concurrency.min(misses.len()).max(1);
-        let chunk_size = misses.len().div_ceil(chunk_count);
-        for chunk in misses.chunks(chunk_size).map(|c| c.to_vec()) {
-            let path_c    = path.clone();
-            let item_id_c = item_id.clone();
-            let disk_c    = state.disk.clone();
-            let cancel_c  = Arc::clone(&state.cancel_flag);
-            let sem_c     = Arc::clone(&state.frame_decode_sem);
-            let tx_c      = tx.clone();
-
-            tokio::spawn(async move {
-                let _permit = match sem_c.acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => return,
-                };
-                let result = tokio::task::spawn_blocking(move || {
-                    jfs_common::decode_range(&path_c, &chunk, width, cancel_c, |fi_idx, pos_ms, webp_thumb, webp_orig| {
-                        if !webp_orig.is_empty() {
-                            disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0, &webp_orig);
-                        }
-                        let wrote_thumb = disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
-                        tx_c.blocking_send((wrote_thumb, fi_idx, pos_ms, webp_thumb, webp_orig))
-                            .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
-                    })
-                }).await;
-                if let Ok(Err(e)) = result {
-                    log::warn!("[jellyfin-suite-frame-forge] chunked prefetch error: {e}");
-                }
-            });
+    // Pass 2: decode remaining misses in fixed-size batches (size = frame_decode_concurrency),
+    // processed strictly in batch order — batch 2 never starts until every frame in batch 1 has
+    // been decoded and reported. Within a batch, frames decode concurrently (independent
+    // decode_and_encode calls, each its own ffmpeg session/seek — trading away decode_range's
+    // single-seek efficiency on purpose). An earlier version split `misses` into N contiguous
+    // chunks running for the whole duration instead: visually that looked like the *last* chunk
+    // (the tail of the range) raced ahead of the others whenever it happened to land a smaller or
+    // cheaper-to-seek share of frames, reading as "loading back-to-front" — not what was wanted
+    // (2026-06-23: "我要的是1234,5678,9101112" — concurrent within a batch, but batches and the
+    // frames inside them still resolve in original front-to-back order). Awaiting each batch's
+    // handles in spawn order (not via a result channel raced across the whole set) is what makes
+    // this deterministic: frame_decode_sem still caps how many decode_and_encode calls run at
+    // once daemon-wide, independent of this batch's own size.
+    for batch in misses.chunks(state.frame_decode_concurrency.max(1)) {
+        let mut handles = Vec::with_capacity(batch.len());
+        for &(fi_idx, pos_ms) in batch {
+            let path_c = path.clone();
+            let sem_c  = Arc::clone(&state.frame_decode_sem);
+            handles.push((fi_idx, pos_ms, tokio::spawn(async move {
+                let _permit = sem_c.acquire_owned().await.map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
+                tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path_c, pos_ms, width))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("decode task panicked: {e}"))?
+            })));
         }
-        drop(tx); // each chunk task owns a clone; rx closes once every chunk has finished
 
-        while let Some((wrote, fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
-            if wrote {
-                decoded += 1;
-                if !first_decode_logged {
-                    first_decode_logged = true;
-                    log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+        for (fi_idx, pos_ms, handle) in handles {
+            let result = match handle.await {
+                Ok(joined) => joined,
+                Err(e) => Err(anyhow::anyhow!("decode task panicked: {e}")),
+            };
+            match result {
+                Ok(r) => {
+                    if !r.webp_orig.is_empty() {
+                        state.disk.write(&item_id, &path, fi_idx, pos_ms, 0, &r.webp_orig);
+                    }
+                    let wrote_thumb = state.disk.write(&item_id, &path, fi_idx, pos_ms, width, &r.webp);
+                    if wrote_thumb {
+                        decoded += 1;
+                        if !first_decode_logged {
+                            first_decode_logged = true;
+                            log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+                        }
+                        {
+                            let mut ram = state.ram.lock().await;
+                            ram.put((path.clone(), pos_ms, 0), r.webp_orig);
+                            ram.put((path.clone(), pos_ms, width), r.webp);
+                        }
+                        let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+                        let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+                        let line = format!(
+                            "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                            thumb.to_string_lossy(), orig.to_string_lossy()
+                        );
+                        write_chunk(stream, line.as_bytes()).await?;
+                    } else {
+                        failed += 1;
+                        let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
+                        write_chunk(stream, line.as_bytes()).await?;
+                    }
                 }
-                {
-                    let mut ram = state.ram.lock().await;
-                    ram.put((path.clone(), pos_ms, 0), webp_orig);
-                    ram.put((path.clone(), pos_ms, width), webp_thumb);
+                Err(e) => {
+                    log::warn!("[jellyfin-suite-frame-forge] batch prefetch decode error fi={fi_idx}: {e}");
+                    failed += 1;
+                    let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
+                    write_chunk(stream, line.as_bytes()).await?;
                 }
-                let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
-                let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
-                let line = format!(
-                    "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
-                    thumb.to_string_lossy(), orig.to_string_lossy()
-                );
-                write_chunk(stream, line.as_bytes()).await?;
-            } else {
-                failed += 1;
-                let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
-                write_chunk(stream, line.as_bytes()).await?;
+            }
+            if state.cancel_flag.load(Ordering::SeqCst) {
+                return Ok(());
             }
         }
     }
