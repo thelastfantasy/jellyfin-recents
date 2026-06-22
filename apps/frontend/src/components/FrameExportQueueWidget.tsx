@@ -36,9 +36,12 @@ function extFromMime(mime: string): string {
 // task.resultUrl's path segment is always the literal placeholder "output.{ext}" (the server
 // route doesn't read it — the real filename comes back via the Content-Disposition header on
 // the actual download), so build a per-item name from the title instead of trusting the URL.
-function safeFileName(title: string, ext: string): string {
+// `suffix` mirrors UpscalePage.tsx's own `_upscale` convention so a saved-to-disk upscaled
+// download reads as "the same export, just sharper" instead of colliding with (or being
+// indistinguishable from) the original's filename.
+function safeFileName(title: string, ext: string, suffix?: string): string {
   const clean = title.replace(/[\\/:*?"<>|]/g, '_').trim()
-  return `${clean || 'export'}.${ext.toLowerCase()}`
+  return `${clean || 'export'}${suffix ? `_${suffix}` : ''}.${ext.toLowerCase()}`
 }
 
 // Hover-to-preview only makes sense where "hover" exists; touch devices play instead based on
@@ -89,18 +92,19 @@ function QueueVideoThumb({ url }: { url: string }) {
 
 // Renders one downloadable preview (original or upscaled, whichever the toggle above it has
 // selected) — extracted so switching between the two doesn't need two near-duplicate JSX blocks.
-function ResultVariant({ downloadLabel, url, itemTitle, fileSize, mimeType, onImageClick }: {
+function ResultVariant({ downloadLabel, url, itemTitle, fileSize, mimeType, filenameSuffix, onImageClick }: {
   downloadLabel: string
   url: string
   itemTitle: string
   fileSize?: number | null
   mimeType?: string | null
+  filenameSuffix?: string
   onImageClick: (url: string) => void
 }) {
   const authedUrl = withAuth(url)
   const ext = mimeType ? extFromMime(mimeType) : extFromUrl(url)
   const isVideo = mimeType ? mimeType.startsWith('video/') : url.endsWith('.mp4')
-  const filename = safeFileName(itemTitle, ext)
+  const filename = safeFileName(itemTitle, ext, filenameSuffix)
   return (
     <div className="jfs-queue-popover__variant">
       <div className="jfs-queue-popover__variant-label">
@@ -295,6 +299,7 @@ export function FrameExportQueueWidget() {
                         itemTitle={task.itemTitle}
                         fileSize={viewingOriginal ? task.fileSize : task.upscaledFileSize}
                         mimeType={viewingOriginal ? undefined : task.upscaledMimeType}
+                        filenameSuffix={viewingOriginal ? undefined : 'upscale'}
                         onImageClick={onImageClick}
                       />
                     </>
