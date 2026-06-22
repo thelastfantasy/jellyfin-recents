@@ -224,6 +224,7 @@ public sealed class UpscaleService : IDisposable
             job.FaceRestoreSkippedNoFace = result.Log?.FaceRestoreSkippedNoFace ?? false;
             job.Percent = 100;
             job.Status = UpscaleJobStatus.Succeeded;
+            _taskManager.MarkUpscaled(job.SourceTaskId);
 
             // Model identity is known up-front here (unlike stitch's auto-detected model), so
             // record LRU usage directly instead of round-tripping it through the daemon's log.
@@ -319,6 +320,7 @@ public sealed class UpscaleService : IDisposable
         {
             ".gif" => "image/gif",
             ".webp" => "image/webp",
+            ".mp4" => "video/mp4",
             _ => "image/png",
         };
         return (File.ReadAllBytes(job.ResultPath), contentType);
@@ -350,7 +352,11 @@ public sealed class UpscaleService : IDisposable
         }
     }
 
-    private void CleanupExpired()
+    /// <summary>Removes completed/failed/cancelled jobs older than 5 minutes, plus their temp
+    /// dirs. Runs on an internal 5-minute <see cref="Timer"/> as a self-healing fallback, and is
+    /// also exposed here so <see cref="Tasks.CleanUpscaleTempTask"/> can surface the same logic as
+    /// a visible, manually-triggerable Jellyfin scheduled task.</summary>
+    public void CleanupExpired()
     {
         var now = DateTime.UtcNow;
         var expired = _jobs

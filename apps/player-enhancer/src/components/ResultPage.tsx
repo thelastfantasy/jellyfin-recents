@@ -34,6 +34,7 @@ export function ResultPage({ onBack, onClose, onUpscale }: {
   }, [isAnimation])
 
   const fullUrl = buildResultUrl('', resultUrl)
+  const isVideo = resultUrl.endsWith('.mp4')
   const sizeStr = fileSize > 1024 * 1024
     ? `${(fileSize / 1024 / 1024).toFixed(1)} MB`
     : `${(fileSize / 1024).toFixed(0)} KB`
@@ -75,15 +76,27 @@ export function ResultPage({ onBack, onClose, onUpscale }: {
         <button className="jfs-fe-btn g" style={{ flex: '0 0 auto', padding: '2px 8px', fontSize: '16px' }} onClick={onClose}>✕</button>
       </div>
       <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
-        <img
-          src={fullUrl}
-          style={{
-            maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
-            transform: `rotate(${rotation}deg)`,
-          }}
-          alt="result"
-        />
+        {isVideo ? (
+          <video
+            src={fullUrl}
+            autoPlay loop muted playsInline controls
+            style={{
+              maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
+              transform: `rotate(${rotation}deg)`,
+            }}
+          />
+        ) : (
+          <img
+            src={fullUrl}
+            style={{
+              maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.5)', transition: 'transform 0.15s',
+              transform: `rotate(${rotation}deg)`,
+            }}
+            alt="result"
+          />
+        )}
       </div>
       <div className="jfs-fe-row sep-t" style={{ flexWrap: 'wrap', gap: '6px' }}>
         <button className="jfs-fe-btn g" onClick={() => setRotation(r => r - 5)} dangerouslySetInnerHTML={{ __html: ICON_CCW + ' 5°' }} />

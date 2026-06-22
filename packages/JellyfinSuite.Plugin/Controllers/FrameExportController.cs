@@ -284,7 +284,7 @@ public class FrameExportController : ControllerBase
 
                 var ext = req.Type switch
                 {
-                    "animate" => req.Params.Format == "webp" ? "webp" : "gif",
+                    "animate" => req.Params.Format switch { "webp" => "webp", "mp4" => "mp4", _ => "gif" },
                     "stitch" => req.Params.Format == "webp" ? "webp" : "png",
                     _ => "bin"
                 };
@@ -316,6 +316,10 @@ public class FrameExportController : ControllerBase
             }
             catch (Exception ex)
             {
+                // This background task has no caller to propagate to — ex.Message alone (what
+                // the frontend shows) was the only trace of a failure anywhere, with nothing in
+                // the server logs to diagnose it from. Always log the full exception here too.
+                _logger.LogError(ex, "[FrameExport] Generate task {TaskId} (type={Type}) failed", task.TaskId, req.Type);
                 task.Status = Services.TaskStatus.Error;
                 task.Error = ex.Message;
                 task.GenerationLog ??= Services.FrameExportService.TryReadOrphanGenerationLog(stitchLogPath);
@@ -379,6 +383,7 @@ public class FrameExportController : ControllerBase
             ".gif" => "image/gif",
             ".webp" => "image/webp",
             ".png" => "image/png",
+            ".mp4" => "video/mp4",
             _ => "application/octet-stream",
         };
 
@@ -458,6 +463,7 @@ public class FrameExportController : ControllerBase
             FileSize  = t.OutputSize,
             Error     = t.Error,
             CreatedAt = new DateTimeOffset(t.CreatedAt, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+            Upscaled  = t.Upscaled,
         });
         return Ok(tasks);
     }

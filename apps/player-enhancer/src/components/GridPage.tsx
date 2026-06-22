@@ -16,8 +16,8 @@ import { ParamsPanel } from './ParamsPanel'
 
 export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, loading = false }: {
   onClose:        () => void
-  onExpandBack:   () => void
-  onExpandForward: () => void
+  onExpandBack:   (seconds?: number) => void
+  onExpandForward: (seconds?: number) => void
   onGenerate:     () => void
   loading?:       boolean
 }) {
@@ -70,7 +70,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
 
   const canGenerate = selectedCount > 1 && visible.filter(f => f.selected).every(f => f.jpegUrl && !f.loadError)
   const displayFormat = exportType === 'animate' ? settings.animateFormat : settings.stitchFormat
-  const formatOpts = exportType === 'animate' ? ['gif', 'webp'] : ['png', 'webp']
+  const formatOpts = exportType === 'animate' ? ['gif', 'webp', 'mp4'] : ['png', 'webp']
 
   function handleSelectAll() {
     const val = !visible.every(f => f.selected)
@@ -103,7 +103,7 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
 
   function handleFormatChange(e: ChangeEvent<HTMLSelectElement>) {
     const formatValue = e.target.value
-    if (exportType === 'animate') updateSettings({ animateFormat: formatValue as 'gif' | 'webp' })
+    if (exportType === 'animate') updateSettings({ animateFormat: formatValue as 'gif' | 'webp' | 'mp4' })
     else                          updateSettings({ stitchFormat:  formatValue as 'png' | 'webp' })
   }
 
@@ -153,12 +153,22 @@ export function GridPage({ onClose, onExpandBack, onExpandForward, onGenerate, l
             </button>
           )}
         </span>
-        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart || backPending} onClick={onExpandBack}>
+        {!isMobile && (
+          <button id="jfs-fe-prev5" className="jfs-fe-btn" disabled={atStart || backPending} onClick={() => onExpandBack(5)}>
+            {atStart ? t('frameExport.atStart') : backPending ? t('frameExport.loading') : t('frameExport.loadPrev5')}
+          </button>
+        )}
+        <button id="jfs-fe-prev" className="jfs-fe-btn" disabled={atStart || backPending} onClick={() => onExpandBack()}>
           {atStart ? t('frameExport.atStart') : backPending ? t('frameExport.loading') : t('frameExport.loadPrev')}
         </button>
-        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd || forwardPending} onClick={onExpandForward}>
+        <button id="jfs-fe-next" className="jfs-fe-btn" disabled={atEnd || forwardPending} onClick={() => onExpandForward()}>
           {atEnd ? t('frameExport.atEnd') : forwardPending ? t('frameExport.loading') : t('frameExport.loadNext')}
         </button>
+        {!isMobile && (
+          <button id="jfs-fe-next5" className="jfs-fe-btn" disabled={atEnd || forwardPending} onClick={() => onExpandForward(5)}>
+            {atEnd ? t('frameExport.atEnd') : forwardPending ? t('frameExport.loading') : t('frameExport.loadNext5')}
+          </button>
+        )}
         <button id="jfs-fe-generate" className="jfs-fe-btn p" disabled={!canGenerate} onClick={onGenerate}>
           {exportType === 'animate' ? t('grid.generate.animate') : t('grid.generate.stitch')}
         </button>

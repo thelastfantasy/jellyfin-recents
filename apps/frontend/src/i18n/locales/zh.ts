@@ -142,6 +142,7 @@ export const zh: Translations = {
   exportQueue: '帧导出队列',
   exportQueueRemove: '删除',
   exportQueueDownload: '下载',
+  exportQueueUpscaled: '已提升画质',
   clipWorkshopQueue: '剪辑工坊队列',
   exportFormat: '格式',
   exportSize: '大小',

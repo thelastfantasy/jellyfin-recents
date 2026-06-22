@@ -48,7 +48,7 @@ pub fn stitch_landscape(
             if stitched.width() >= min_w {
                 Some(stitched)
             } else {
-                eprintln!("[landscape] SIFT canvas too narrow ({}px < {}px) → OpenCV Stitcher",
+                log::warn!("[landscape] SIFT canvas too narrow ({}px < {}px) → OpenCV Stitcher",
                     stitched.width(), min_w);
                 None
             }
@@ -59,11 +59,11 @@ pub fn stitch_landscape(
             // Homography failed or canvas too narrow: try OpenCV Panorama Stitcher first (handles repetitive textures).
             match crate::stitch_liveaction::stitch_with_opencv_panorama(&prev, &curr) {
                 Ok(stitched) => {
-                    eprintln!("[landscape] OpenCV Stitcher fallback succeeded");
+                    log::warn!("[landscape] OpenCV Stitcher fallback succeeded");
                     result = stitched;
                 }
                 Err(e2) => {
-                    eprintln!("[landscape] OpenCV Stitcher fallback failed: {e2} → translation");
+                    log::warn!("[landscape] OpenCV Stitcher fallback failed: {e2} → translation");
                     let mat_prev = image_to_mat(&DynamicImage::ImageRgba8(result.clone()));
                     let (dx, dy) = sift_translation_estimate(&mat_prev, &curr)
                         .unwrap_or_else(|| {
@@ -148,7 +148,7 @@ fn estimate_homography_inner(
     if let Some(m) = matcher {
         match m.match_images(img1, img2).and_then(|pts| {
             let n = pts.len();
-            eprintln!("[dl_match] {} raw matches (need ≥{})", n, crate::dl_match::MIN_INLIERS);
+            log::warn!("[dl_match] {} raw matches (need ≥{})", n, crate::dl_match::MIN_INLIERS);
             if n >= crate::dl_match::MIN_INLIERS {
                 crate::dl_match::homography_usac(&pts)
             } else {
@@ -157,12 +157,12 @@ fn estimate_homography_inner(
         }) {
             Ok(h) => {
                 if homography_is_sane_logged(&h, img1.cols(), img1.rows(), "DL") {
-                    eprintln!("[landscape] DL homography OK → warp_expand_blend");
+                    log::warn!("[landscape] DL homography OK → warp_expand_blend");
                     return Ok(h);
                 }
-                eprintln!("[landscape] DL homography rejected by sanity check, trying AKAZE");
+                log::warn!("[landscape] DL homography rejected by sanity check, trying AKAZE");
             }
-            Err(e) => eprintln!("[dl_match] DL failed ({e}), trying AKAZE"),
+            Err(e) => log::warn!("[dl_match] DL failed ({e}), trying AKAZE"),
         }
     }
 
@@ -171,7 +171,7 @@ fn estimate_homography_inner(
     if !homography_is_sane_logged(&h, img1.cols(), img1.rows(), "AKAZE") {
         anyhow::bail!("homography failed geometric sanity check (repetitive texture)");
     }
-    eprintln!("[landscape] AKAZE homography OK → warp_expand_blend");
+    log::warn!("[landscape] AKAZE homography OK → warp_expand_blend");
     Ok(h)
 }
 
@@ -185,7 +185,7 @@ fn homography_is_sane_logged(h: &core::Mat, img_w: i32, img_h: i32, tag: &str) -
     let scale_y = (h01*h01 + h11*h11).sqrt();
     let angle   = h10.atan2(h00).to_degrees().abs();
     let persp   = (h20*h20 + h21*h21).sqrt();
-    eprintln!("[sanity/{tag}] scale=({scale_x:.3},{scale_y:.3}) angle={angle:.2}° tx={h02:.1} ty={h12:.1} persp={persp:.2e}");
+    log::warn!("[sanity/{tag}] scale=({scale_x:.3},{scale_y:.3}) angle={angle:.2}° tx={h02:.1} ty={h12:.1} persp={persp:.2e}");
     homography_is_sane(h, img_w, img_h)
 }
 
@@ -289,7 +289,7 @@ pub fn warp_expand_blend(
     // exponential.
     let canvas_w = ((max_x-min_x+1).max(1) as u32).min(bw as u32 * 3).min(cw as u32 * 20);
     let canvas_h = ((max_y-min_y+1).max(1) as u32).min(bh as u32 * 3).min(ch as u32 * 20);
-    eprintln!("[landscape] warp_expand_blend: base={bw}x{bh} curr={cw}x{ch} → canvas={canvas_w}x{canvas_h}");
+    log::warn!("[landscape] warp_expand_blend: base={bw}x{bh} curr={cw}x{ch} → canvas={canvas_w}x{canvas_h}");
 
     let mut canvas_base = RgbaImage::new(canvas_w, canvas_h);
     image::imageops::overlay(&mut canvas_base, base, off_x as i64, off_y as i64);
@@ -624,7 +624,7 @@ fn try_graphcut_seam(a: &RgbaImage, b: &RgbaImage) -> Option<FMsk> {
     // both images almost on top of each other. In these cases the DP seam path is poorly
     // constrained → return None and let the caller use a smooth linear gradient instead.
     if cols * 2 > w as usize {
-        eprintln!("[blend] DP seam skipped: overlap {cols}/{w} > 50% → linear gradient");
+        log::warn!("[blend] DP seam skipped: overlap {cols}/{w} > 50% → linear gradient");
         return None;
     }
 
@@ -699,7 +699,7 @@ fn try_graphcut_seam(a: &RgbaImage, b: &RgbaImage) -> Option<FMsk> {
             msk.set(x, y, v);
         }
     }
-    eprintln!("[blend] DP seam OK ({w}×{h}, overlap=[{x_min},{x_max}], b_right={b_right})");
+    log::warn!("[blend] DP seam OK ({w}×{h}, overlap=[{x_min},{x_max}], b_right={b_right})");
     Some(msk)
 }
 
@@ -743,7 +743,7 @@ fn blend_two(a: &RgbaImage, b: &RgbaImage, ma: &GrayMask, mb: &GrayMask) -> Rgba
     // 2. Seam mask — graph-cut (optimal color seam) with linear-gradient fallback
     let msk = try_graphcut_seam(a, &b_ec)
         .unwrap_or_else(|| {
-            eprintln!("[blend] graph-cut unavailable, using linear gradient seam");
+            log::warn!("[blend] graph-cut unavailable, using linear gradient seam");
             seam_mask(ma, mb, w, h)
         });
 

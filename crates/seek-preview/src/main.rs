@@ -15,6 +15,10 @@ fn main() -> Result<()> {
 }
 
 async fn run() -> Result<()> {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("seek_preview=info,jfs_common=warn"),
+    )
+    .init();
     jfs_common::init();
 
     let args: Vec<String> = std::env::args().collect();
@@ -22,9 +26,9 @@ async fn run() -> Result<()> {
 
     let _ = std::fs::remove_file(sock_path);
     let listener = UnixListener::bind(sock_path)?;
-    eprintln!("[seek-preview] listening on {sock_path}");
+    log::info!("[jellyfin-suite-seek-preview] listening on {sock_path}");
 
-    let disk = DiskCache::new("seek-preview");
+    let disk = DiskCache::new("jellyfin-suite-seek-preview");
     let state = server::State::new(disk);
 
     loop {
@@ -32,7 +36,7 @@ async fn run() -> Result<()> {
             Ok((stream, _)) => {
                 tokio::spawn(server::handle_conn(stream, state.clone()));
             }
-            Err(e) => eprintln!("[seek-preview] accept error: {e}"),
+            Err(e) => log::error!("[jellyfin-suite-seek-preview] accept error: {e}"),
         }
     }
 }

@@ -23,6 +23,7 @@ export interface FrameExportTaskDto {
   fileSize: number | null
   error: string | null
   createdAt: number
+  upscaled: boolean
 }
 
 export async function listTasks(): Promise<FrameExportTaskDto[]> {
@@ -40,6 +41,7 @@ export async function listTasks(): Promise<FrameExportTaskDto[]> {
       fileSize:  d.fileSize  ?? null,
       error:     d.error     ?? null,
       createdAt: d.createdAt ?? 0,
+      upscaled:  d.upscaled  ?? false,
     }))
   } catch {
     return []

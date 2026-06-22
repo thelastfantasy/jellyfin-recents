@@ -58,7 +58,7 @@ pub struct AnimationInfo {
 /// let mut decoder = AnimationDecoder::new(webp_data)?;
 ///
 /// let info = decoder.info();
-/// println!("Animation: {}x{}, {} frames", info.width, info.height, info.frame_count);
+/// let _dims_and_frame_count = (info.width, info.height, info.frame_count);
 ///
 /// while let Some(frame) = decoder.next_frame()? {
 ///     process_frame(&frame.data, frame.timestamp_ms);

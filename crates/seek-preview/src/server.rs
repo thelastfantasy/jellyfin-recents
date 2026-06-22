@@ -112,7 +112,7 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                 }
             }
             PRIORITY_LIST => { if handle_list_cached(&mut stream, &state).await.is_err() { break; } }
-            _ => { eprintln!("[seek-preview] unknown priority: 0x{priority:02x}"); break; }
+            _ => { log::warn!("[jellyfin-suite-seek-preview] unknown priority: 0x{priority:02x}"); break; }
         }
     }
 }

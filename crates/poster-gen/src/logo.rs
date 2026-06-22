@@ -20,7 +20,7 @@ pub fn render_logo_at(canvas: &mut RgbaImage, x: u32, y: u32, size: u32, opacity
     let opt = resvg::usvg::Options::default();
     let tree = match resvg::usvg::Tree::from_str(LOGO_SVG, &opt) {
         Ok(t) => t,
-        Err(e) => { eprintln!("WARNING: logo SVG parse failed: {e}"); return; }
+        Err(e) => { log::warn!("[jellyfin-suite-poster-gen] logo SVG parse failed: {e}"); return; }
     };
     let svg_size = tree.size();
     let logo_w = size;
@@ -97,7 +97,7 @@ pub fn render_logo(canvas: &mut RgbaImage, canvas_w: u32, canvas_h: u32) {
     let opt = resvg::usvg::Options::default();
     let tree = match resvg::usvg::Tree::from_str(LOGO_SVG, &opt) {
         Ok(t) => t,
-        Err(e) => { eprintln!("WARNING: logo SVG parse failed: {e}"); return; }
+        Err(e) => { log::warn!("[jellyfin-suite-poster-gen] logo SVG parse failed: {e}"); return; }
     };
 
     let svg_size = tree.size();

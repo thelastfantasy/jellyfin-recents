@@ -66,7 +66,7 @@ pub fn run_generate(args: GenerateArgs) -> Result<(), String> {
                 *c += 1;
                 *c
             };
-            println!("PROGRESS {n}/{total_frames}");
+            crate::ipc::emit_progress(n, total_frames);
             (idx, result)
         })
         .collect();
@@ -79,7 +79,7 @@ pub fn run_generate(args: GenerateArgs) -> Result<(), String> {
             match result {
                 Ok(img) => frames.push((img, timestamps[idx])),
                 Err(e) => {
-                    eprintln!("WARNING: frame {idx} failed: {e}");
+                    log::warn!("[jellyfin-suite-poster-gen] frame {idx} failed: {e}");
                     let blank = image::DynamicImage::ImageRgba8(image::RgbaImage::new(
                         thumb_width,
                         thumb_width * 9 / 16,
@@ -92,7 +92,7 @@ pub fn run_generate(args: GenerateArgs) -> Result<(), String> {
 
     let info_json = serde_json::to_string(&media_info)
         .map_err(|e| format!("Failed to serialize media info: {e}"))?;
-    println!("MEDIA_INFO {info_json}");
+    crate::ipc::emit_media_info(&info_json);
 
     let renderer = crate::text_renderer::Renderer::new(
         args.font_path.as_deref(),
@@ -134,7 +134,7 @@ pub fn run_generate(args: GenerateArgs) -> Result<(), String> {
 
     let abs_output = std::fs::canonicalize(&output)
         .unwrap_or_else(|_| std::path::PathBuf::from(&output));
-    println!("DONE {}", abs_output.display());
+    crate::ipc::emit_done(&abs_output);
 
     Ok(())
 }

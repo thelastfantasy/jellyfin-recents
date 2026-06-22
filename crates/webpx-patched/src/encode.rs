@@ -1124,7 +1124,7 @@ impl<'a> Encoder<'a> {
     ///     .quality(85.0)
     ///     .encode_into(Unstoppable, &mut output)?;
     ///
-    /// println!("Encoded {} bytes", output.len());
+    /// let _encoded_len_bytes = output.len();
     /// # Ok::<(), webpx::At<webpx::Error>>(())
     /// ```
     pub fn encode_into<S: Stop>(self, stop: S, output: &mut Vec<u8>) -> Result<()> {

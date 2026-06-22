@@ -9,7 +9,7 @@ export interface FpsFrac  { num: number; den: number }
 export interface DimSetting { value: number; mode: 'userInput' | 'autoAdjust' }
 
 export interface ExportSettings {
-  animateFormat:      'gif' | 'webp'
+  animateFormat:      'gif' | 'webp' | 'mp4'
   stitchFormat:       'png' | 'webp'
   width:              DimSetting
   height:             DimSetting

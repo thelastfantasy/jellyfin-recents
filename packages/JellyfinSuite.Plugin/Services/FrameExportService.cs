@@ -567,7 +567,7 @@ public sealed class FrameExportService : IDisposable
         Guid itemId,
         List<string> filePaths,
         List<long> frameIndices,
-        string format,   // "gif" or "webp"
+        string format,   // "gif", "webp", or "mp4"
         string resizeMode, int targetPx, float speed, int loopCount,
         float cropX = 0f, float cropY = 0f, float cropW = 0f, float cropH = 0f,
         float quality = 0.75f, string resolutionPreset = "original",
@@ -597,7 +597,7 @@ public sealed class FrameExportService : IDisposable
             ms.Write(pathBytes, 0, pathBytes.Length);
         }
 
-        ushort fmtVal = format == "webp" ? (ushort)0x02 : (ushort)0x01;
+        ushort fmtVal = format switch { "webp" => (ushort)0x02, "mp4" => (ushort)0x03, _ => (ushort)0x01 };
         ushort modeVal = resizeMode == "height" ? (ushort)0x02 : (ushort)0x01;
         ms.Write(BitConverter.GetBytes(fmtVal), 0, 2);
         ms.Write(BitConverter.GetBytes(modeVal), 0, 2);

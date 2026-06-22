@@ -637,7 +637,7 @@ pub fn decode_yuv(data: &[u8]) -> Result<YuvPlanes> {
 /// let webp_data: &[u8] = &[0u8; 100]; // placeholder
 /// let decoder = Decoder::new(webp_data)?;
 /// let info = decoder.info();
-/// println!("Image: {}x{}, alpha: {}", info.width, info.height, info.has_alpha);
+/// let _dims_and_alpha = (info.width, info.height, info.has_alpha);
 ///
 /// let img: imgref::ImgVec<rgb::RGBA8> = decoder.decode_rgba()?;
 /// # Ok::<(), webpx::At<webpx::Error>>(())

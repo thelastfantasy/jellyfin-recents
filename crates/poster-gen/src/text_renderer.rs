@@ -570,7 +570,7 @@ fn decode_if_woff2(data: Vec<u8>) -> Vec<u8> {
     if data.starts_with(b"wOF2") {
         match woff2_patched::decode::convert_woff2_to_ttf(&mut std::io::Cursor::new(&data)) {
             Ok(ttf) => return ttf,
-            Err(e) => eprintln!("WARNING: WOFF2 decode failed, using raw bytes: {e}"),
+            Err(e) => log::warn!("[jellyfin-suite-poster-gen] WOFF2 decode failed, using raw bytes: {e}"),
         }
     }
     data
@@ -583,13 +583,13 @@ fn load_font(path: &str) -> Option<FontArc> {
             match FontArc::try_from_vec(data) {
                 Ok(font) => Some(font),
                 Err(e) => {
-                    eprintln!("WARNING: failed to parse font {path}: {e}");
+                    log::warn!("[jellyfin-suite-poster-gen] failed to parse font {path}: {e}");
                     None
                 }
             }
         },
         Err(e) => {
-            eprintln!("WARNING: failed to load font {path}: {e}");
+            log::warn!("[jellyfin-suite-poster-gen] failed to load font {path}: {e}");
             None
         }
     }

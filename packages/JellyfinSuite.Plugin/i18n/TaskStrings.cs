@@ -30,6 +30,10 @@ public static class TaskStrings
             ["CleanInvalid.Desc"] = "删除用户已不存在或媒体已删除的无效播放记录，每日自动执行",
             ["CleanPosterSheets.Name"] = "清理过期海报图片",
             ["CleanPosterSheets.Desc"] = "删除超过 24 小时的已生成海报图片文件，每日凌晨 3 点自动执行",
+            ["CleanFrameExportTemp.Name"] = "清理工坊导出临时文件",
+            ["CleanFrameExportTemp.Desc"] = "删除已完成超过 5 分钟的动图/全景图导出任务及其临时文件，每日凌晨 4 点自动执行",
+            ["CleanUpscaleTemp.Name"] = "清理工坊提升画质临时文件",
+            ["CleanUpscaleTemp.Desc"] = "删除已完成超过 5 分钟的提升画质任务及其临时文件，每日凌晨 4 点自动执行",
         },
         ["ja"] = new()
         {
@@ -45,6 +49,10 @@ public static class TaskStrings
             ["CleanInvalid.Desc"] = "存在しないユーザーまたは削除されたメディアの無効な再生記録を削除します。毎日自動実行されます。",
             ["CleanPosterSheets.Name"] = "期限切れポスター画像を削除",
             ["CleanPosterSheets.Desc"] = "生成から24時間以上経過したポスター画像ファイルを削除します。毎日午前3時に自動実行されます。",
+            ["CleanFrameExportTemp.Name"] = "ワークショップのエクスポート一時ファイルを削除",
+            ["CleanFrameExportTemp.Desc"] = "完了から5分以上経過したアニメ/パノラマのエクスポートタスクと一時ファイルを削除します。毎日午前4時に自動実行されます。",
+            ["CleanUpscaleTemp.Name"] = "ワークショップの高画質化一時ファイルを削除",
+            ["CleanUpscaleTemp.Desc"] = "完了から5分以上経過した高画質化タスクと一時ファイルを削除します。毎日午前4時に自動実行されます。",
         },
         ["en"] = new()
         {
@@ -60,6 +68,10 @@ public static class TaskStrings
             ["CleanInvalid.Desc"] = "Deletes playback records from deleted users or removed media. Runs automatically every day.",
             ["CleanPosterSheets.Name"] = "Delete expired poster sheets",
             ["CleanPosterSheets.Desc"] = "Deletes generated poster sheet files older than 24 hours. Runs automatically at 3:00 AM daily.",
+            ["CleanFrameExportTemp.Name"] = "Clean up Workshop export temp files",
+            ["CleanFrameExportTemp.Desc"] = "Deletes animate/panorama export tasks (and their temp files) completed more than 5 minutes ago. Runs automatically at 4:00 AM daily.",
+            ["CleanUpscaleTemp.Name"] = "Clean up Workshop upscale temp files",
+            ["CleanUpscaleTemp.Desc"] = "Deletes upscale jobs (and their temp files) completed more than 5 minutes ago. Runs automatically at 4:00 AM daily.",
         },
     };
 

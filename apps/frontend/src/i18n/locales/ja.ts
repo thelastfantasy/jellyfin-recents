@@ -142,6 +142,7 @@ export const ja: Translations = {
   exportQueue: 'フレームエクスポートキュー',
   exportQueueRemove: '削除',
   exportQueueDownload: 'ダウンロード',
+  exportQueueUpscaled: '高画質化済み',
   clipWorkshopQueue: 'クリップワークショップキュー',
   exportFormat: 'フォーマット',
   exportSize: 'サイズ',

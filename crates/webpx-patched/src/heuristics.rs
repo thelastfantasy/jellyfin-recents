@@ -246,9 +246,8 @@ pub struct DecodeEstimate {
 /// use webpx::EncoderConfig;
 ///
 /// let est = estimate_encode(1920, 1080, 4, &EncoderConfig::default());
-/// println!("Peak memory: {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
-/// println!("Estimated time: {:.0}ms (typical), {:.0}-{:.0}ms range",
-///     est.time_ms, est.time_ms_min, est.time_ms_max);
+/// let _peak_memory_mb = est.peak_memory_bytes as f64 / 1_000_000.0;
+/// let _time_range_ms = (est.time_ms_min, est.time_ms, est.time_ms_max);
 /// ```
 #[must_use]
 pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig) -> EncodeEstimate {
@@ -400,10 +399,9 @@ pub fn estimate_encode(width: u32, height: u32, bpp: u8, config: &EncoderConfig)
 /// use webpx::heuristics::estimate_decode;
 ///
 /// let est = estimate_decode(1920, 1080, 4);
-/// println!("Output buffer: {:.1} MB", est.output_bytes as f64 / 1_000_000.0);
-/// println!("Peak memory: {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
-/// println!("Estimated time: {:.0}ms (typical), {:.0}-{:.0}ms range",
-///     est.time_ms, est.time_ms_min, est.time_ms_max);
+/// let _output_buffer_mb = est.output_bytes as f64 / 1_000_000.0;
+/// let _peak_memory_mb = est.peak_memory_bytes as f64 / 1_000_000.0;
+/// let _time_range_ms = (est.time_ms_min, est.time_ms, est.time_ms_max);
 /// ```
 #[must_use]
 pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimate {
@@ -458,7 +456,7 @@ pub fn estimate_decode(width: u32, height: u32, output_bpp: u8) -> DecodeEstimat
 /// use webpx::heuristics::estimate_decode_zerocopy;
 ///
 /// let est = estimate_decode_zerocopy(1920, 1080);
-/// println!("Peak memory (zero-copy): {:.1} MB", est.peak_memory_bytes as f64 / 1_000_000.0);
+/// let _peak_memory_zerocopy_mb = est.peak_memory_bytes as f64 / 1_000_000.0;
 /// ```
 #[must_use]
 pub fn estimate_decode_zerocopy(width: u32, height: u32) -> DecodeEstimate {
@@ -495,8 +493,7 @@ pub fn estimate_decode_zerocopy(width: u32, height: u32) -> DecodeEstimate {
 /// use webpx::EncoderConfig;
 ///
 /// let est = estimate_animation_encode(640, 480, 30, &EncoderConfig::default());
-/// println!("Peak memory for 30-frame animation: {:.1} MB",
-///     est.peak_memory_bytes as f64 / 1_000_000.0);
+/// let _peak_memory_animation_mb = est.peak_memory_bytes as f64 / 1_000_000.0;
 /// ```
 #[must_use]
 pub fn estimate_animation_encode(

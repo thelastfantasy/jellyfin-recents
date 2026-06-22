@@ -2112,6 +2112,10 @@ a.jfs-card__series-name:hover {
   background: rgba(34,197,94,0.25);
   color: #86efac;
 }
+.jfs-export-type-badge--upscaled {
+  background: rgba(245,158,11,0.25);
+  color: #fcd34d;
+}
 .jfs-export-download-btn {
   display: block;
   text-align: center;

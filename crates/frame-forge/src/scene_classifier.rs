@@ -63,7 +63,7 @@ pub fn classify(frames: &[DynamicImage]) -> SceneClass {
         let a = frames[0].resize(128, 128, image::imageops::FilterType::Triangle);
         let b = frames[1].resize(128, 128, image::imageops::FilterType::Triangle);
         let (_, _, pc_quality) = crate::stitch_anime::phase_correlate(&a, &b);
-        eprintln!("[classify] edge={edge_density:.3} entropy={color_entropy:.1} flat={flat_region_ratio:.3} \
+        log::warn!("[classify] edge={edge_density:.3} entropy={color_entropy:.1} flat={flat_region_ratio:.3} \
             motion={motion_score:.3} pc_quality={pc_quality:.4}");
         // High pc_quality → one dominant translation peak → panoramic panning → Landscape.
         // Low pc_quality → diffuse / multi-modal motion → LiveAction.

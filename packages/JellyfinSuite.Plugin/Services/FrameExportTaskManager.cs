@@ -18,6 +18,7 @@ public class TaskState
     public string? OutputPath { get; set; }
     public long? OutputSize { get; set; }
     public string? Error { get; set; }
+    public bool Upscaled { get; set; }
     public string TempDir { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
@@ -151,7 +152,21 @@ public sealed class FrameExportTaskManager : IDisposable
 
     public IEnumerable<TaskState> GetAllTasks() => _tasks.Values;
 
-    private void CleanupExpired()
+    /// <summary>Flags a task's result as having been upscaled at least once, so the queue widget
+    /// can surface a tag — called by <see cref="UpscaleService"/> once its (otherwise fully
+    /// separate) job dictionary reports success. Best-effort: silently no-ops once the source task
+    /// has already expired out of <see cref="_tasks"/> (5min TTL), since there's nothing left to
+    /// flag at that point.</summary>
+    public void MarkUpscaled(string taskId)
+    {
+        if (_tasks.TryGetValue(taskId, out var state)) state.Upscaled = true;
+    }
+
+    /// <summary>Removes completed/errored/cancelled tasks older than 5 minutes, plus their temp
+    /// dirs. Runs on an internal 5-minute <see cref="Timer"/> as a self-healing fallback, and is
+    /// also exposed here so <see cref="Tasks.CleanFrameExportTempTask"/> can surface the same
+    /// logic as a visible, manually-triggerable Jellyfin scheduled task.</summary>
+    public void CleanupExpired()
     {
         var now = DateTime.UtcNow;
         var expired = new List<string>();

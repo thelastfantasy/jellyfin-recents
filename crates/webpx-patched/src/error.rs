@@ -47,8 +47,8 @@
 //! ```rust,ignore
 //! if let Err(at_err) = encode_rgba(data, 100, 100, 85.0, Unstoppable) {
 //!     match at_err.error() {
-//!         Error::InvalidInput(msg) => println!("Bad input: {}", msg),
-//!         _ => println!("{:?}", at_err),  // Print with trace
+//!         Error::InvalidInput(msg) => handle_invalid_input(msg),
+//!         _ => log_with_trace(&at_err),  // has full trace via Debug
 //!     }
 //! }
 //! ```

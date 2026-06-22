@@ -9,6 +9,7 @@ export interface ExportTaskEntry {
   fileSize?: number
   error?: string
   addedAt: number
+  upscaled?: boolean
 }
 
 const _tasks = new Map<string, ExportTaskEntry>()

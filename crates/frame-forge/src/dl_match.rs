@@ -480,24 +480,24 @@ fn load_matcher() -> Option<AnyMatcher> {
     let pref = std::env::var("FRAME_FORGE_MATCHER").unwrap_or_default();
     let result = match pref.trim() {
         "none" | "disabled" | "akaze" => {
-            eprintln!("[dl_match] matcher=disabled (AKAZE only)");
+            log::warn!("[dl_match] matcher=disabled (AKAZE only)");
             None
         }
         "lightglue" => load_lightglue().or_else(|| {
-            eprintln!("[dl_match] FRAME_FORGE_MATCHER=lightglue but model not found");
+            log::warn!("[dl_match] FRAME_FORGE_MATCHER=lightglue but model not found");
             None
         }),
         "efficient-loftr" | "loftr" => load_loftr().or_else(|| {
-            eprintln!("[dl_match] FRAME_FORGE_MATCHER=efficient-loftr but model not found");
+            log::warn!("[dl_match] FRAME_FORGE_MATCHER=efficient-loftr but model not found");
             None
         }),
         _ => load_lightglue().or_else(|| load_loftr()),
     };
     match &result {
-        Some(AnyMatcher::LightGlue(_))     => eprintln!("[dl_match] loaded: LightGlue v1"),
-        Some(AnyMatcher::LightGlueV2(_))   => eprintln!("[dl_match] loaded: LightGlue v2"),
-        Some(AnyMatcher::EfficientLoFTR(_))=> eprintln!("[dl_match] loaded: EfficientLoFTR"),
-        None => eprintln!("[dl_match] no model loaded — AKAZE only"),
+        Some(AnyMatcher::LightGlue(_))     => log::warn!("[dl_match] loaded: LightGlue v1"),
+        Some(AnyMatcher::LightGlueV2(_))   => log::warn!("[dl_match] loaded: LightGlue v2"),
+        Some(AnyMatcher::EfficientLoFTR(_))=> log::warn!("[dl_match] loaded: EfficientLoFTR"),
+        None => log::warn!("[dl_match] no model loaded — AKAZE only"),
     }
     result
 }
@@ -698,7 +698,7 @@ pub fn build_ep_session(
                 let verbose = std::env::var("FRAME_FORGE_ORT_VERBOSE").as_deref() == Ok("1");
                 let builder = match Session::builder() {
                     Ok(b) => b,
-                    Err(e) => { if verbose { eprintln!("[dl_match] Session::builder() failed: {e}"); } return None; }
+                    Err(e) => { if verbose { log::warn!("[dl_match] Session::builder() failed: {e}"); } return None; }
                 };
                 // Without these, ORT's CUDA EP defaults to an unbounded arena with
                 // kNextPowerOfTwo extension — every time the arena needs more memory it rounds
@@ -715,12 +715,12 @@ pub fn build_ep_session(
                     .with_memory_limit(memory_limit_bytes);
                 let builder = match builder.with_execution_providers([cuda_ep.build()]) {
                     Ok(b) => b,
-                    Err(e) => { if verbose { eprintln!("[dl_match] with_execution_providers(CUDA) failed: {e}"); } return None; }
+                    Err(e) => { if verbose { log::warn!("[dl_match] with_execution_providers(CUDA) failed: {e}"); } return None; }
                 };
                 let builder = if verbose {
                     match builder.with_log_level(ort::logging::LogLevel::Verbose) {
                         Ok(b) => b,
-                        Err(e) => { eprintln!("[dl_match] with_log_level failed: {e}"); return None; }
+                        Err(e) => { log::warn!("[dl_match] with_log_level failed: {e}"); return None; }
                     }
                 } else { builder };
                 // ORT's chrome-trace profiler records the actual EP each op executed on — more
@@ -730,7 +730,7 @@ pub fn build_ep_session(
                 let builder = if verbose {
                     match builder.with_profiling("/tmp/ort_profile") {
                         Ok(b) => b,
-                        Err(e) => { eprintln!("[dl_match] with_profiling failed: {e}"); return None; }
+                        Err(e) => { log::warn!("[dl_match] with_profiling failed: {e}"); return None; }
                     }
                 } else { builder };
                 // FRAME_FORGE_ORT_NO_OPT=1: diagnostic-only — ORT defaults to GraphOptimizationLevel::Level3
@@ -746,13 +746,13 @@ pub fn build_ep_session(
                 let builder = if std::env::var("FRAME_FORGE_ORT_NO_OPT").as_deref() == Ok("1") {
                     match builder.with_optimization_level(ort::session::builder::GraphOptimizationLevel::Disable) {
                         Ok(b) => b,
-                        Err(e) => { if verbose { eprintln!("[dl_match] with_optimization_level failed: {e}"); } return None; }
+                        Err(e) => { if verbose { log::warn!("[dl_match] with_optimization_level failed: {e}"); } return None; }
                     }
                 } else { builder };
                 let mut builder = builder;
                 match builder.commit_from_file(&path_buf) {
                     Ok(s) => Some(s),
-                    Err(e) => { if verbose { eprintln!("[dl_match] commit_from_file (CUDA) failed: {e}"); } None }
+                    Err(e) => { if verbose { log::warn!("[dl_match] commit_from_file (CUDA) failed: {e}"); } None }
                 }
             });
             match gpu {
@@ -1071,7 +1071,7 @@ pub fn estimate_homography(
     if let Some(m) = matcher {
         match m.match_images(img0, img1).and_then(|pts| {
             let n = pts.len();
-            eprintln!("[dl_match] {} raw matches (need ≥{})", n, MIN_INLIERS);
+            log::warn!("[dl_match] {} raw matches (need ≥{})", n, MIN_INLIERS);
             if n >= MIN_INLIERS {
                 homography_usac(&pts)
             } else {
@@ -1079,11 +1079,11 @@ pub fn estimate_homography(
             }
         }) {
             Ok(h) => {
-                eprintln!("[dl_match] DL homography OK");
+                log::warn!("[dl_match] DL homography OK");
                 return Ok(h);
             }
             Err(e) => {
-                eprintln!("[dl_match] DL failed ({e}), falling back to AKAZE");
+                log::warn!("[dl_match] DL failed ({e}), falling back to AKAZE");
             }
         }
     }

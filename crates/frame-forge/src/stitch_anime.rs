@@ -13,6 +13,13 @@ use rustfft::{FftPlanner, num_complex::Complex};
 // margin on both sides of the observed gap.
 const QUALITY_THRESHOLD: f64 = 0.15;
 
+// Backtrack is O(run-of-consecutive-low-quality-pairs), not O(1) — a long stretch of mutually
+// noisy frames (plausible with many input frames and an unlucky dedup outcome) makes every one
+// of them re-correlate against every prior frame, an O(n²) phase_correlate blowup with no
+// existing ceiling. 40 is generous relative to the actual backtrack distances seen in production
+// (recoveries have all been within single digits of frames) while still bounding the worst case.
+const MAX_BACKTRACK: usize = 40;
+
 /// Returns (dx, dy, peak_quality). quality < QUALITY_THRESHOLD → scene cut.
 pub fn phase_correlate(a: &DynamicImage, b: &DynamicImage) -> (i32, i32, f64) {
     let ga = a.to_luma8();
@@ -249,7 +256,7 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 { anyhow::bail!("need at least 2 frames"); }
 
     let (fw, fh) = (frames[0].width() as i32, frames[0].height() as i32);
-    eprintln!("[stitch] stitch_anime: {} frames, {fw}x{fh}", frames.len());
+    log::warn!("[stitch] stitch_anime: {} frames, {fw}x{fh}", frames.len());
 
     // Compute offsets; low-quality pairs don't extend the canvas.
     //
@@ -260,15 +267,24 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     // how much of the real footage the final canvas covers is the whole point of this
     // algorithm, so before writing a frame off as a scene cut, back off to i-2, i-3, ... and
     // try those instead. Only if *none* of the prior frames correlate is it a genuine cut.
+    //
+    // Tried (and reverted) always taking the best sub-threshold candidate instead of freezing:
+    // on a real production clip with a run of several mutually-noisy near-static frames, summing
+    // those noise-level (non-zero-mean) dx/dy values compounded into a ~260px spurious drift and
+    // *shrank* the panorama's real vertical extent by shifting the later, genuinely-correlated
+    // frames' baseline — strictly worse than freezing on both axes. Below-threshold quality here
+    // is genuinely indistinguishable from noise, not recoverable real motion, so freezing (not
+    // accumulating) is the safer default.
     let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];
     let mut pair_quality: Vec<f64> = vec![];
     for i in 1..frames.len() {
         let mut accepted: Option<(usize, i32, i32, f64)> = None;
         let mut best_q = 0.0f64;
-        for k in 1..=i {
+        let backtrack_limit = i.min(MAX_BACKTRACK);
+        for k in 1..=backtrack_limit {
             let ref_idx = i - k;
             let (dx, dy, q) = phase_correlate(&frames[ref_idx], &frames[i]);
-            eprintln!(
+            log::warn!(
                 "[stitch] pair {ref_idx}-{i}: dx={dx} dy={dy} q={q:.4}{}",
                 if k > 1 { " (backtrack)" } else { "" }
             );
@@ -284,12 +300,12 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
                 let base = offsets[ref_idx];
                 offsets.push((base.0 + dx, base.1 + dy));
                 if ref_idx != i - 1 {
-                    eprintln!("[stitch] frame {i}: recovered via backtrack to frame {ref_idx} (q={q:.4})");
+                    log::warn!("[stitch] frame {i}: recovered via backtrack to frame {ref_idx} (q={q:.4})");
                 }
             }
             None => {
-                eprintln!(
-                    "[stitch] frame {i}: scene cut (best q={best_q:.4} < {QUALITY_THRESHOLD} against all {i} prior frames)"
+                log::warn!(
+                    "[stitch] frame {i}: scene cut (best q={best_q:.4} < {QUALITY_THRESHOLD} against {backtrack_limit} prior frames)"
                 );
                 offsets.push(offsets[i - 1]);
             }
@@ -302,7 +318,7 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     let max_y = offsets.iter().map(|o| o.1 + fh).max().unwrap_or(fh);
     let cw = (max_x - min_x) as u32;
     let ch = (max_y - min_y) as u32;
-    eprintln!("[stitch] canvas {cw}x{ch} (offsets span x=[{min_x},{max_x}] y=[{min_y},{max_y}])");
+    log::warn!("[stitch] canvas {cw}x{ch} (offsets span x=[{min_x},{max_x}] y=[{min_y},{max_y}])");
 
     // Sanity cap: each pair contributes at most half a frame dimension (phase_correlate's
     // wraparound correction bounds |dx|,|dy| <= w/2, h/2 — see its doc comment), so N frames

@@ -57,7 +57,7 @@ public class FrameReference
 
 public class ExportParams
 {
-    [JsonPropertyName("format")]           public string Format { get; set; } = "gif"; // animate: gif/webp; stitch: png/webp-lossless
+    [JsonPropertyName("format")]           public string Format { get; set; } = "gif"; // animate: gif/webp/mp4; stitch: png/webp-lossless
     [JsonPropertyName("resizeMode")]       public string ResizeMode { get; set; } = "width";
     [JsonPropertyName("customWidth")]      public int? CustomWidth { get; set; }
     [JsonPropertyName("customHeight")]     public int? CustomHeight { get; set; }

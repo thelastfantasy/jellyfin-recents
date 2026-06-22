@@ -41,6 +41,7 @@ export function FrameExportQueueWidget() {
           resultUrl: st.resultUrl ?? undefined,
           fileSize:  st.fileSize  ?? undefined,
           error:     st.error     ?? undefined,
+          upscaled:  st.upscaled,
         })
       }
     })
@@ -107,6 +108,11 @@ export function FrameExportQueueWidget() {
                         )}
                       </>
                     )}
+                    {task.upscaled && (
+                      <span className="jfs-export-type-badge jfs-export-type-badge--upscaled">
+                        {t.exportQueueUpscaled}
+                      </span>
+                    )}
                     {task.itemTitle}
                   </span>
                   <button
@@ -137,14 +143,24 @@ export function FrameExportQueueWidget() {
                 {task.status === 'complete' && task.resultUrl && (() => {
                   const url = withAuth(task.resultUrl)
                   const filename = task.resultUrl.split('/').pop() ?? 'output'
+                  const isVideo = task.resultUrl.endsWith('.mp4')
                   return (
                     <>
-                      <img
-                        src={url}
-                        alt={task.itemTitle}
-                        className="jfs-queue-popover__thumb"
-                        onClick={() => { setLightboxSrc(url); setLightboxTaskId(task.taskId) }}
-                      />
+                      {isVideo ? (
+                        <video
+                          src={url}
+                          className="jfs-queue-popover__thumb"
+                          controls
+                          muted
+                        />
+                      ) : (
+                        <img
+                          src={url}
+                          alt={task.itemTitle}
+                          className="jfs-queue-popover__thumb"
+                          onClick={() => { setLightboxSrc(url); setLightboxTaskId(task.taskId) }}
+                        />
+                      )}
                       <a href={url} download={filename} className="jfs-export-download-btn">
                         {t.exportQueueDownload}
                       </a>

@@ -355,14 +355,29 @@ export function UpscalePage({ onBack, onClose }: {
         </div>
       )}
 
-      {phase === 'success' && job && (
+      {phase === 'success' && job && (() => {
+        const previewUrl = (showAfter ? job.resultUrl : job.originalUrl) ?? ''
+        const isVideo = previewUrl.endsWith('.mp4')
+        return (
         <>
           <div style={{ overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', background: 'rgba(0,0,0,0.3)' }}>
-            <img
-              src={buildResultUrl('', (showAfter ? job.resultUrl : job.originalUrl) ?? '')}
-              style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
-              alt={showAfter ? t('upscale.after') : t('upscale.before')}
-            />
+            {isVideo ? (
+              <video
+                key={previewUrl}
+                src={buildResultUrl('', previewUrl)}
+                style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+                controls
+                autoPlay
+                loop
+                muted
+              />
+            ) : (
+              <img
+                src={buildResultUrl('', previewUrl)}
+                style={{ maxWidth: '100%', maxHeight: '36vh', objectFit: 'contain', borderRadius: '6px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+                alt={showAfter ? t('upscale.after') : t('upscale.before')}
+              />
+            )}
           </div>
           <div className="jfs-fe-row" style={{ justifyContent: 'center', gap: '8px' }}>
             <button className={`jfs-fe-btn${showAfter ? '' : ' p'}`} onClick={() => setShowAfter(false)}>{t('upscale.before')}</button>
@@ -391,20 +406,21 @@ export function UpscalePage({ onBack, onClose }: {
             </div>
           )}
           <div className="jfs-fe-row sep-t" style={{ gap: '8px' }}>
-            <button className="jfs-fe-btn g" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>
+            <button className="jfs-fe-btn" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>
             <div className="jfs-fe-spacer" />
-            <button className="jfs-fe-btn g" onClick={handleDownloadOriginal}>{t('upscale.downloadOriginal')}</button>
+            <button className="jfs-fe-btn" onClick={handleDownloadOriginal}>{t('upscale.downloadOriginal')}</button>
             <button className="jfs-fe-btn p" onClick={handleDownloadImage}>{t('upscale.download')}</button>
           </div>
         </>
-      )}
+        )
+      })()}
 
       {phase === 'error' && (
         <div className="jfs-fe-row" style={{ flexDirection: 'column', gap: '10px', padding: '20px 12px' }}>
           <span style={{ color: '#f87171' }}>{t('upscale.failed').replace('{msg}', errorMsg)}</span>
           <div className="jfs-fe-row" style={{ gap: '8px' }}>
             <button className="jfs-fe-btn" onClick={onBack}>{t('upscale.back')}</button>
-            {job?.jobId && <button className="jfs-fe-btn g" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>}
+            {job?.jobId && <button className="jfs-fe-btn" onClick={handleDownloadLog}>{t('upscale.downloadLog')}</button>}
           </div>
         </div>
       )}

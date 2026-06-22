@@ -178,7 +178,7 @@ pub struct State {
 
 impl State {
     pub fn new() -> Arc<Self> {
-        let disk = DiskCache::new("frame-forge");
+        let disk = DiskCache::new("jellyfin-suite-frame-forge");
         let (tx, rx) = mpsc::channel(PREFETCH_QUEUE_CAP);
         let state = Arc::new(Self {
             ram: Mutex::new(LruCache::new(NonZeroUsize::new(RAM_CACHE_CAP).unwrap())),
@@ -202,6 +202,32 @@ impl State {
 fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
     if fps_num <= 0 || fps_den <= 0 { return -1; }
     (actual_pts_ms * fps_num + fps_den * 500) / (fps_den * 1000)
+}
+
+/// Seeks `ictx` to its very start and returns the first video packet's ms timestamp (relative to
+/// `stream_start_ms`) — the zero-point that both `queue_a_demux`'s slow path and
+/// `handle_prefetch_range_stream`'s quick-demux fallback must subtract before calling
+/// `compute_frame_idx`, so the two stay numerically consistent with each other before Queue B's
+/// full background index is ready. Without this, a stream whose first packet PTS is non-zero
+/// (e.g. ~4.7s on a 29fps stream → ~138 frames) biases the naive ms*fps/1000 formula by a constant
+/// offset — and since the two call sites used to apply this correction inconsistently, the frame
+/// numbers they emitted for the same on-screen window diverged by that offset, so the frontend's
+/// fiIdx-based matching between the displayed grid and incoming prefetch results silently failed
+/// for every frame in the window.
+fn first_video_pkt_ms(
+    ictx: &mut ffmpeg_next::format::context::Input,
+    stream_idx: usize,
+    stream_start_ms: i64,
+) -> i64 {
+    ictx.seek(0, ..i64::MAX).unwrap_or(());
+    for (s, pkt) in ictx.packets() {
+        if s.index() != stream_idx { continue; }
+        let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
+        let tb = s.time_base();
+        let raw = (pts as f64 * tb.numerator() as f64 * 1000.0 / tb.denominator() as f64) as i64;
+        return (raw - stream_start_ms).max(0);
+    }
+    0
 }
 
 /// Resolve frameIdx → posMs using the cached frame index.
@@ -251,10 +277,10 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
                     ram.put((job.path.clone(), pos_ms, 0), r.webp_orig);
                 }
                 ram.put((job.path, pos_ms, width), r.webp);
-                log::warn!("[frame-forge] PREFETCH done: {item_id} f{frame_idx}@{pos_ms}ms w={width}");
+                log::warn!("[jellyfin-suite-frame-forge] PREFETCH done: {item_id} f{frame_idx}@{pos_ms}ms w={width}");
             }
-            Ok(Err(e)) => log::warn!("[frame-forge] prefetch decode error: {e}"),
-            Err(e) => log::warn!("[frame-forge] prefetch spawn error: {e}"),
+            Ok(Err(e)) => log::warn!("[jellyfin-suite-frame-forge] prefetch decode error: {e}"),
+            Err(e) => log::warn!("[jellyfin-suite-frame-forge] prefetch spawn error: {e}"),
         }
 
         state.in_progress.lock().await.remove(&(item_id, pos_ms, width));
@@ -273,69 +299,69 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
         match msg_type {
             MSG_SINGLE_FRAME => {
                 if let Err(e) = handle_single_frame(&mut stream, &state).await {
-                    log::warn!("[frame-forge] single_frame error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] single_frame error: {e}");
                 }
             }
             MSG_PREFETCH_FRAME => {
                 if let Err(e) = handle_prefetch_frame(&mut stream, &state).await {
-                    log::warn!("[frame-forge] prefetch error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] prefetch error: {e}");
                 }
             }
             MSG_ANIMATE => {
                 if let Err(e) = handle_animate(&mut stream, &state).await {
-                    log::warn!("[frame-forge] animate error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] animate error: {e}");
                 }
             }
             MSG_STITCH => {
                 if let Err(e) = handle_stitch(&mut stream, &state).await {
-                    log::warn!("[frame-forge] stitch error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] stitch error: {e}");
                 }
             }
             MSG_LIST_CACHED => {
                 if let Err(e) = handle_list_cached(&mut stream, &state).await {
-                    log::warn!("[frame-forge] list_cached error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] list_cached error: {e}");
                     break;
                 }
             }
             MSG_INDEX_FRAMES => {
                 if let Err(e) = handle_index_frames(&mut stream, &state).await {
-                    log::warn!("[frame-forge] index_frames error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] index_frames error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_RANGE => {
                 if let Err(e) = handle_prefetch_range(&mut stream, &state).await {
-                    log::warn!("[frame-forge] prefetch_range error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] prefetch_range error: {e}");
                     break;
                 }
             }
             MSG_INDEX_FRAMES_STREAM => {
                 if let Err(e) = handle_index_frames_stream(&mut stream, state.clone()).await {
-                    log::warn!("[frame-forge] index_frames_stream error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] index_frames_stream error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_STREAM => {
                 if let Err(e) = handle_prefetch_stream(&mut stream, &state).await {
-                    log::warn!("[frame-forge] prefetch_stream error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] prefetch_stream error: {e}");
                     break;
                 }
             }
             MSG_PREFETCH_RANGE_STREAM => {
                 if let Err(e) = handle_prefetch_range_stream(&mut stream, &state).await {
-                    log::warn!("[frame-forge] prefetch_range_stream error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] prefetch_range_stream error: {e}");
                     break;
                 }
             }
             MSG_DEBUG_DUMP => {
                 if let Err(e) = handle_debug_dump(&mut stream, &state).await {
-                    log::warn!("[frame-forge] debug_dump error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] debug_dump error: {e}");
                     break;
                 }
             }
             MSG_UPSCALE => {
                 if let Err(e) = handle_upscale(&mut stream, &state).await {
-                    log::warn!("[frame-forge] upscale error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] upscale error: {e}");
                     // handle_upscale can fail (model load, decode, inference OOM, encode, ...)
                     // at points that never reached a send_progress("error", ...) call on their
                     // own — leaving the client's ReceiveExactAsync waiting forever for a response
@@ -353,13 +379,13 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                 if let Ok(req) = crate::protocol::read_cancel_upscale_req(&mut stream).await {
                     if let Some(flag) = state.upscale_cancel_flags.lock().unwrap().get(&req.job_id) {
                         flag.store(true, Ordering::Relaxed);
-                        log::info!("[frame-forge] UPSCALE job {} flagged for cancellation", req.job_id);
+                        log::info!("[jellyfin-suite-frame-forge] UPSCALE job {} flagged for cancellation", req.job_id);
                     }
                 }
                 break;
             }
             _ => {
-                log::warn!("[frame-forge] unknown msg_type: 0x{msg_type:02x}");
+                log::warn!("[jellyfin-suite-frame-forge] unknown msg_type: 0x{msg_type:02x}");
                 break;
             }
         }
@@ -414,7 +440,7 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
             let img = match image::load_from_memory(&r.webp) {
                 Ok(i) => i,
                 Err(e) => {
-                    log::warn!("[frame-forge] image decode error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] image decode error: {e}");
                     write_ack(stream, req.request_id).await?;
                     return Ok(());
                 }
@@ -423,11 +449,11 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
             write_jpeg_response(stream, req.request_id, &r.webp, flags, r.pts_ms).await?;
         }
         Ok(Err(e)) => {
-            log::warn!("[frame-forge] decode error: {e}");
+            log::warn!("[jellyfin-suite-frame-forge] decode error: {e}");
             write_ack(stream, req.request_id).await?;
         }
         Err(e) => {
-            log::warn!("[frame-forge] spawn error: {e}");
+            log::warn!("[jellyfin-suite-frame-forge] spawn error: {e}");
             write_ack(stream, req.request_id).await?;
         }
     }
@@ -499,21 +525,21 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     let req = crate::protocol::read_animate_req(stream).await?;
     log::warn!(
-        "[frame-forge] ANIMATE task={} frames={} fmt={:?} speed={}",
+        "[jellyfin-suite-frame-forge] ANIMATE task={} frames={} fmt={:?} speed={}",
         req.task_id, req.paths.len(), req.format, req.speed
     );
 
     // Reject under high resource pressure to protect seek-preview latency (T085)
     let pressure = crate::resources::resource_pressure();
     if pressure > 0.8 {
-        log::warn!("[frame-forge] ANIMATE: resource pressure {pressure:.2} > 0.8, rejecting task");
+        log::warn!("[jellyfin-suite-frame-forge] ANIMATE: resource pressure {pressure:.2} > 0.8, rejecting task");
         send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
         return Ok(());
     }
 
     let total_input = req.paths.len();
     send_progress(stream, "running", "decoding", 0, total_input as u32, 0.0).await?;
-    log::warn!("[frame-forge] ANIMATE progress sent, loading frame index...");
+    log::warn!("[jellyfin-suite-frame-forge] ANIMATE progress sent, loading frame index...");
 
     // Load frame index for the first path (all frames share the same video)
     let fi = {
@@ -521,7 +547,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         state.fi.get_or_build(&p).await?
     };
     let (fi_frames, _, _) = fi.as_ref();
-    log::warn!("[frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
+    log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame index loaded: {} frames", fi_frames.len());
 
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(total_input);
     let mut actual_pts_vec: Vec<i64> = Vec::with_capacity(total_input);
@@ -532,13 +558,13 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         } else {
             0
         };
-        log::warn!("[frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
+        log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame {} idx={} pos_ms={}", i, frame_idx, pos_ms);
 
         let (img, actual_pts) = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
-            log::warn!("[frame-forge] ANIMATE frame {} → disk cache hit", i);
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame {} → disk cache hit", i);
             (image::load_from_memory(&cached)?, pos_ms)
         } else {
-            log::warn!("[frame-forge] ANIMATE frame {} → decode", i);
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame {} → decode", i);
             let p = path.clone();
             let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
             (image::load_from_memory(&r.webp)?, r.pts_ms)
@@ -546,14 +572,14 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
         images.push(img);
         actual_pts_vec.push(actual_pts);
-        if i == 0 { log::warn!("[frame-forge] ANIMATE first frame ready"); }
+        if i == 0 { log::warn!("[jellyfin-suite-frame-forge] ANIMATE first frame ready"); }
         send_progress(
             stream, "running", "decoding",
             (i + 1) as u32, total_input as u32,
             (i + 1) as f64 / total_input as f64 * 50.0,
         ).await?;
     }
-    log::warn!("[frame-forge] ANIMATE decode done, {} images", images.len());
+    log::warn!("[jellyfin-suite-frame-forge] ANIMATE decode done, {} images", images.len());
 
     if images.is_empty() {
         // Same hang hazard as the stitch dedup check below — must send an error progress
@@ -611,10 +637,23 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     let format = req.format;
     let loop_count = req.loop_count;
     let quality = req.quality;
+    // delays_ms is always uniform (single repeated value, see above) — MP4 is CFR-only, so
+    // there's no per-frame timing to preserve beyond this single rate.
+    let fps = (1000.0 / delays_ms[0].max(1) as f64).clamp(1.0, 60.0);
 
     let encode_handle = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
         let n = images.len();
-        if format.is_webp() {
+        match format {
+        crate::protocol::AnimFormat::Mp4 => {
+            let scaled: Vec<image::DynamicImage> = images.iter()
+                .map(|img| crate::animate::scale_frame(img, tw, th))
+                .collect();
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE encoder: mp4 {}x{} fps={:.3} quality={}", tw, th, fps, quality);
+            crate::animate::encode_mp4(&scaled, fps, quality, |i| {
+                let _ = prog_tx.send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
+            })
+        }
+        crate::protocol::AnimFormat::WebP => {
             use image::imageops;
             use webpx::AnimationEncoder;
             use enough::Unstoppable;
@@ -637,7 +676,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                 encoder.set_preprocessing(1);
                 encoder.set_sharp_yuv(true);
             }
-            log::warn!("[frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE encoder: {}x{} lossless={} quality={}", tw, th, lossless, if lossless { 0.0 } else { quality * 100.0 });
 
             // Workaround: libwebp's minimize_size (default true) merges too-similar frames.
             // Flip the last byte of each frame's RGBA data to guarantee uniqueness,
@@ -657,18 +696,19 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                     let last = rgba.len() - 1;
                     rgba[last] ^= 1;
                 }
-                log::warn!("[frame-forge] ANIMATE add_frame {} cursor_ms={} rgba_bytes={}", i, cursor_ms, rgba.len());
+                log::warn!("[jellyfin-suite-frame-forge] ANIMATE add_frame {} cursor_ms={} rgba_bytes={}", i, cursor_ms, rgba.len());
                 encoder.add_frame_rgba(&rgba, cursor_ms)
                     .map_err(|e| anyhow::anyhow!("add_frame: {e}"))?;
                 cursor_ms += delays_ms.get(i).map(|&ms| ms as i32).unwrap_or(200);
                 let _ = prog_tx.send(50.0 + (i + 1) as f64 / n as f64 * 49.0);
             }
 
-            log::warn!("[frame-forge] ANIMATE webp finish start, {} frames added, {} input images", n, n);
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE webp finish start, {} frames added, {} input images", n, n);
             let output = encoder.finish(cursor_ms).map_err(|e| anyhow::anyhow!("finish: {e}"))?;
-            log::warn!("[frame-forge] ANIMATE webp finish done, {} bytes", output.len());
+            log::warn!("[jellyfin-suite-frame-forge] ANIMATE webp finish done, {} bytes", output.len());
             Ok(output)
-        } else {
+        }
+        crate::protocol::AnimFormat::Gif => {
             use gif::{Encoder as GifEnc, Frame as GifFrame, Repeat};
             let gif_speed = if quality <= 0.0 { 1 } else {
                 (1.0 + (1.0 - quality.clamp(0.0, 1.0)) * 29.0).round() as i32
@@ -688,6 +728,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
             }
             Ok(buf.into_inner())
         }
+        }
     });
 
     // Forward progress while encoding completes
@@ -706,7 +747,7 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         }
     };
 
-    log::warn!("[frame-forge] ANIMATE encoding done, output {} bytes", output.len());
+    log::warn!("[jellyfin-suite-frame-forge] ANIMATE encoding done, output {} bytes", output.len());
 
     // Skip "done" progress — it can block the final output write on Unix socket.
     // C# detects completion via statusCode=2 in the final output.
@@ -719,6 +760,46 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     Ok(())
 }
 
+/// Downscales for ranking-only phase correlation — full-resolution (e.g. 1920x1080, neither
+/// dimension a power of 2) forces rustfft's slow mixed-radix/Bluestein path, and a long dedup
+/// run (dozens of frames) means dozens of full-res FFTs just to pick a bridge candidate, which
+/// in production stalled an entire stitch request for minutes. Only the *ranking* among
+/// candidates matters here (the actual stitch offsets are recomputed at full resolution later
+/// in stitch_anime), so a coarser, much cheaper comparison is fine.
+fn downscale_for_ranking(img: &image::DynamicImage) -> image::DynamicImage {
+    const MAX_DIM: u32 = 480;
+    let longest = img.width().max(img.height());
+    if longest <= MAX_DIM { return img.clone(); }
+    let scale = MAX_DIM as f64 / longest as f64;
+    let nw = ((img.width() as f64 * scale).round() as u32).max(1);
+    let nh = ((img.height() as f64 * scale).round() as u32).max(1);
+    img.resize(nw, nh, image::imageops::FilterType::Triangle)
+}
+
+/// Picks whichever frame in `run` best phase-correlates against `next_anchor` (the frame that
+/// ended the run) and removes+returns it, leaving the rest of `run` to be dropped by the caller.
+/// `None` if `run` is empty (the two anchors were already adjacent, nothing to bridge with).
+fn best_bridge_frame(
+    run: &mut Vec<(image::DynamicImage, i64)>,
+    next_anchor: &image::DynamicImage,
+) -> Option<(image::DynamicImage, i64)> {
+    if run.is_empty() { return None; }
+    let anchor_small = downscale_for_ranking(next_anchor);
+    let mut best_idx = 0;
+    let mut best_q = -1.0f64;
+    for (i, (img, _)) in run.iter().enumerate() {
+        let img_small = downscale_for_ranking(img);
+        let (_, _, q) = crate::stitch_anime::phase_correlate(&img_small, &anchor_small);
+        if q > best_q {
+            best_q = q;
+            best_idx = i;
+        }
+    }
+    let result = run.swap_remove(best_idx);
+    run.clear();
+    Some(result)
+}
+
 async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
 
@@ -726,18 +807,18 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     // read_stitch_req is distinguishable from "never reached handle_stitch at all" —
     // two production OOM kills left zero application log output, and this entry point not
     // having a pre-parse marker was part of why it took this long to even narrow down.
-    log::warn!("[frame-forge] STITCH: request received, parsing...");
+    log::warn!("[jellyfin-suite-frame-forge] STITCH: request received, parsing...");
     let parse_start = std::time::Instant::now();
     let req = crate::protocol::read_stitch_req(stream).await?;
     log::warn!(
-        "[frame-forge] STITCH task={} frames={} device={:?} parse_ms={}",
+        "[jellyfin-suite-frame-forge] STITCH task={} frames={} device={:?} parse_ms={}",
         req.task_id, req.paths.len(), req.device_id, parse_start.elapsed().as_millis()
     );
 
     // Reject under high resource pressure to protect seek-preview latency (T085)
     let pressure = crate::resources::resource_pressure();
     if pressure > 0.8 {
-        log::warn!("[frame-forge] STITCH: resource pressure {pressure:.2} > 0.8, rejecting task");
+        log::warn!("[jellyfin-suite-frame-forge] STITCH: resource pressure {pressure:.2} > 0.8, rejecting task");
         send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
         return Ok(());
     }
@@ -750,6 +831,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     let (fi_frames, _, _) = fi.as_ref();
 
     send_progress(stream, "running", "decoding", 0, req.paths.len() as u32, 0.0).await?;
+    let decode_start = std::time::Instant::now();
     let mut images: Vec<image::DynamicImage> = Vec::with_capacity(req.paths.len());
     for (i, (path, frame_idx)) in req.paths.iter().enumerate() {
         let pos_ms = if *frame_idx >= 0 && (*frame_idx as usize) < fi_frames.len() {
@@ -759,10 +841,10 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         };
 
         let img = if let Some(cached) = state.disk.read(&req.item_id, path, pos_ms, 0) {
-            log::warn!("[frame-forge] STITCH frame {} → disk cache hit", i);
+            log::warn!("[jellyfin-suite-frame-forge] STITCH frame {} → disk cache hit", i);
             image::load_from_memory(&cached)?
         } else {
-            log::warn!("[frame-forge] STITCH frame {} → decode", i);
+            log::warn!("[jellyfin-suite-frame-forge] STITCH frame {} → decode", i);
             let p = path.clone();
             let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
             image::load_from_memory(&r.webp)?
@@ -776,26 +858,84 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         ).await?;
     }
 
+    log::warn!("[jellyfin-suite-frame-forge] STITCH decode done: {} frames in {}ms", images.len(), decode_start.elapsed().as_millis());
     send_progress(stream, "running", "classifying", 0, 1, 30.0).await?;
+    let dedup_start = std::time::Instant::now();
 
-    // pHash near-duplicate removal: skip frames with Hamming distance ≤ 6 from predecessor (T078).
+    // pHash near-duplicate removal: collapse runs of frames within Hamming distance ≤ 6 of a
+    // shared anchor (T078), but keep both the anchor *and* a bridge frame from the run, not just
+    // the anchor. A long, slow pan can sit entirely under the pHash similarity threshold relative
+    // to its starting frame — collapsing the whole run down to one representative silently throws
+    // away every other frame's real (if individually subtle) displacement, forcing stitch_anime
+    // to bridge the entire run in a single low-overlap phase-correlation jump, which tends to
+    // *underestimate* the true total pan (large-displacement low-overlap correlation favors the
+    // strongest local peak, not necessarily the true one). Keeping a frame from the run's tail
+    // lets that bridge happen in two short, high-overlap hops instead.
+    //
+    // Which frame, though, matters: blindly taking the literal last frame in the run risks
+    // landing on a motion-blurred or transitional frame that itself correlates poorly with what
+    // comes next, recreating the same false "scene cut" this is meant to avoid. Instead, every
+    // frame in the run is buffered and phase-correlated against the frame that *broke* the run
+    // (the next real anchor) once the run ends, picking whichever one actually bridges best —
+    // this checks the thing we actually care about directly, rather than via a blur/blank-frame
+    // proxy. Cost is bounded by total frame count overall (each input frame is correlated at
+    // most once, when its run ends), not by run count squared.
     let orig_len = images.len();
+    let frame_idxs: Vec<i64> = req.paths.iter().map(|(_, idx)| *idx).collect();
+    let mut kept_frame_idxs: Vec<i64> = Vec::with_capacity(orig_len);
     let images: Vec<image::DynamicImage> = {
         let hashes: Vec<u64> = images.iter().map(|img| crate::scene_classifier::phash(img)).collect();
         let mut out: Vec<image::DynamicImage> = Vec::with_capacity(orig_len);
-        let mut last_hash: Option<u64> = None;
-        for (img, &h) in images.into_iter().zip(hashes.iter()) {
-            let is_dup = last_hash.map_or(false, |prev| (prev ^ h).count_ones() <= 6);
-            if !is_dup {
+        let mut anchor_hash: Option<u64> = None;
+        let mut pending_run: Vec<(image::DynamicImage, i64)> = Vec::new();
+        for ((img, &h), &fidx) in images.into_iter().zip(hashes.iter()).zip(frame_idxs.iter()) {
+            let is_dup = anchor_hash.map_or(false, |a| (a ^ h).count_ones() <= 6);
+            if is_dup {
+                pending_run.push((img, fidx));
+            } else {
+                if let Some((bridge_img, bridge_fidx)) = best_bridge_frame(&mut pending_run, &img) {
+                    out.push(bridge_img);
+                    kept_frame_idxs.push(bridge_fidx);
+                }
                 out.push(img);
-                last_hash = Some(h);
+                kept_frame_idxs.push(fidx);
+                anchor_hash = Some(h);
             }
+        }
+        // Trailing run at the very end of input has no further anchor to bridge to — just keep
+        // its last frame, for symmetry with "don't drop the very last input frame".
+        if let Some((tail_img, tail_fidx)) = pending_run.into_iter().last() {
+            out.push(tail_img);
+            kept_frame_idxs.push(tail_fidx);
         }
         out
     };
-    if images.len() != orig_len {
-        log::debug!("[frame-forge] pHash dedup: {} → {} unique frames", orig_len, images.len());
+    log::warn!(
+        "[jellyfin-suite-frame-forge] STITCH: input {} frames {:?} → kept {} after pHash dedup in {}ms: {:?}",
+        orig_len, frame_idxs, kept_frame_idxs.len(), dedup_start.elapsed().as_millis(), kept_frame_idxs
+    );
+
+    // TEMPORARY DEV-ONLY DEBUG TOOL — delete this whole block once frame-selection tuning is
+    // done. Unconditionally dumps exactly the frames that survived dedup (named by their
+    // original frame index, matching the log line above) so they can be pulled out of the
+    // container and eyeballed against the source video:
+    //   podman cp jellyfin-dev:/tmp/frame-forge-debug/<task_id> ./local-dir
+    {
+        let dump_dir = std::path::PathBuf::from("/tmp/frame-forge-debug").join(&req.task_id);
+        match std::fs::create_dir_all(&dump_dir) {
+            Ok(()) => {
+                for (img, fidx) in images.iter().zip(kept_frame_idxs.iter()) {
+                    let path = dump_dir.join(format!("frame_{fidx}.png"));
+                    if let Err(e) = img.save(&path) {
+                        log::warn!("[jellyfin-suite-frame-forge] debug dump: failed to save {path:?}: {e}");
+                    }
+                }
+                log::warn!("[jellyfin-suite-frame-forge] debug dump: wrote {} frames to {:?}", images.len(), dump_dir);
+            }
+            Err(e) => log::warn!("[jellyfin-suite-frame-forge] debug dump: failed to create dir {dump_dir:?}: {e}"),
+        }
     }
+
     if images.len() < 2 {
         // Must send an error progress event before bailing — handle_conn only logs Err
         // returns and loops back to read the next request, so a bare `bail!` here leaves
@@ -807,7 +947,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
 
     let class = crate::scene_classifier::classify(&images);
     log::warn!(
-        "[frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1} flat={:.3}",
+        "[jellyfin-suite-frame-forge] scene={:?} motion={:?} edge={:.3} entropy={:.1} flat={:.3}",
         class.category, class.motion, class.edge_density, class.color_entropy, class.flat_region_ratio
     );
 
@@ -863,6 +1003,7 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     let (result, dl_match_count, dl_inference_ms) = result;
 
     let total_ms = stitch_start.elapsed().as_millis() as u64;
+    log::warn!("[jellyfin-suite-frame-forge] STITCH core algorithm done in {total_ms}ms (scene={scene_label})");
 
     // Write GenerationLog if log_path was requested (opencv/DL path only).
     #[cfg(feature = "opencv")]
@@ -887,11 +1028,12 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
             fallbacks: ep_fallbacks,
         };
         if let Err(e) = gen_log.write_to_file(std::path::Path::new(&req.log_path)) {
-            log::warn!("[frame-forge] Failed to write generation log to {}: {e}", req.log_path);
+            log::warn!("[jellyfin-suite-frame-forge] Failed to write generation log to {}: {e}", req.log_path);
         }
     }
 
     send_progress(stream, "running", "encoding", 0, 1, 85.0).await?;
+    let encode_start = std::time::Instant::now();
 
     let enc_format = req.format;
     let enc_quality = req.quality;
@@ -922,7 +1064,10 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         }
     }).await??;
 
-    log::warn!("[frame-forge] STITCH encoding done, output {} bytes", output.len());
+    log::warn!(
+        "[jellyfin-suite-frame-forge] STITCH encoding done in {}ms, output {} bytes",
+        encode_start.elapsed().as_millis(), output.len()
+    );
 
     // Skip "done" progress — C# detects completion via statusCode=2
     let mut header = Vec::with_capacity(8 + output.len());
@@ -972,7 +1117,7 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     use tokio::io::AsyncWriteExt;
 
     let req = crate::protocol::read_upscale_req(stream).await?;
-    log::warn!("[frame-forge] UPSCALE item={} animation={} device={}", req.item_id, req.is_animation, req.device_id);
+    log::warn!("[jellyfin-suite-frame-forge] UPSCALE item={} animation={} device={}", req.item_id, req.is_animation, req.device_id);
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
     state.upscale_cancel_flags.lock().unwrap().insert(req.job_id.clone(), cancel_flag.clone());
@@ -980,7 +1125,7 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     let pressure = crate::resources::resource_pressure();
     if pressure > 0.8 {
-        log::warn!("[frame-forge] UPSCALE: resource pressure {pressure:.2} > 0.8, rejecting task");
+        log::warn!("[jellyfin-suite-frame-forge] UPSCALE: resource pressure {pressure:.2} > 0.8, rejecting task");
         send_progress(stream, "error", "overloaded", 0, 1, 0.0).await?;
         return Ok(());
     }
@@ -989,11 +1134,18 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     let raw = tokio::fs::read(&req.input_path).await?;
 
-    // GIF files start with "GIF8"; everything else animated in this project is WebP.
+    // GIF files start with "GIF8"; MP4 (ISO base media) carries an "ftyp" box at offset 4;
+    // everything else animated in this project is WebP.
     let is_gif = raw.starts_with(b"GIF8");
+    let is_mp4 = raw.len() >= 8 && &raw[4..8] == b"ftyp";
+    let mut mp4_fps = 0.0f64;
     let (mut frames, delays, loop_count): (Vec<image::DynamicImage>, Vec<u32>, u16) = if req.is_animation {
         if is_gif {
             crate::animate::decode_gif(&raw)?
+        } else if is_mp4 {
+            let (frames, fps) = crate::animate::decode_mp4(&req.input_path)?;
+            mp4_fps = fps;
+            (frames, Vec::new(), 0)
         } else {
             crate::animate::decode_webp_anim(&raw)?
         }
@@ -1068,9 +1220,10 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
     // spawn_blocking thread keeps running, but C#'s EnsureStartedAsync already detects
     // HasExited and transparently relaunches a fresh daemon on the next request.
     let timeout_secs = upscale_timeout_secs();
+    let timeout_dur = std::time::Duration::from_secs(timeout_secs);
     tokio::pin! {
         let inference = inference;
-        let deadline = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs));
+        let deadline = tokio::time::sleep(timeout_dur);
     }
     let (out_frames, session, face_session, total_faces_found) = loop {
         tokio::select! {
@@ -1078,6 +1231,13 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
                 // None once the closure below finishes and drops progress_tx — at that point
                 // `inference` is about to resolve too, so just skip and loop back around to it.
                 if let Some(done) = recv {
+                    // A completed frame proves the worker thread is alive, so reset the deadline
+                    // to now + timeout_dur (not deadline += timeout_dur — this is an absolute
+                    // reset, not an accumulating extension) rather than letting it run out against
+                    // the whole job — a fixed total-job timeout would misfire on any animation
+                    // long enough that per_frame_time * frame_count > timeout_secs, even with
+                    // nothing actually stuck.
+                    deadline.as_mut().reset(tokio::time::Instant::now() + timeout_dur);
                     let pct = 20.0 + (done as f64 / total_frames.max(1) as f64) * 65.0;
                     send_progress(stream, "running", "upscaling", done, total_frames, pct).await?;
                 }
@@ -1087,8 +1247,8 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
             }
             () = &mut deadline => {
                 log::error!(
-                    "[frame-forge] UPSCALE inference exceeded {timeout_secs}s timeout \
-                     (env FRAME_FORGE_UPSCALE_TIMEOUT_SECS) — aborting process immediately so the \
+                    "[jellyfin-suite-frame-forge] UPSCALE inference stalled for {timeout_secs}s with no frame \
+                     progress (env FRAME_FORGE_UPSCALE_TIMEOUT_SECS) — aborting process immediately so the \
                      daemon respawns clean instead of wedging every other request behind it"
                 );
                 std::process::abort();
@@ -1111,7 +1271,7 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
             fallbacks,
         };
         if let Err(e) = upscale_log.write_to_file(std::path::Path::new(&req.log_path)) {
-            log::warn!("[frame-forge] Failed to write upscale log to {}: {e}", req.log_path);
+            log::warn!("[jellyfin-suite-frame-forge] Failed to write upscale log to {}: {e}", req.log_path);
         }
     }
 
@@ -1121,6 +1281,12 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         if req.is_animation {
             if is_gif {
                 crate::animate::encode_gif(&out_frames, &delays, loop_count)
+            } else if is_mp4 {
+                // Upscaling exists to improve quality, so re-encode at the "high quality" tier
+                // unconditionally rather than exposing a knob the user already chose once at
+                // export time (see ParamsPanel's MP4 quality options for that original choice).
+                const MP4_UPSCALE_QUALITY: f32 = 0.85;
+                crate::animate::encode_mp4(&out_frames, mp4_fps, MP4_UPSCALE_QUALITY, |_| {})
             } else {
                 crate::animate::encode_webp_anim(&out_frames, &delays, loop_count)
             }
@@ -1138,7 +1304,7 @@ async fn handle_upscale(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
 
     tokio::fs::write(&req.output_path, &output).await?;
 
-    log::warn!("[frame-forge] UPSCALE encoding done, output {} bytes → {}", output.len(), req.output_path.display());
+    log::warn!("[jellyfin-suite-frame-forge] UPSCALE encoding done, output {} bytes → {}", output.len(), req.output_path.display());
 
     // Skip "done" progress — C# detects completion via statusCode=2, mirroring handle_stitch.
     let mut header = Vec::with_capacity(8 + output.len());
@@ -1295,6 +1461,65 @@ async fn write_chunk(stream: &mut UnixStream, bytes: &[u8]) -> std::io::Result<(
     Ok(())
 }
 
+/// Sends the ±1s window from an already-built `FrameIndexCache` (Queue B's true sequential
+/// frame count) as batched SSE chunks. Returns the number of frames sent.
+fn send_window_from_cache(
+    idx: &FrameIndexCache,
+    p_start: i64,
+    p_end: i64,
+    tx: &mpsc::UnboundedSender<Vec<u8>>,
+) -> usize {
+    let (frames, _, _) = idx.as_ref();
+    let start = frames.partition_point(|(ms, _)| *ms < p_start);
+    let mut batch = Vec::new();
+    let mut sent = 0usize;
+    for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
+        if *ms > p_end { break; }
+        batch.push((start + i, *ms, *is_key));
+        if batch.len() >= BATCH_SIZE {
+            tx.send(make_batch(&batch)).ok();
+            sent += batch.len();
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        sent += batch.len();
+        tx.send(make_batch(&batch)).ok();
+    }
+    sent
+}
+
+/// Resolves the to-process frame list for a prefetch range request directly from an already-built
+/// `FrameIndexCache` (Queue B's true sequential frame count) — shared by `handle_prefetch_range_stream`'s
+/// immediate cache-hit check and its bounded wait-for-Queue-B fallback below.
+fn build_prefetch_window_from_cache(
+    idx: &FrameIndexCache,
+    current_frame_idx: i64,
+    current_time_ms: i64,
+    before_ms: i64,
+    after_ms: i64,
+    include_current: bool,
+) -> (Vec<(i64, i64)>, i64, i64) {
+    let (frames, fps_num, fps_den) = idx.as_ref();
+    let anchor_ms = if current_frame_idx >= 0 {
+        let pos = (current_frame_idx as usize).min(frames.len().saturating_sub(1));
+        frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
+    } else {
+        current_time_ms
+    };
+    let range_start_ms = anchor_ms.saturating_sub(before_ms);
+    let range_end_ms   = anchor_ms.saturating_add(after_ms);
+    let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
+    let mut tp: Vec<(i64, i64)> = Vec::new();
+    for (i, &(ms, _)) in frames[start..].iter().enumerate() {
+        if ms > range_end_ms { break; }
+        if !include_current && ms == anchor_ms { continue; }
+        tp.push(((start + i) as i64, ms));
+    }
+    let fps = if *fps_num > 0 && *fps_den > 0 { *fps_num / *fps_den } else { 24 };
+    (tp, fps, anchor_ms)
+}
+
 /// 队列 A：seek demux ±1s，用估计帧号发送 SSE。
 /// 若该路径的帧索引已缓存，直接 binary_search，无需打开文件。
 async fn queue_a_demux(
@@ -1309,28 +1534,30 @@ async fn queue_a_demux(
 
     // Fast path: use in-memory index (populated by queue_b or resolve_frame_idx)
     if let Some(idx) = state.fi.get(&path).await {
-        let (frames, _, _) = idx.as_ref();
-        let start = frames.partition_point(|(ms, _)| *ms < p_start);
-        let mut batch = Vec::new();
-        let mut sent = 0usize;
-        for (i, (ms, is_key)) in frames[start..].iter().enumerate() {
-            if *ms > p_end { break; }
-            batch.push((start + i, *ms, *is_key));
-            if batch.len() >= BATCH_SIZE {
-                tx.send(make_batch(&batch)).ok();
-                sent += batch.len();
-                batch.clear();
-            }
-        }
-        if !batch.is_empty() {
-            sent += batch.len();
-            tx.send(make_batch(&batch)).ok();
-        }
+        let sent = send_window_from_cache(&idx, p_start, p_end, &tx);
         log::debug!("[bench][queue_a] +{}ms fast_path_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
         return Ok(());
     }
 
-    // Slow path: open file, seek, demux ±1s window
+    // Bounded wait for Queue B (just spawned/already running for this path) to land its real
+    // sequential frame count before falling back to the linear avg_frame_rate estimate below.
+    // Queue B only demuxes packet headers (no decode), so it finishes in well under a second even
+    // for feature-length files in practice — and the estimate is provably wrong on VFR/duplicate-
+    // frame content (drifts by thousands of frames deep into a video), which made this window's
+    // frame numbers disagree with whatever any other request (e.g. PrefetchReady) got a moment
+    // later from the now-completed cache. Worth a bounded wait; only true cold-disk/huge-file
+    // cases should ever reach the fallback below.
+    for _ in 0..30 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if let Some(idx) = state.fi.get(&path).await {
+            let sent = send_window_from_cache(&idx, p_start, p_end, &tx);
+            log::debug!("[bench][queue_a] +{}ms awaited_queue_b_done current_time={current_time_ms} range=[{p_start},{p_end}] sent={sent} abs={}", bench_now_ms() - t0, bench_now_ms());
+            return Ok(());
+        }
+    }
+
+    // Slow path: open file, seek, demux ±1s window (estimate-based fallback — Queue B didn't
+    // land within the wait above)
     log::debug!("[bench][queue_a] +{}ms slow_path_open_file abs={}", bench_now_ms() - t0, bench_now_ms());
     let tx_inner = tx.clone();
     let sent = tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
@@ -1352,6 +1579,7 @@ async fn queue_a_demux(
             (s.index(), fps_num, fps_den, sms)
         };
 
+        let first_pkt_ms = first_video_pkt_ms(&mut ictx, stream_idx, stream_start_ms);
         ictx.seek(p_start * 1000, ..p_start * 1000)?;
 
         let mut batch = Vec::new();
@@ -1368,7 +1596,7 @@ async fn queue_a_demux(
             if ms < p_start { continue; }
             if ms > p_end { break; }
 
-            let fi = compute_frame_idx(ms, fps_num, fps_den) as usize;
+            let fi = compute_frame_idx(ms - first_pkt_ms, fps_num, fps_den) as usize;
             batch.push((fi, ms, pkt.is_key()));
             total += 1;
 
@@ -1514,7 +1742,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
             let p_b = p.clone();
             tokio::spawn(async move {
                 if let Err(e) = queue_b_demux(path_b, p_b, state_b).await {
-                    log::warn!("[frame-forge] queue_b_demux error: {e}");
+                    log::warn!("[jellyfin-suite-frame-forge] queue_b_demux error: {e}");
                 }
             });
             p
@@ -1530,7 +1758,7 @@ async fn handle_index_frames_stream(stream: &mut UnixStream, state: Arc<State>) 
         let t = req.current_time_ms;
         tokio::spawn(async move {
             if let Err(e) = queue_a_demux(path_a, t, tx_a, state_a).await {
-                log::warn!("[frame-forge] queue_a_demux error: {e}");
+                log::warn!("[jellyfin-suite-frame-forge] queue_a_demux error: {e}");
             }
         });
     }
@@ -1724,40 +1952,29 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
 
     // Build to_process list and determine anchor_ms (frame closest to current position).
     // 优先用缓存的完整索引；若 Queue B 还在运行则快速 demux 锚点区域
-    let (to_process, fps, anchor_ms) = if let Some(frame_idx) = state.fi.get(&path).await {
-        let (frames, fps_num, fps_den) = frame_idx.as_ref();
-        let fps_num_c = *fps_num;
-        let fps_den_c = *fps_den;
-        log::debug!("[bench][prefetch] +{}ms [priority_adjust] skipped — index cached frames={}", bench_now_ms() - t0, frames.len());
-
-        // current_frame_idx is a sequential DTS-order index (from queue_b fi = all_frames.len()).
-        // Using compute_frame_idx() to convert ms→frame_number causes a constant offset on
-        // videos whose first packet PTS is non-zero (e.g. PTS≈4.7 s → 138-frame bias at 29fps).
-        // Just use it as a direct index into the cache.
-        let anchor_ms = if req.current_frame_idx >= 0 {
-            let pos = (req.current_frame_idx as usize).min(frames.len().saturating_sub(1));
-            frames.get(pos).map(|(ms, _)| *ms).unwrap_or(current_time_ms)
-        } else {
-            current_time_ms
-        };
-
-        let range_start_ms = anchor_ms.saturating_sub(req.before_ms);
-        let range_end_ms   = anchor_ms.saturating_add(req.after_ms);
-        log::debug!("[bench][prefetch] anchor_ms={anchor_ms} range=[{range_start_ms},{range_end_ms}]");
-
-        let start = frames.partition_point(|(ms, _)| *ms < range_start_ms);
-        let mut tp: Vec<(i64, i64)> = Vec::new();
-        for (i, &(ms, _)) in frames[start..].iter().enumerate() {
-            if ms > range_end_ms { break; }
-            if !include_current && ms == anchor_ms { continue; }
-            tp.push(((start + i) as i64, ms));
+    let cached_idx = state.fi.get(&path).await;
+    let (to_process, fps, anchor_ms) = if let Some(frame_idx) = cached_idx {
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] skipped — index cached frames={}", bench_now_ms() - t0, frame_idx.0.len());
+        build_prefetch_window_from_cache(&frame_idx, req.current_frame_idx, current_time_ms, req.before_ms, req.after_ms, include_current)
+    } else if let Some(frame_idx) = {
+        // Bounded wait for Queue B (see queue_a_demux's matching wait for the full rationale) —
+        // using its real sequential count here too avoids this request inventing its own estimate
+        // that could disagree with whatever queue_a_demux (or a later request) gets from the same
+        // file once Queue B lands, which is the exact frame-number mismatch this was chasing.
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → waiting for queue_b", bench_now_ms() - t0);
+        let mut found = None;
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Some(idx) = state.fi.get(&path).await { found = Some(idx); break; }
         }
-        let fps = if fps_num_c > 0 && fps_den_c > 0 { fps_num_c / fps_den_c } else { 24 };
-        (tp, fps, anchor_ms)
+        found
+    } {
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] awaited_queue_b frames={}", bench_now_ms() - t0, frame_idx.0.len());
+        build_prefetch_window_from_cache(&frame_idx, req.current_frame_idx, current_time_ms, req.before_ms, req.after_ms, include_current)
     } else {
-        // 帧索引尚未就绪：对锚点区域做快速 seek+demux，立即开始解码
+        // Queue B didn't land within the wait above: fall back to estimate-based quick seek+demux.
         // anchor 计算移入 spawn_blocking，因为需要 fps 才能从 current_frame_idx 反推 ms
-        log::debug!("[bench][prefetch] +{}ms [priority_adjust] index_not_ready → quick_demux", bench_now_ms() - t0);
+        log::debug!("[bench][prefetch] +{}ms [priority_adjust] quick_demux_fallback", bench_now_ms() - t0);
 
         let path_c            = path.clone();
         let cf_idx_c          = req.current_frame_idx;
@@ -1788,19 +2005,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             // queue_b 用 all_frames.len()（从 0 开始计数），而 compute_frame_idx 在首包
             // PTS 非零时会有常量偏移（如 PTS≈4742ms、29fps → 偏移 138 帧）。
             // 用首帧 PTS 作基准可消除该偏移：fi ≈ round((ms - first_pkt_ms) * fps / 1000)
-            let first_pkt_ms = {
-                ictx.seek(0, ..i64::MAX).unwrap_or(());
-                let mut fms = 0i64;
-                for (s, pkt) in ictx.packets() {
-                    if s.index() != stream_idx { continue; }
-                    let pts = pkt.pts().or_else(|| pkt.dts()).unwrap_or(0);
-                    let tb  = s.time_base();
-                    let raw = (pts as f64 * tb.numerator() as f64 * 1000.0 / tb.denominator() as f64) as i64;
-                    fms = (raw - stream_start_ms).max(0);
-                    break;
-                }
-                fms
-            };
+            let first_pkt_ms = first_video_pkt_ms(&mut ictx, stream_idx, stream_start_ms);
 
             // 从 current_frame_idx 反推锚点 ms（仅当 currentFrameIndex 提供时）
             let anchor_ms = if cf_idx_c >= 0 && fps_num > 0 && fps_den > 0 {
@@ -1944,7 +2149,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                     .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
             });
             if let Err(e) = result {
-                log::warn!("[frame-forge] sequential prefetch error: {e}");
+                log::warn!("[jellyfin-suite-frame-forge] sequential prefetch error: {e}");
             }
         });
 

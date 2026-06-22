@@ -12,3 +12,5 @@ jfs-common = { path = "../jfs-common" }
 tokio = { version = "1", features = ["full"] }
 lru = "0.18"
 anyhow = "1"
+log = "0.4"
+env_logger = "0.11"

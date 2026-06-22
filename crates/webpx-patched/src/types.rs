@@ -486,7 +486,7 @@ impl<'a> From<&'a YuvPlanes> for YuvPlanesRef<'a> {
 ///
 /// // Access the data without copying
 /// let bytes: &[u8] = &webp_data;
-/// println!("Encoded {} bytes", bytes.len());
+/// let _encoded_len_bytes = bytes.len();
 ///
 /// // Or convert to Vec when needed (copies)
 /// let vec: Vec<u8> = webp_data.into();
