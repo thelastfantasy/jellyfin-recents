@@ -14,12 +14,51 @@
 const MAX_STR_FIELD_LEN: usize = 1 << 20; // 1 MiB — generous for any path/id/family/version string
 const MAX_FRAME_COUNT: usize = 4096; // no real export UI ever submits anywhere near this many
 
+/// Device selection strategy for hardware decode (spec FR-012). Wire-encoded as a
+/// single `u8` (0 = Performance, 1 = IdleResource; anything else degrades to
+/// Performance — see contracts/rest-api.md's "never 400 on a bad setting" philosophy,
+/// applied here too rather than failing the whole request over one bad byte).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeviceStrategy {
+    Performance,
+    IdleResource,
+}
+
+impl DeviceStrategy {
+    pub fn from_u8(v: u8) -> Self {
+        if v == 1 { Self::IdleResource } else { Self::Performance }
+    }
+}
+
+/// Every decode-triggering request carries these two fields (spec FR-005/FR-008/
+/// FR-012) — see contracts/socket-protocol.md §1 for the full list of which wire
+/// structs include this and why (`SingleFrameReq`/`AnimateReq`/`PrefetchRangeReq`/
+/// `PrefetchRangeStreamReq`; `StitchReq` inherits it from `AnimateReq`'s base read).
+/// `hw_decode_enabled = false` means the decode path must never call
+/// `av_hwdevice_ctx_create` at all (FR-008), not just "prefer software".
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HwDecodeFlags {
+    pub hw_decode_enabled: bool,
+    pub device_strategy: DeviceStrategy,
+}
+
+async fn read_hw_decode_flags(stream: &mut tokio::net::UnixStream) -> anyhow::Result<HwDecodeFlags> {
+    use tokio::io::AsyncReadExt;
+    let mut buf = [0u8; 2];
+    stream.read_exact(&mut buf).await?;
+    Ok(HwDecodeFlags {
+        hw_decode_enabled: buf[0] != 0,
+        device_strategy: DeviceStrategy::from_u8(buf[1]),
+    })
+}
+
 pub(crate) struct SingleFrameReq {
     pub request_id: u32,
     pub frame_idx: i64,
     pub width: u32,
     pub path: std::path::PathBuf,
     pub item_id: String,
+    pub hw: HwDecodeFlags,
 }
 
 pub(crate) struct PrefetchRangeReq {
@@ -30,6 +69,7 @@ pub(crate) struct PrefetchRangeReq {
     pub after_seconds: f64,
     pub include_start: bool,
     pub width: u32,
+    pub hw: HwDecodeFlags,
 }
 
 pub(crate) async fn read_msg_type(
@@ -74,7 +114,9 @@ pub(crate) async fn read_single_frame_req(
     stream.read_exact(&mut id_buf).await?;
     let item_id = String::from_utf8(id_buf.to_vec()).unwrap_or_default();
 
-    Ok(SingleFrameReq { request_id, frame_idx, width, path, item_id })
+    let hw = read_hw_decode_flags(stream).await?;
+
+    Ok(SingleFrameReq { request_id, frame_idx, width, path, item_id, hw })
 }
 
 /// Wire: [request_id(4)] [jpeg_len(4)] [jpeg_data(N)] [quality_flags(2)] [actual_pts_ms(8)]
@@ -190,6 +232,7 @@ pub(crate) struct AnimateReq {
     pub crop: Option<(f32, f32, f32, f32)>, // (x, y, w, h) normalized 0-1；None = 不裁切
     pub quality: f32,     // 0.0 = lossless, 0.01-1.0 = lossy quality
     pub resolution_preset: ResolutionPreset,
+    pub hw: HwDecodeFlags,
 }
 
 pub(crate) async fn read_animate_req(
@@ -280,7 +323,9 @@ pub(crate) async fn read_animate_req(
     stream.read_exact(&mut preset_bytes).await?;
     let resolution_preset = ResolutionPreset::from_str(&String::from_utf8(preset_bytes).unwrap_or_default());
 
-    Ok(AnimateReq { item_id, task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset })
+    let hw = read_hw_decode_flags(stream).await?;
+
+    Ok(AnimateReq { item_id, task_id, paths, format, resize_mode, target_px, speed, loop_count, crop, quality, resolution_preset, hw })
 }
 
 // ── STITCH request (0x12) ─────────────────────────────────────────────────────
@@ -305,6 +350,7 @@ pub(crate) struct StitchReq {
     pub model_family: String,
     pub model_version: String,
     pub model_path: String,
+    pub hw: HwDecodeFlags,
 }
 
 async fn read_len_prefixed_string(stream: &mut tokio::net::UnixStream) -> anyhow::Result<String> {
@@ -354,6 +400,7 @@ pub(crate) async fn read_stitch_req(
         model_family,
         model_version,
         model_path,
+        hw: base.hw,
     })
 }
 
@@ -399,7 +446,9 @@ pub(crate) async fn read_prefetch_range_req(
     stream.read_exact(&mut w_buf).await?;
     let width = u32::from_le_bytes(w_buf);
 
-    Ok(PrefetchRangeReq { item_id, path, start_idx, before_seconds, after_seconds, include_start, width })
+    let hw = read_hw_decode_flags(stream).await?;
+
+    Ok(PrefetchRangeReq { item_id, path, start_idx, before_seconds, after_seconds, include_start, width, hw })
 }
 
 /// Wire: [frame_count(4)][fps_num(8)][fps_den(8)] × frame_count: [pts_ms(8)][is_key(1)]
@@ -460,6 +509,7 @@ pub(crate) struct PrefetchRangeStreamReq {
     pub include_current: bool,
     pub width: u32,
     pub session_id: String,
+    pub hw: HwDecodeFlags,
 }
 
 pub(crate) async fn read_prefetch_range_stream_req(
@@ -519,7 +569,9 @@ pub(crate) async fn read_prefetch_range_stream_req(
         String::new()
     };
 
-    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, current_frame_idx, before_ms, after_ms, include_current, width, session_id })
+    let hw = read_hw_decode_flags(stream).await?;
+
+    Ok(PrefetchRangeStreamReq { item_id, path, current_time_ms, current_frame_idx, before_ms, after_ms, include_current, width, session_id, hw })
 }
 
 // ── MSG_INDEX_FRAMES_STREAM (0x17) ──────────────────────────────────
@@ -647,4 +699,43 @@ pub(crate) async fn read_cancel_upscale_req(
 ) -> anyhow::Result<CancelUpscaleReq> {
     let job_id = read_len_prefixed_string(stream).await?;
     Ok(CancelUpscaleReq { job_id })
+}
+
+// ── MSG_HW_DECODE_CAPS (0x1D) ────────────────────────────────────────────────
+// Request: no body (just the 1-byte msg_type already consumed by read_msg_type).
+// Response wire (see contracts/socket-protocol.md §2):
+//   [supported(1)] [vendor_count(1)]
+//   × vendor_count: [vendor(1): 0=NVIDIA,1=AMD,2=Intel] [supported(1)] [reason_len(4)][reason(N)]
+//
+// Queried by C# once when the player-enhancer modal opens (FR-010); the daemon
+// answers from a cache (`jfs_common::HwDecodeCapabilities`) populated once at
+// startup (server.rs), never re-probing per-request.
+
+fn hw_vendor_to_wire(vendor: jfs_common::DecodeVendor) -> u8 {
+    match vendor {
+        jfs_common::DecodeVendor::Nvidia => 0,
+        jfs_common::DecodeVendor::Amd => 1,
+        jfs_common::DecodeVendor::Intel => 2,
+    }
+}
+
+pub(crate) async fn write_hw_decode_caps(
+    stream: &mut tokio::net::UnixStream,
+    caps: &jfs_common::HwDecodeCapabilities,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut buf = Vec::with_capacity(2 + caps.vendors.len() * 8);
+    buf.push(if caps.supported { 1 } else { 0 });
+    buf.push(caps.vendors.len() as u8);
+    for v in &caps.vendors {
+        buf.push(hw_vendor_to_wire(v.vendor));
+        buf.push(if v.supported { 1 } else { 0 });
+        let reason_bytes = v.reason.as_bytes();
+        buf.extend_from_slice(&(reason_bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(reason_bytes);
+    }
+    stream.write_all(&buf).await?;
+    stream.flush().await?;
+    Ok(())
 }

@@ -163,4 +163,11 @@ export const ja: Translations = {
   enhancerIndexHtmlNote: '⚠ Jellyfinウェブディレクトリの index.html への書き込み権限が必要です。起動時にプラグインが自動で <script> タグを注入してバンドルを読み込みます。Jellyfinアップデート後は「再注入」が必要です。',
   enhancerBrowserNote: 'ℹ 一部機能はブラウザに依存します：スクリーンショットはFirefox for Androidでは利用不可（ハードウェアデコード制限）；タッチジェスチャー（スワイプで輝度/音量、ダブルタップでシーク）はタッチデバイスのみ。',
   enhancerTrickplayLabel: 'シーク中にサムネイルプレビューを表示',
+  enhancerHwDecodeLabel: 'ハードウェアデコード',
+  enhancerHwDecodeHint: 'ℹ 工坊機能（サムネイル、アニメ結合、パノラマ結合）のフレームデコード処理のみに影響します。GPUデコードで高速化されます。動画再生自体には影響しません。',
+  enhancerHwDecodeUnsupported: 'このサーバーでは対応するハードウェアデコーダーが検出されませんでした（{reason}）',
+  enhancerHwDecodeStrategyPerformance: '性能優先',
+  enhancerHwDecodeStrategyPerformanceHint: '常に専用GPUを使用します（通常より高速）。利用可能なデバイスが1つだけの場合は実質的な違いはありません。',
+  enhancerHwDecodeStrategyIdle: 'アイドルデバイスを優先',
+  enhancerHwDecodeStrategyIdleHint: 'デコードの都度各デバイスの負荷を確認し、より空いている方を自動選択します。負荷データが取得できない場合は「性能優先」にフォールバックします。',
 }

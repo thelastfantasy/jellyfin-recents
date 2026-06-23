@@ -163,4 +163,11 @@ export const zh: Translations = {
   enhancerIndexHtmlNote: '⚠ 需要 Jellyfin Web 目录下 index.html 的写入权限。插件启动时会自动在此文件中注入 <script> 标签以加载增强脚本；升级 Jellyfin 后需重新点击「重新注入」。',
   enhancerBrowserNote: 'ℹ 部分功能受浏览器限制：截图功能在 Firefox Android 版中不可用（硬件解码限制）；触摸手势（滑动亮度/音量、双击快进）仅在触屏设备上生效。',
   enhancerTrickplayLabel: '拖动进度条时显示缩略图预览',
+  enhancerHwDecodeLabel: '硬件解码',
+  enhancerHwDecodeHint: 'ℹ 仅影响工坊功能（缩略图、动图拼接、全景图拼接）的逐帧解码步骤，可用 GPU 加速解码以提速；不影响视频播放本身。',
+  enhancerHwDecodeUnsupported: '本服务器未检测到受支持的硬件解码设备（{reason}）',
+  enhancerHwDecodeStrategyPerformance: '性能优先',
+  enhancerHwDecodeStrategyPerformanceHint: '始终使用独立显卡（一般性能更强）；只有一张可用设备时此策略无实际区别。',
+  enhancerHwDecodeStrategyIdle: '优先使用闲置资源',
+  enhancerHwDecodeStrategyIdleHint: '每次解码前实时检测各设备负载，自动选当前更空闲的那个；查不到负载数据时自动降级为"性能优先"。',
 }

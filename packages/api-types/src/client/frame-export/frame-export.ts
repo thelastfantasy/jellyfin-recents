@@ -11,6 +11,8 @@ import type {
   FrameExportTaskProgressParams,
   GenerateRequest,
   GenerateResponse,
+  HwDecodeSettingsDto,
+  HwDecodeSettingsUpdateDto,
   PrefetchRangeEvent,
   PrefetchRangeStreamRequest,
   PrefetchRequest,
@@ -574,6 +576,76 @@ export const frameExportSetQualityThresholds = async (qualityThresholds: Quality
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(qualityThresholds)
+  }
+);}
+
+
+export type frameExportGetHwDecodeSettingsResponse200 = {
+  data: HwDecodeSettingsDto
+  status: 200
+}
+
+export type frameExportGetHwDecodeSettingsResponseSuccess = (frameExportGetHwDecodeSettingsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type frameExportGetHwDecodeSettingsResponse = (frameExportGetHwDecodeSettingsResponseSuccess)
+
+export const getFrameExportGetHwDecodeSettingsUrl = () => {
+
+
+
+
+  return `/JellyfinSuite/FrameExport/HwDecodeSettings`
+}
+
+/**
+ * @summary Get Hw Decode Settings
+ */
+export const frameExportGetHwDecodeSettings = async ( options?: RequestInit): Promise<frameExportGetHwDecodeSettingsResponse> => {
+
+  return apiFetch<frameExportGetHwDecodeSettingsResponse>(getFrameExportGetHwDecodeSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+export type frameExportSetHwDecodeSettingsResponse200 = {
+  data: HwDecodeSettingsDto
+  status: 200
+}
+
+export type frameExportSetHwDecodeSettingsResponseSuccess = (frameExportSetHwDecodeSettingsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type frameExportSetHwDecodeSettingsResponse = (frameExportSetHwDecodeSettingsResponseSuccess)
+
+export const getFrameExportSetHwDecodeSettingsUrl = () => {
+
+
+
+
+  return `/JellyfinSuite/FrameExport/HwDecodeSettings`
+}
+
+/**
+ * @summary Set Hw Decode Settings
+ */
+export const frameExportSetHwDecodeSettings = async (hwDecodeSettingsUpdateDto: HwDecodeSettingsUpdateDto, options?: RequestInit): Promise<frameExportSetHwDecodeSettingsResponse> => {
+
+  return apiFetch<frameExportSetHwDecodeSettingsResponse>(getFrameExportSetHwDecodeSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hwDecodeSettingsUpdateDto)
   }
 );}
 

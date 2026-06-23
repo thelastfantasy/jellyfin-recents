@@ -2963,6 +2963,14 @@ a.jfs-card__series-name:hover {
   border-left: 2px solid rgba(180,200,255,0.35);
   padding-left: 0.6rem;
 }
+.jfs-enhancer-panel__hwdecode-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(180,200,255,0.7);
+  line-height: 1.5;
+  padding-top: 0.25rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
 .jfs-enhancer-panel__status {
   margin: 0;
   font-size: 0.95rem;
@@ -3014,6 +3022,19 @@ a.jfs-card__series-name:hover {
   color: #fff;
   font-size: 0.9rem;
   text-align: center;
+}
+.jfs-enhancer-panel__select {
+  padding: 4px 6px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.82rem;
+  color-scheme: dark;
+}
+.jfs-enhancer-panel__select option {
+  background-color: #1e1e2e;
+  color: #e0e0e0;
 }
 .jfs-enhancer-panel__seek-unit {
   font-size: 0.82rem;

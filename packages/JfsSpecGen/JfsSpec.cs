@@ -19,6 +19,8 @@ static class JfsSpec
         typeof(TaskProgressDto),
         typeof(QualityThresholds),
         typeof(FrameExportTaskListItemDto),
+        typeof(HwDecodeSettingsDto),
+        typeof(HwDecodeSettingsUpdateDto),
         // FrameInfo / FrameIndex
         typeof(FrameInfoDto),
         typeof(FrameIndexDto),
@@ -329,6 +331,15 @@ static class JfsSpec
             .Tag("FrameExport").OpId("frameExport_setQualityThresholds")
             .Body("QualityThresholds")
             .ResRef(200, "Updated thresholds", "QualityThresholds"));
+
+        doc.AddPath("/JellyfinSuite/FrameExport/HwDecodeSettings", "get", new OaOp()
+            .Tag("FrameExport").OpId("frameExport_getHwDecodeSettings")
+            .ResRef(200, "Hardware decode settings", "HwDecodeSettingsDto"));
+
+        doc.AddPath("/JellyfinSuite/FrameExport/HwDecodeSettings", "put", new OaOp()
+            .Tag("FrameExport").OpId("frameExport_setHwDecodeSettings")
+            .Body("HwDecodeSettingsUpdateDto")
+            .ResRef(200, "Updated hardware decode settings", "HwDecodeSettingsDto"));
     }
 
     // ── PosterSheet ─────────────────────────────────────────────────────

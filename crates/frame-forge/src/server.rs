@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
 
 use jfs_common::DiskCache;
 use jfs_common::FrameIndexEntry;
-use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, read_upscale_req, write_ack, write_jpeg_response};
+use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, read_upscale_req, write_ack, write_jpeg_response, write_hw_decode_caps};
 use crate::quality::detect_quality;
 
 
@@ -30,6 +30,7 @@ const MSG_DEBUG_DUMP:           u8 = 0x1A;
 // this uses 0x1B instead to avoid colliding with that existing, functioning handler.
 const MSG_UPSCALE:             u8 = 0x1B;
 const MSG_CANCEL_UPSCALE:      u8 = 0x1C;
+const MSG_HW_DECODE_CAPS:      u8 = 0x1D;
 
 /// Real-ESRGAN tile size / overlap (px, in input-tile coordinates) for `upscale::upscale_image`.
 /// Not user-configurable (FR-024: scale/style are model-version choices, not runtime params).
@@ -83,6 +84,7 @@ struct PrefetchJob {
     path: PathBuf,
     pos_ms: i64,
     width: u32,
+    hw: crate::protocol::HwDecodeFlags,
 }
 
 /// Cached frame index per video path: (pts_ms, is_keyframe)[], fps_num, fps_den
@@ -203,6 +205,9 @@ pub struct State {
     /// from being in flight at once. handle_upscale inserts on start and removes on exit (via
     /// CancelFlagGuard); MSG_CANCEL_UPSCALE just flips the flag if the entry is still present.
     upscale_cancel_flags: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Probed once at startup (FR-010, data-model.md §2's `Unknown → Detected` transition) and
+    /// never re-probed for the lifetime of this process — `MSG_HW_DECODE_CAPS` just reads this.
+    hw_caps: jfs_common::HwDecodeCapabilities,
 }
 
 impl State {
@@ -222,6 +227,7 @@ impl State {
             in_progress: Mutex::new(HashSet::new()),
             fi: FrameIndexManager::new(),
             upscale_cancel_flags: std::sync::Mutex::new(HashMap::new()),
+            hw_caps: jfs_common::detect_capabilities(),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -229,6 +235,76 @@ impl State {
         }
         state
     }
+}
+
+/// `Performance` strategy's static priority order (FR-012): NVIDIA dGPU > AMD > Intel. Real
+/// discrete/integrated PCI classification (`DeviceEnumerationService.cs`'s `IsIntegrated`) backs
+/// the modal's device list and `multiDeviceAvailable` flag on the C# side — this daemon-local
+/// fallback only ever sees one render node per vendor in practice (current dev/test hardware: one
+/// NVIDIA dGPU + one AMD iGPU; the eventual A380 target has just one Intel device), so vendor
+/// granularity is what's actually exercised, not per-render-node discrete/integrated nuance.
+fn pick_performance_vendor(supported: &[&jfs_common::VendorCapability]) -> Option<jfs_common::DecodeVendor> {
+    use jfs_common::DecodeVendor;
+    [DecodeVendor::Nvidia, DecodeVendor::Amd, DecodeVendor::Intel]
+        .into_iter()
+        .find(|v| supported.iter().any(|c| c.vendor == *v))
+}
+
+/// `IdleResource` strategy (FR-012): picks whichever supported vendor currently reports the
+/// lowest real-time utilization; `None` if none of the supported vendors could report a load
+/// value at all (always true when only Intel is supported, since `query_load_percent` has no
+/// signal for it) — the caller then degrades to `pick_performance_vendor`.
+fn pick_idle_resource_vendor(supported: &[&jfs_common::VendorCapability]) -> Option<jfs_common::DecodeVendor> {
+    use jfs_common::DecodeVendor;
+    [DecodeVendor::Nvidia, DecodeVendor::Amd, DecodeVendor::Intel]
+        .into_iter()
+        .filter(|v| supported.iter().any(|c| c.vendor == *v))
+        .filter_map(|v| jfs_common::query_load_percent(v).map(|load| (v, load)))
+        .min_by_key(|(_, load)| *load)
+        .map(|(v, _)| v)
+}
+
+fn decode_vendor_to_hw_vendor(v: jfs_common::DecodeVendor) -> jfs_common::HwVendor {
+    match v {
+        jfs_common::DecodeVendor::Nvidia => jfs_common::HwVendor::Cuda,
+        jfs_common::DecodeVendor::Amd | jfs_common::DecodeVendor::Intel => jfs_common::HwVendor::Vaapi,
+    }
+}
+
+/// Resolves the wire-level `{ hw_decode_enabled, device_strategy }` pair into an actual
+/// `HwDecodeRequest` for this one decode call, or `None` if hw decode should not be attempted at
+/// all (disabled, or no vendor in `state.hw_caps` came back supported at startup — FR-008: off
+/// means zero hw path attempts). Picking the concrete device happens here, in the daemon that
+/// actually executes the decode, rather than over the wire — `contracts/socket-protocol.md` §1
+/// intentionally only carries the *policy* (which of the two strategies), not a resolved device
+/// id.
+fn resolve_hw_decode_request(
+    state: &State,
+    hw: &crate::protocol::HwDecodeFlags,
+) -> Option<jfs_common::HwDecodeRequest> {
+    use crate::protocol::DeviceStrategy;
+
+    if !hw.hw_decode_enabled || !state.hw_caps.supported {
+        return None;
+    }
+    let supported: Vec<&jfs_common::VendorCapability> =
+        state.hw_caps.vendors.iter().filter(|v| v.supported).collect();
+    if supported.is_empty() {
+        return None;
+    }
+    let vendor = match hw.device_strategy {
+        DeviceStrategy::Performance => pick_performance_vendor(&supported),
+        DeviceStrategy::IdleResource => {
+            pick_idle_resource_vendor(&supported).or_else(|| pick_performance_vendor(&supported))
+        }
+    }?;
+    let device = match vendor {
+        jfs_common::DecodeVendor::Amd | jfs_common::DecodeVendor::Intel => {
+            jfs_common::first_render_node_for(vendor)
+        }
+        jfs_common::DecodeVendor::Nvidia => None,
+    };
+    Some(jfs_common::HwDecodeRequest { vendor: decode_vendor_to_hw_vendor(vendor), device })
 }
 
 fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
@@ -296,8 +372,16 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
         let width = job.width;
         let disk = state.disk.clone();
         let item_id = job.item_id.clone();
+        let hw_req = resolve_hw_decode_request(&state, &job.hw);
 
-        match tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path, pos_ms, width)).await {
+        match tokio::task::spawn_blocking(move || {
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path, pos_ms, width, hw_req, Some(&mut sink))
+        })
+        .await
+        {
             Ok(Ok(r)) => {
                 let frame_idx = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
                 if !r.webp_orig.is_empty() {
@@ -405,6 +489,12 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                     let _ = send_progress(&mut stream, "error", &e.to_string(), 0, 1, 0.0).await;
                 }
             }
+            MSG_HW_DECODE_CAPS => {
+                if let Err(e) = write_hw_decode_caps(&mut stream, &state.hw_caps).await {
+                    log::warn!("[jellyfin-suite-frame-forge] hw_decode_caps error: {e}");
+                    break;
+                }
+            }
             MSG_CANCEL_UPSCALE => {
                 // Fire-and-forget on this connection too: no response, and any read error here
                 // just ends this short-lived connection without affecting the job's own one.
@@ -455,9 +545,13 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
     let state_clone = state.clone();
     let ck = ram_key.clone();
 
+    let hw_req = resolve_hw_decode_request(state, &req.hw);
     let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
     let result = tokio::task::spawn_blocking(move || {
-        jfs_common::decode_and_encode(&path, pos_ms, width)
+        let mut sink = |event_type: &str, reason: &str| {
+            crate::generation_log::log_hw_fallback(event_type, reason);
+        };
+        jfs_common::decode_and_encode_hw(&path, pos_ms, width, hw_req, Some(&mut sink))
     })
     .await;
 
@@ -519,6 +613,7 @@ async fn handle_prefetch_frame(stream: &mut UnixStream, state: &Arc<State>) -> a
         path: req.path,
         pos_ms,
         width: req.width,
+        hw: req.hw,
     });
 
     Ok(())
@@ -598,7 +693,13 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         } else {
             log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame {} → decode", i);
             let p = path.clone();
-            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            let hw_req = resolve_hw_decode_request(state, &req.hw);
+            let r = tokio::task::spawn_blocking(move || {
+                let mut sink = |event_type: &str, reason: &str| {
+                    crate::generation_log::log_hw_fallback(event_type, reason);
+                };
+                jfs_common::decode_and_encode_hw(&p, pos_ms, 0, hw_req, Some(&mut sink))
+            }).await??;
             (image::load_from_memory(&r.webp)?, r.pts_ms)
         };
 
@@ -878,7 +979,13 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         } else {
             log::warn!("[jellyfin-suite-frame-forge] STITCH frame {} → decode", i);
             let p = path.clone();
-            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            let hw_req = resolve_hw_decode_request(state, &req.hw);
+            let r = tokio::task::spawn_blocking(move || {
+                let mut sink = |event_type: &str, reason: &str| {
+                    crate::generation_log::log_hw_fallback(event_type, reason);
+                };
+                jfs_common::decode_and_encode_hw(&p, pos_ms, 0, hw_req, Some(&mut sink))
+            }).await??;
             image::load_from_memory(&r.webp)?
         };
 
@@ -1449,7 +1556,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
             if pts < center_ms - before_ms { break; }
             let job = PrefetchJob {
                 item_id: req.item_id.clone(), path: req.path.clone(),
-                pos_ms: pts, width: req.width,
+                pos_ms: pts, width: req.width, hw: req.hw,
             };
             state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
             if state.prefetch_tx.try_send(job).is_err() {
@@ -1471,7 +1578,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
             if pts > upper { break; }
             let job = PrefetchJob {
                 item_id: req.item_id.clone(), path: req.path.clone(),
-                pos_ms: pts, width: req.width,
+                pos_ms: pts, width: req.width, hw: req.hw,
             };
             state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
             if state.prefetch_tx.try_send(job).is_err() {
@@ -1487,7 +1594,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
         let pts = frames[si].0;
         let job = PrefetchJob {
             item_id: req.item_id.clone(), path: req.path.clone(),
-            pos_ms: pts, width: req.width,
+            pos_ms: pts, width: req.width, hw: req.hw,
         };
         state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
         if state.prefetch_tx.try_send(job).is_err() {
@@ -1903,6 +2010,13 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
     stream.read_exact(&mut w_buf).await?;
     let width = read_u32(&w_buf);
 
+    let mut hw_buf = [0u8; 2];
+    stream.read_exact(&mut hw_buf).await?;
+    let hw = crate::protocol::HwDecodeFlags {
+        hw_decode_enabled: hw_buf[0] != 0,
+        device_strategy: crate::protocol::DeviceStrategy::from_u8(hw_buf[1]),
+    };
+
     let mut c_buf = [0u8; 4];
     stream.read_exact(&mut c_buf).await?;
     let count = read_u32(&c_buf) as usize;
@@ -1941,9 +2055,13 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
         let item_id_c = item_id.clone();
         let ram_state = state.clone();
 
+        let hw_req = resolve_hw_decode_request(state, &hw);
         let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
         let result = tokio::task::spawn_blocking(move || {
-            jfs_common::decode_and_encode(&path_c, pos_ms, width)
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path_c, pos_ms, width, hw_req, Some(&mut sink))
         }).await;
 
         match result {
@@ -1984,6 +2102,10 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let current_time_ms = req.current_time_ms;
     let include_current = req.include_current;
     let session_id = req.session_id;
+    // Resolved once for the whole session (not per-frame) — avoids one nvidia-smi/sysfs
+    // round-trip per frame when the "优先使用闲置资源" strategy is active; the chosen device
+    // stays fixed for every frame this single prefetch-range-stream call decodes.
+    let hw_req = resolve_hw_decode_request(state, &req.hw);
 
     let t0 = bench_now_ms();
     log::debug!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} session={session_id} abs={t0}", req.current_frame_idx);
@@ -2146,8 +2268,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     if let Some(anchor_pos) = anchor_miss_pos {
         let (anchor_fi_idx, anchor_pos_ms) = misses.remove(anchor_pos);
         let path_c = path.clone();
+        let hw_req_c = hw_req.clone();
         let anchor_result = tokio::task::spawn_blocking(move || {
-            jfs_common::decode_and_encode(&path_c, anchor_pos_ms, width)
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path_c, anchor_pos_ms, width, hw_req_c, Some(&mut sink))
         }).await;
         match anchor_result {
             Ok(Ok(r)) => {
@@ -2204,6 +2330,7 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
             let path_c   = path.clone();
             let sem_c    = Arc::clone(&state.frame_decode_sem);
             let cancel_c = Arc::clone(&state.cancel_flag);
+            let hw_req_c = hw_req.clone();
             handles.push((fi_idx, pos_ms, tokio::spawn(async move {
                 let _permit = sem_c.acquire_owned().await.map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
                 tokio::task::spawn_blocking(move || -> anyhow::Result<jfs_common::DecodeResult> {
@@ -2216,7 +2343,10 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
                     // grid cell stayed blank, reproducing only sometimes — consistent with a
                     // tolerance/timing-dependent miss, not a hard out-of-range position).
                     let mut found: Option<(Vec<u8>, Vec<u8>)> = None;
-                    jfs_common::decode_range(&path_c, &[(fi_idx, pos_ms)], width, cancel_c, |_fi, _pos, webp_thumb, webp_orig| {
+                    let mut sink = |event_type: &str, reason: &str| {
+                        crate::generation_log::log_hw_fallback(event_type, reason);
+                    };
+                    jfs_common::decode_range_hw(&path_c, &[(fi_idx, pos_ms)], width, cancel_c, hw_req_c, Some(&mut sink), |_fi, _pos, webp_thumb, webp_orig| {
                         found = Some((webp_thumb, webp_orig));
                         Ok(())
                     })?;

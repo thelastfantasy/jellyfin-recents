@@ -8,10 +8,12 @@ import {
   devicesQuery,
   downloadModelMutation,
   downloadOrtVersionMutation,
+  hwDecodeSettingsQuery,
   modelsQuery,
   openModelDownloadProgressStream,
   openOrtVersionDownloadProgressStream,
   ortVersionsQuery,
+  updateHwDecodeSettingsMutation,
 } from '../api/frameExportApi'
 import { exportTypeAtom, settingsAtom, updateSettings } from '../core/state'
 import { t } from '../lib/i18n'
@@ -41,6 +43,7 @@ export function AdvancedPanel() {
   const { data: devices, isLoading: devicesLoading } = useQuery({ ...devicesQuery(), enabled: open })
   const { data: modelList, isLoading: modelsLoading } = useQuery({ ...modelsQuery(), enabled: open })
   const { data: ortList } = useQuery({ ...ortVersionsQuery(), enabled: open })
+  const { data: hwDecode } = useQuery({ ...hwDecodeSettingsQuery(), enabled: open })
   const [versionOpen, setVersionOpen] = useState(false)
   const versionRef = useRef<HTMLDivElement>(null)
   const [deviceOpen, setDeviceOpen] = useState(false)
@@ -181,6 +184,18 @@ export function AdvancedPanel() {
       .catch((err: unknown) => setOrtDownloadError(err instanceof Error ? err.message : String(err)))
   }
 
+  // Optimistic update + server-response correction (contracts/rest-api.md §"前端调用点") — the
+  // server may degrade an unrecognised deviceStrategy to "performance", so the cache is always
+  // overwritten with whatever the PUT response actually says, not just the locally-intended value.
+  function updateHwDecode(patch: { enabled?: boolean; deviceStrategy?: string }) {
+    if (!hwDecode) return
+    const next = { ...hwDecode, ...patch }
+    queryClient.setQueryData(['hwDecodeSettings'], next)
+    updateHwDecodeSettingsMutation().mutationFn({ enabled: next.enabled, deviceStrategy: next.deviceStrategy })
+      .then(dto => queryClient.setQueryData(['hwDecodeSettings'], dto))
+      .catch(() => queryClient.invalidateQueries({ queryKey: ['hwDecodeSettings'] }))
+  }
+
   // AMD/Intel GPU 在当前实现里都没有真正跑起来的 EP（AMD 没有 ROCm 分支直接落到 CPU；Intel 的
   // OpenVINO 分支虽然写了，但 Linux 下非 NVIDIA 显卡现在下载的 ORT 包根本没编译 OpenVINO EP，
   // 同样落到 CPU——见 project_arc_a380_untestable 记忆），选了它们和选 CPU 没有实际区别，只会让
@@ -221,6 +236,37 @@ export function AdvancedPanel() {
         <div className="jfs-fe-advanced-body">
           <p className="jfs-fe-advanced-warning">{t('advanced.warning')}</p>
           <div className="jfs-fe-pbar nopad">
+            <div className="jfs-fe-pgroup">
+              <div className="jfs-fe-pgroup-body">
+                <label className="jfs-fe-lbl" style={{ gap: '5px', whiteSpace: 'nowrap' }}>
+                  <input
+                    type="checkbox"
+                    className="jfs-fe-toggle-chk"
+                    checked={hwDecode?.enabled ?? true}
+                    disabled={!hwDecode || hwDecode.supported === false}
+                    onChange={e => updateHwDecode({ enabled: e.target.checked })}
+                  />
+                  <span className="jfs-fe-toggle-track" />
+                </label>
+                {hwDecode?.multiDeviceAvailable && hwDecode.enabled && (
+                  <select
+                    className="jfs-fe-sel"
+                    value={hwDecode.deviceStrategy}
+                    onChange={e => updateHwDecode({ deviceStrategy: e.target.value })}
+                  >
+                    <option value="performance">{t('advanced.hwDecodeStrategyPerformance')}</option>
+                    <option value="idle-resource">{t('advanced.hwDecodeStrategyIdle')}</option>
+                  </select>
+                )}
+              </div>
+              <div className="jfs-fe-pgroup-label">{t('advanced.hwDecode')}</div>
+              {hwDecode?.supported === false && (
+                <div className="jfs-fe-muted" style={{ fontSize: '11px' }}>
+                  {t('advanced.hwDecodeUnsupported').replace('{reason}', hwDecode.unsupportedReason ?? '')}
+                </div>
+              )}
+            </div>
+            <div className="jfs-fe-pgroup-sep" />
             {!isAnim && (<>
               <div className="jfs-fe-pgroup" ref={deviceRef}>
                 <div className="jfs-fe-pgroup-body">

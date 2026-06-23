@@ -175,4 +175,11 @@ export interface Translations {
   enhancerIndexHtmlNote: string
   enhancerBrowserNote: string
   enhancerTrickplayLabel: string
+  enhancerHwDecodeLabel: string
+  enhancerHwDecodeHint: string
+  enhancerHwDecodeUnsupported: string
+  enhancerHwDecodeStrategyPerformance: string
+  enhancerHwDecodeStrategyPerformanceHint: string
+  enhancerHwDecodeStrategyIdle: string
+  enhancerHwDecodeStrategyIdleHint: string
 }

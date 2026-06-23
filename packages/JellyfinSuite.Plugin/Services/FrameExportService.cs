@@ -25,6 +25,22 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgDebugDump          = 0x1A;
     private const byte MsgUpscale             = 0x1B;
     private const byte MsgCancelUpscale      = 0x1C;
+    private const byte MsgHwDecodeCaps        = 0x1D;
+
+    /// <summary>
+    /// Reads the persisted hw-decode toggle/strategy (FR-005/FR-012) for the 2 trailing wire
+    /// bytes every modified request type appends — see contracts/socket-protocol.md §1.
+    /// `deviceStrategy`: 0 = performance, 1 = idle-resource; unknown config values degrade to 0
+    /// (data-model.md §1's validation rule), matching frame-forge's own degrade-don't-reject
+    /// philosophy for this field.
+    /// </summary>
+    private static (bool Enabled, byte DeviceStrategy) GetHwDecodeFlags()
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config == null) return (true, 0);
+        byte strategy = config.HwDecodeDeviceStrategy == "idle-resource" ? (byte)1 : (byte)0;
+        return (config.HwDecodeEnabled, strategy);
+    }
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -135,7 +151,7 @@ public sealed class FrameExportService : IDisposable
             if (_cudaRuntime?.ActiveLibDir is { Length: > 0 } cudaLibDir)
                 ldLibraryPath = $"{cudaLibDir}:{ldLibraryPath}";
             psi.Environment["LD_LIBRARY_PATH"] = ldLibraryPath;
-            psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug";
+            psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug,jfs_common=debug";
             // ORT_DYLIB_PATH tells the `load-dynamic` ort build which ORT shared library to load.
             // OrtVersionService sets this after scanning/downloading the active ORT version.
             var ortLibPath = _ortVersion?.ActiveOrtLibPath;
@@ -259,7 +275,9 @@ public sealed class FrameExportService : IDisposable
             // [4] path_len (u32 LE)
             // [N] file path (UTF-8)
             // [32] item_id (ASCII hex, no dashes)
-            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            // [1] hw_decode_enabled [1] device_strategy
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32 + 2];
             buf[0] = MsgSingleFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
@@ -267,6 +285,8 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
             itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
+            buf[21 + pathBytes.Length + 32] = hwEnabled ? (byte)1 : (byte)0;
+            buf[21 + pathBytes.Length + 32 + 1] = hwStrategy;
 
             try
             {
@@ -368,7 +388,8 @@ public sealed class FrameExportService : IDisposable
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
 
-            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32 + 2];
             buf[0] = MsgPrefetchFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
@@ -376,6 +397,8 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
             itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
+            buf[21 + pathBytes.Length + 32] = hwEnabled ? (byte)1 : (byte)0;
+            buf[21 + pathBytes.Length + 32 + 1] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -419,8 +442,9 @@ public sealed class FrameExportService : IDisposable
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before(8)] [after(8)] [include(1)] [width(4)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before(8)] [after(8)] [include(1)] [width(4)] [hw_decode_enabled(1)] [device_strategy(1)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4 + 2];
             var pos = 0;
             buf[pos++] = MsgPrefetchRange;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
@@ -430,7 +454,9 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), beforeSeconds); pos += 8;
             BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), afterSeconds); pos += 8;
             buf[pos++] = includeStart ? (byte)1 : (byte)0;
-            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -634,6 +660,11 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes((uint)presetBytes.Length), 0, 4);
         ms.Write(presetBytes, 0, presetBytes.Length);
 
+        // [hw_decode_enabled(1)] [device_strategy(1)] — trailing, see contracts/socket-protocol.md §1
+        var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+        ms.WriteByte(hwEnabled ? (byte)1 : (byte)0);
+        ms.WriteByte(hwStrategy);
+
         var reqBuf = ms.ToArray();
         try
         {
@@ -778,6 +809,13 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_h = 0
         ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
         ms.Write(BitConverter.GetBytes((uint)0), 0, 4);         // preset_len = 0 (stitch always uses original resolution)
+
+        // [hw_decode_enabled(1)] [device_strategy(1)] — animate-base trailing fields (read_stitch_req
+        // reads these as part of its `read_animate_req` base call, BEFORE the MSG_STITCH-specific
+        // trailing fields below), see contracts/socket-protocol.md §1.
+        var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+        ms.WriteByte(hwEnabled ? (byte)1 : (byte)0);
+        ms.WriteByte(hwStrategy);
 
         // MSG_STITCH trailing extension fields (spec 012):
         // [device_id_len(4 LE)][device_id(UTF-8)]  -- empty string = use default EP chain
@@ -1174,8 +1212,9 @@ public sealed class FrameExportService : IDisposable
             var afterMs  = (long)Math.Round(afterSeconds  * 1000);
             var sessionIdBytes = Encoding.UTF8.GetBytes(prefetchSessionId ?? "");
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)] [session_id_len(4)][session_id(N)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4 + 4 + sessionIdBytes.Length];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)] [session_id_len(4)][session_id(N)] [hw_decode_enabled(1)] [device_strategy(1)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4 + 4 + sessionIdBytes.Length + 2];
             var pos = 0;
             buf[pos++] = MsgPrefetchRangeStream;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
@@ -1188,7 +1227,9 @@ public sealed class FrameExportService : IDisposable
             buf[pos++] = (byte)(includeCurrentFrame ? 1 : 0);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)sessionIdBytes.Length); pos += 4;
-            sessionIdBytes.CopyTo(buf.AsSpan(pos));
+            sessionIdBytes.CopyTo(buf.AsSpan(pos)); pos += sessionIdBytes.Length;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -1241,15 +1282,18 @@ public sealed class FrameExportService : IDisposable
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
 
-            // Wire: [msg(1)] [path_len(4)][path(N)] [item_id(32)] [width(4)] [count(4)] [count × fi_idx(8)]
+            // Wire: [msg(1)] [path_len(4)][path(N)] [item_id(32)] [width(4)] [hw_decode_enabled(1)] [device_strategy(1)] [count(4)] [count × fi_idx(8)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
             var count = fiIndices.Length;
-            var buf = new byte[1 + 4 + pathBytes.Length + 32 + 4 + 4 + count * 8];
+            var buf = new byte[1 + 4 + pathBytes.Length + 32 + 4 + 2 + 4 + count * 8];
             var pos = 0;
             buf[pos++] = MsgPrefetchStream; // 0x18
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
             pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)count); pos += 4;
             foreach (var fi in fiIndices)
             {
@@ -1320,6 +1364,78 @@ public sealed class FrameExportService : IDisposable
                 _logger.LogWarning("[FrameExport] debug dump socket error: {Ex}", ex.Message);
                 InvalidateSocket(conn);
                 return "{}";
+            }
+        }
+        finally
+        {
+            _pool.Writer.TryWrite(conn);
+        }
+    }
+
+    /// <summary>
+    /// Queries the daemon's once-at-startup hw-decode capability probe (FR-010,
+    /// MSG_HW_DECODE_CAPS — see contracts/socket-protocol.md §2). Daemon-side this is a cache
+    /// read, not a fresh probe, so calling it on every modal open is cheap. Returns
+    /// `(supported: false, reason: "frame-forge daemon unavailable")` if the daemon itself can't
+    /// be reached — consistent with this whole feature's "never let hw-decode plumbing block the
+    /// UI" philosophy.
+    /// </summary>
+    public async Task<HwDecodeCapsResult> GetHwDecodeCapsAsync(CancellationToken ct = default)
+    {
+        if (!IsAvailable) return new HwDecodeCapsResult(false, null);
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
+            try
+            {
+                await sock.SendAsync(new byte[] { MsgHwDecodeCaps }, SocketFlags.None, ct).ConfigureAwait(false);
+
+                // [supported(1)] [vendor_count(1)] × vendor_count: [vendor(1)] [supported(1)] [reason_len(4)][reason(N)]
+                var head = new byte[2];
+                await ReceiveExactAsync(sock, head, 2, ct).ConfigureAwait(false);
+                var supported = head[0] != 0;
+                var vendorCount = head[1];
+
+                string? firstUnsupportedReason = null;
+                var supportedVendorCount = 0;
+                for (var i = 0; i < vendorCount; i++)
+                {
+                    var entry = new byte[6];
+                    await ReceiveExactAsync(sock, entry, 6, ct).ConfigureAwait(false);
+                    var vendorSupported = entry[1] != 0;
+                    var reasonLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(entry.AsSpan(2, 4));
+                    string reason = "";
+                    if (reasonLen > 0)
+                    {
+                        var reasonBuf = new byte[reasonLen];
+                        await ReceiveExactAsync(sock, reasonBuf, reasonLen, ct).ConfigureAwait(false);
+                        reason = Encoding.UTF8.GetString(reasonBuf);
+                    }
+                    if (vendorSupported)
+                    {
+                        supportedVendorCount++;
+                    }
+                    else if (firstUnsupportedReason == null && reason.Length > 0)
+                    {
+                        firstUnsupportedReason = reason;
+                    }
+                }
+
+                return new HwDecodeCapsResult(supported, supported ? null : firstUnsupportedReason, supportedVendorCount);
+            }
+            catch (OperationCanceledException)
+            {
+                InvalidateSocket(conn);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[FrameExport] hw_decode_caps socket error: {Ex}", ex.Message);
+                InvalidateSocket(conn);
+                return new HwDecodeCapsResult(false, "frame-forge daemon unavailable");
             }
         }
         finally
