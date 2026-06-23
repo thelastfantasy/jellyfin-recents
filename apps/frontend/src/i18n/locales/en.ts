@@ -163,4 +163,11 @@ export const en: Translations = {
   enhancerIndexHtmlNote: '⚠ Requires write access to index.html in the Jellyfin web directory. On startup the plugin injects a <script> tag into that file to load the enhancer bundle; re-injection is needed after Jellyfin upgrades.',
   enhancerBrowserNote: 'ℹ Some features are browser-limited: screenshot is unavailable on Firefox for Android (hardware decoding restriction); touch gestures (swipe brightness/volume, double-tap seek) are touch-device only.',
   enhancerTrickplayLabel: 'Show thumbnail preview while seeking',
+  enhancerHwDecodeLabel: 'Hardware decode',
+  enhancerHwDecodeHint: 'ℹ Only affects the frame-decode step of Workshop features (thumbnails, animated stitching, panorama stitching) — speeds them up via GPU decode; does not affect video playback itself.',
+  enhancerHwDecodeUnsupported: 'No supported hardware decoder detected on this server ({reason})',
+  enhancerHwDecodeStrategyPerformance: 'Performance',
+  enhancerHwDecodeStrategyPerformanceHint: 'Always uses the discrete GPU (usually faster); no practical difference when only one device is available.',
+  enhancerHwDecodeStrategyIdle: 'Prefer idle device',
+  enhancerHwDecodeStrategyIdleHint: "Checks each device's live load before every decode and picks whichever is more idle; falls back to Performance if load data isn't available.",
 }

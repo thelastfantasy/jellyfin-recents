@@ -89,3 +89,23 @@ export async function getGenerationLog(taskId: string): Promise<GenerationLogDto
   if (!res.ok) throw new Error(`generation-log fetch failed: ${res.status}`)
   return res.json() as Promise<GenerationLogDto>
 }
+
+export interface HwDecodeSettingsDto {
+  enabled: boolean
+  deviceStrategy: string
+  supported: boolean
+  unsupportedReason: string | null
+  multiDeviceAvailable: boolean
+}
+
+export async function getHwDecodeSettings(): Promise<HwDecodeSettingsDto> {
+  const res = await apiFetch(`${BASE}/HwDecodeSettings`)
+  if (!res.ok) throw new Error(`HwDecodeSettings fetch failed: ${res.status}`)
+  return res.json() as Promise<HwDecodeSettingsDto>
+}
+
+export async function setHwDecodeSettings(patch: { enabled: boolean; deviceStrategy: string }): Promise<HwDecodeSettingsDto> {
+  const res = await apiFetch(`${BASE}/HwDecodeSettings`, { method: 'PUT', body: JSON.stringify(patch) })
+  if (!res.ok) throw new Error(`HwDecodeSettings update failed: ${res.status}`)
+  return res.json() as Promise<HwDecodeSettingsDto>
+}

@@ -1007,6 +1007,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "enough",
+ "env_logger",
  "ffmpeg-next",
  "log",
  "serde",

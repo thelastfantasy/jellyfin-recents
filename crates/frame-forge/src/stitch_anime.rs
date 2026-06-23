@@ -252,7 +252,10 @@ fn find_vertical_seam(
 
 /// Stitch frames via Phase Correlation + graph cut seam blending.
 /// Low-quality pairs (scene cuts) are detected and handled gracefully.
-pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
+pub fn stitch_anime(
+    frames: &[DynamicImage],
+    progress: Option<&dyn Fn(usize, usize)>,
+) -> anyhow::Result<DynamicImage> {
     if frames.len() < 2 { anyhow::bail!("need at least 2 frames"); }
 
     let (fw, fh) = (frames[0].width() as i32, frames[0].height() as i32);
@@ -310,6 +313,7 @@ pub fn stitch_anime(frames: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
                 offsets.push(offsets[i - 1]);
             }
         }
+        if let Some(p) = progress { p(i, frames.len() - 1); }
     }
 
     let min_x = offsets.iter().map(|o| o.0).min().unwrap_or(0);
@@ -460,7 +464,7 @@ mod quality_tests {
         let (_, _, q_noise) = phase_correlate(&frame0, &frame1);
         assert!(q_noise < QUALITY_THRESHOLD, "noise frame must score below threshold (got {q_noise:.4})");
 
-        let stitched = stitch_anime(&[frame0, frame1, frame2]).expect("stitch_anime failed");
+        let stitched = stitch_anime(&[frame0, frame1, frame2], None).expect("stitch_anime failed");
         assert_eq!(stitched.height(), h, "frame 2's true offset from frame 0 must still be recovered \
             via backtrack — canvas should cover the full vertical extent, not collapse to frame 1's position");
     }
@@ -499,7 +503,7 @@ mod quality_tests {
         assert_eq!(dy, true_dy as i32, "phase_correlate dy must match the true vertical offset");
         assert!(q >= QUALITY_THRESHOLD, "quality {q:.4} too low for a clean synthetic pair");
 
-        let stitched = stitch_anime(&[top, bottom]).expect("stitch_anime failed");
+        let stitched = stitch_anime(&[top, bottom], None).expect("stitch_anime failed");
         assert_eq!((stitched.width(), stitched.height()), (w, h),
             "canvas must cover the full vertical extent, not just one input frame's height");
         assert_eq!(stitched.to_rgb8().into_raw(), reference.to_rgb8().into_raw(),
@@ -516,7 +520,7 @@ mod quality_tests {
         let t = load_thresholds();
         let a = image::open(dir.join("frame_0.png")).expect("frame_0.png missing");
         let b = image::open(dir.join("frame_1.png")).expect("frame_1.png missing");
-        let stitched = stitch_anime(&[a.clone(), b]).expect("stitch_anime failed");
+        let stitched = stitch_anime(&[a.clone(), b], None).expect("stitch_anime failed");
         let score = ssim(&stitched, &a);
         assert!(score >= t.ssim_min, "SSIM {:.3} < threshold {:.3}", score, t.ssim_min);
     }

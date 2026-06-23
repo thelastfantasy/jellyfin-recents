@@ -24,6 +24,8 @@ export * from './framePairDto';
 export * from './frameReference';
 export * from './generateRequest';
 export * from './generateResponse';
+export * from './hwDecodeSettingsDto';
+export * from './hwDecodeSettingsUpdateDto';
 export * from './jellyfinSuiteFrameInfoStreamParams';
 export * from './mediaInfoDto';
 export * from './modelDownloadProgressDto';

@@ -1,11 +1,12 @@
-import { queryOptions } from '@tanstack/react-query'
-
 import type {
   FallbackEventDto,
+  HwDecodeSettingsDto,
+  HwDecodeSettingsUpdateDto,
   UpscaleJobDto,
   UpscaleJobLogDto,
   UpscaleStartRequestDto,
 } from '@jfs/api-types'
+import { queryOptions } from '@tanstack/react-query'
 
 import type { FrameInfoEntry } from '../core/state'
 import { apiUrl, fetchApi } from '../lib/fetchApi'
@@ -345,3 +346,32 @@ export function openPrefetchRangeStream(
     })
   return abort
 }
+
+// ── Hardware decode settings (spec 013) ──────────────────────────────────────
+// DTOs come from @jfs/api-types — see JfsSpec.cs's AddFrameExportPaths.
+
+export type { HwDecodeSettingsDto, HwDecodeSettingsUpdateDto }
+
+export async function fetchHwDecodeSettings(): Promise<HwDecodeSettingsDto> {
+  const res = await fetchApi(suite.frameExport.hwDecodeSettings())
+  if (!res.ok) throw new Error(`hw decode settings fetch failed: ${res.status}`)
+  return res.json() as Promise<HwDecodeSettingsDto>
+}
+
+export const hwDecodeSettingsQuery = () =>
+  queryOptions({
+    queryKey: ['hwDecodeSettings'] as const,
+    queryFn: fetchHwDecodeSettings,
+    staleTime: 60 * 1000,
+  })
+
+export const updateHwDecodeSettingsMutation = () => ({
+  mutationKey: ['updateHwDecodeSettings'] as const,
+  mutationFn: async (body: HwDecodeSettingsUpdateDto): Promise<HwDecodeSettingsDto> => {
+    const res = await fetchApi(suite.frameExport.hwDecodeSettings(), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`hw decode settings update failed: ${res.status}`)
+    return res.json() as Promise<HwDecodeSettingsDto>
+  },
+})

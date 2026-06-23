@@ -861,6 +861,56 @@
         }
       }
     },
+    "/JellyfinSuite/FrameExport/HwDecodeSettings": {
+      "get": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_getHwDecodeSettings",
+        "summary": "Get Hw Decode Settings",
+        "responses": {
+          "200": {
+            "description": "Hardware decode settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HwDecodeSettingsDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "FrameExport"
+        ],
+        "operationId": "frameExport_setHwDecodeSettings",
+        "summary": "Set Hw Decode Settings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HwDecodeSettingsUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated hardware decode settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HwDecodeSettingsDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/JellyfinSuite/PosterSheet/{id}": {
       "post": {
         "tags": [
@@ -2137,6 +2187,50 @@
           "status",
           "createdAt",
           "upscaled"
+        ]
+      },
+      "HwDecodeSettingsDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "deviceStrategy": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "unsupportedReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "multiDeviceAvailable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "deviceStrategy",
+          "supported",
+          "multiDeviceAvailable"
+        ]
+      },
+      "HwDecodeSettingsUpdateDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "deviceStrategy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "deviceStrategy"
         ]
       },
       "FrameInfoDto": {

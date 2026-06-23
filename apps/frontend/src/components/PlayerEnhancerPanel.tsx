@@ -1,6 +1,11 @@
 import { useEffect, useRef,useState } from 'react'
 
 import {
+  getHwDecodeSettings,
+  type HwDecodeSettingsDto,
+  setHwDecodeSettings,
+} from '../api/frameExportQueueApi'
+import {
   getEnhancerStatus,
   getGestureConfig,
   injectEnhancer,
@@ -23,6 +28,7 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
   const [seekSeconds, setSeekSeconds] = useState(10)
   const [speedRate, setSpeedRate] = useState(2.0)
   const [trickplayEnabled, setTrickplayEnabled] = useState(true)
+  const [hwDecode, setHwDecode] = useState<HwDecodeSettingsDto | null>(null)
 
   // Keep refs so auto-save callbacks always see latest values
   const seekRef = useRef(seekSeconds)
@@ -43,7 +49,19 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
         setSpeedRate(cfg.speedRate ?? 2.0)
       })
       .catch(() => {})
+    getHwDecodeSettings()
+      .then(setHwDecode)
+      .catch(() => {})
   }, [])
+
+  function updateHwDecode(patch: Partial<{ enabled: boolean; deviceStrategy: string }>) {
+    if (!hwDecode) return
+    const next = { ...hwDecode, ...patch }
+    setHwDecode(next)
+    setHwDecodeSettings({ enabled: next.enabled, deviceStrategy: next.deviceStrategy })
+      .then(setHwDecode)
+      .catch(() => getHwDecodeSettings().then(setHwDecode).catch(() => {}))
+  }
 
   async function saveConfig(patch: Partial<{ trickplayEnabled: boolean; seekSeconds: number; speedRate: number }>) {
     const cfg = {
@@ -128,6 +146,39 @@ export function PlayerEnhancerPanel({ onClose }: Props) {
             />
           </div>
         </div>
+        <p className="jfs-enhancer-panel__hwdecode-note">{t.enhancerHwDecodeHint}</p>
+        <div className="jfs-enhancer-panel__seek-row">
+          <label className="jfs-enhancer-panel__seek-label">{t.enhancerHwDecodeLabel}</label>
+          <div className="jfs-enhancer-panel__seek-input-wrap">
+            <input
+              type="checkbox"
+              className="jfs-enhancer-panel__checkbox"
+              checked={hwDecode?.enabled ?? true}
+              disabled={!hwDecode || hwDecode.supported === false}
+              onChange={(e) => updateHwDecode({ enabled: (e.target as HTMLInputElement).checked })}
+            />
+            {hwDecode?.multiDeviceAvailable && hwDecode.enabled && (
+              <select
+                className="jfs-enhancer-panel__select"
+                value={hwDecode.deviceStrategy}
+                onChange={(e) => updateHwDecode({ deviceStrategy: (e.target as HTMLSelectElement).value })}
+              >
+                <option value="performance" title={t.enhancerHwDecodeStrategyPerformanceHint}>{t.enhancerHwDecodeStrategyPerformance}</option>
+                <option value="idle-resource" title={t.enhancerHwDecodeStrategyIdleHint}>{t.enhancerHwDecodeStrategyIdle}</option>
+              </select>
+            )}
+          </div>
+        </div>
+        {hwDecode?.multiDeviceAvailable && hwDecode.enabled && (
+          <p className="jfs-enhancer-panel__hwdecode-note">
+            {hwDecode.deviceStrategy === 'idle-resource' ? t.enhancerHwDecodeStrategyIdleHint : t.enhancerHwDecodeStrategyPerformanceHint}
+          </p>
+        )}
+        {hwDecode?.supported === false && (
+          <p className="jfs-enhancer-panel__hint">
+            {t.enhancerHwDecodeUnsupported.replace('{reason}', hwDecode.unsupportedReason ?? '')}
+          </p>
+        )}
         <div className="jfs-enhancer-panel__seek-row">
           <label className="jfs-enhancer-panel__seek-label">{t.enhancerSeekLabel}</label>
           <div className="jfs-enhancer-panel__seek-input-wrap">

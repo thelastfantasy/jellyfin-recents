@@ -323,6 +323,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/JellyfinSuite/FrameExport/HwDecodeSettings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Hw Decode Settings */
+        get: operations["frameExport_getHwDecodeSettings"];
+        /** Set Hw Decode Settings */
+        put: operations["frameExport_setHwDecodeSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/JellyfinSuite/PosterSheet/{id}": {
         parameters: {
             query?: never;
@@ -837,6 +855,17 @@ export interface components {
             /** Format: int64 */
             upscaledFileSize?: number | null;
             upscaledMimeType?: string | null;
+        };
+        HwDecodeSettingsDto: {
+            enabled: boolean;
+            deviceStrategy: string;
+            supported: boolean;
+            unsupportedReason?: string | null;
+            multiDeviceAvailable: boolean;
+        };
+        HwDecodeSettingsUpdateDto: {
+            enabled: boolean;
+            deviceStrategy: string;
         };
         FrameInfoDto: {
             /** Format: int64 */
@@ -1804,6 +1833,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QualityThresholds"];
+                };
+            };
+        };
+    };
+    frameExport_getHwDecodeSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hardware decode settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HwDecodeSettingsDto"];
+                };
+            };
+        };
+    };
+    frameExport_setHwDecodeSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HwDecodeSettingsUpdateDto"];
+            };
+        };
+        responses: {
+            /** @description Updated hardware decode settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HwDecodeSettingsDto"];
                 };
             };
         };

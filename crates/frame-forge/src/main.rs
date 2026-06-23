@@ -19,7 +19,10 @@ mod stitch_anime;
 mod tar_xz;
 #[cfg(feature = "opencv")]
 mod dl_match;
-#[cfg(feature = "opencv")]
+// Not opencv-gated like its siblings below: `FallbackEvent`/`log_hw_fallback` here are used
+// unconditionally by server.rs's hw-decode fallback paths, which have nothing to do with
+// opencv/dl_match — only this module's *other* consumers (GenerationLog writes in handle_stitch,
+// UpscaleLog in handle_upscale) are themselves opencv-gated at their call sites.
 mod generation_log;
 #[cfg(feature = "opencv")]
 mod gpu_compat;
@@ -344,5 +347,50 @@ mod tests {
             opencv::core::ocl::have_open_cl().unwrap_or(false),
             "Arc A380 OpenCL not detected — check /dev/dri passthrough and intel-opencl-icd"
         );
+    }
+
+    // ── test 5: hw-decode init failure falls back to software (T016, FR-003) ──
+
+    /// Pointing the hw-decode request at a render node that cannot possibly exist forces
+    /// `av_hwdevice_ctx_create` to fail every time (no real hardware needed — this exercises
+    /// the *init failure* path, not an actual hw decode). The call must still produce a
+    /// correct, identical-to-pure-software `DecodeResult` and must report exactly one
+    /// `hwdecode_init_failed` fallback event with a non-empty reason (FR-003/FR-011).
+    #[test]
+    fn hw_decode_init_failure_falls_back_to_software() {
+        use jfs_common::{decode_and_encode_hw, HwDecodeRequest, HwVendor};
+
+        let Some(video) = get_test_video() else { return; };
+        let _ = ffmpeg_next::init();
+        let all_pts = demux_pts(video);
+        assert!(!all_pts.is_empty(), "video has no frames");
+        let pos = all_pts[all_pts.len() / 2];
+
+        let software_only = decode_and_encode(video, pos, 160)
+            .unwrap_or_else(|e| panic!("baseline software decode @{pos}ms: {e}"));
+
+        let mut events: Vec<(String, String)> = Vec::new();
+        let hw_req = HwDecodeRequest {
+            vendor: HwVendor::Vaapi,
+            device: Some("/dev/dri/renderD_jfs_test_never_exists_9999".to_string()),
+        };
+        let mut sink = |event_type: &str, reason: &str| {
+            events.push((event_type.to_string(), reason.to_string()));
+        };
+        let with_hw_attempt = decode_and_encode_hw(video, pos, 160, Some(hw_req), Some(&mut sink))
+            .unwrap_or_else(|e| panic!("decode_and_encode_hw @{pos}ms should fall back, not fail: {e}"));
+
+        assert_eq!(
+            with_hw_attempt.pts_ms, software_only.pts_ms,
+            "hw-init-failure fallback must land on the same frame as pure software decode"
+        );
+        assert_eq!(
+            with_hw_attempt.webp, software_only.webp,
+            "hw-init-failure fallback must produce byte-identical WebP output to pure software decode"
+        );
+
+        assert_eq!(events.len(), 1, "expected exactly one fallback event, got {events:?}");
+        assert_eq!(events[0].0, "hwdecode_init_failed");
+        assert!(!events[0].1.is_empty(), "fallback reason must not be empty (FR-011)");
     }
 }

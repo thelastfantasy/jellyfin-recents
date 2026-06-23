@@ -1,10 +1,18 @@
 pub mod decoder;
 pub mod disk_cache;
 pub mod fps_utils;
+pub mod hwaccel;
 
-pub use decoder::{decode_all_frames_rgba, decode_and_encode, decode_range, DecodeResult, index_frames, demux_frames};
+pub use decoder::{
+    decode_all_frames_rgba, decode_and_encode, decode_and_encode_hw, decode_range,
+    decode_range_hw, DecodeResult, HwDecodeRequest, HwFallbackSink, index_frames, demux_frames,
+};
 pub use disk_cache::DiskCache;
 pub use fps_utils::compute_frame_idx;
+pub use hwaccel::{
+    detect_capabilities, first_render_node_for, query_load_percent, DecodeVendor,
+    HwDecodeCapabilities, HwVendor, VendorCapability,
+};
 
 use serde::Serialize;
 

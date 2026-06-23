@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using Jellyfin.Plugin.JellyfinSuite.Models;
 using Jellyfin.Plugin.JellyfinSuite.Services;
@@ -505,6 +506,53 @@ public class FrameExportController : ControllerBase
     {
         _thresholds = t;
         return Ok(_thresholds);
+    }
+
+    /// <summary>
+    /// GET /FrameExport/HwDecodeSettings — merges the persisted toggle/strategy with the daemon's
+    /// capability probe and device count (contracts/rest-api.md).
+    /// </summary>
+    [HttpGet("HwDecodeSettings")]
+    [ProducesResponseType(typeof(HwDecodeSettingsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<HwDecodeSettingsDto>> GetHwDecodeSettings(CancellationToken ct)
+    {
+        return Ok(await BuildHwDecodeSettingsDtoAsync(ct));
+    }
+
+    /// <summary>
+    /// PUT /FrameExport/HwDecodeSettings — persists the toggle/strategy to
+    /// <see cref="Plugin.Configuration"/> (unlike <see cref="_thresholds"/> above, this setting
+    /// must survive a restart — FR-007). An unrecognised <c>deviceStrategy</c> degrades to
+    /// <c>"performance"</c> rather than rejecting the request (data-model.md §1).
+    /// </summary>
+    [HttpPut("HwDecodeSettings")]
+    [ProducesResponseType(typeof(HwDecodeSettingsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<HwDecodeSettingsDto>> SetHwDecodeSettings(
+        [FromBody] HwDecodeSettingsUpdateDto dto, CancellationToken ct)
+    {
+        var config = Plugin.Instance!.Configuration;
+        config.HwDecodeEnabled = dto.Enabled;
+        config.HwDecodeDeviceStrategy = dto.DeviceStrategy is "performance" or "idle-resource"
+            ? dto.DeviceStrategy
+            : "performance";
+        Plugin.Instance!.SaveConfiguration();
+
+        return Ok(await BuildHwDecodeSettingsDtoAsync(ct));
+    }
+
+    private async Task<HwDecodeSettingsDto> BuildHwDecodeSettingsDtoAsync(CancellationToken ct)
+    {
+        var config = Plugin.Instance!.Configuration;
+        var caps = await _frameExport.GetHwDecodeCapsAsync(ct);
+
+        return new HwDecodeSettingsDto
+        {
+            Enabled = config.HwDecodeEnabled,
+            DeviceStrategy = config.HwDecodeDeviceStrategy,
+            Supported = caps.Supported,
+            UnsupportedReason = caps.UnsupportedReason,
+            MultiDeviceAvailable = caps.SupportedVendorCount > 1,
+        };
     }
 
     /// Returns true if the file path matches a known DRM-protected container format.

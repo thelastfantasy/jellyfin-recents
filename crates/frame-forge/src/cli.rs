@@ -276,15 +276,15 @@ fn stitch_routed(
     match class.category {
         SceneCategory::LiveAction => {
             log::info!("Auto-routing: liveaction (OpenCV Stitcher)");
-            stitch_liveaction::stitch_liveaction(images, per_req_matcher)
+            stitch_liveaction::stitch_liveaction(images, per_req_matcher, None)
         }
         SceneCategory::Landscape => {
             log::info!("Auto-routing: landscape (SIFT + Laplacian)");
-            stitch_landscape::stitch_landscape(images, per_req_matcher)
+            stitch_landscape::stitch_landscape(images, per_req_matcher, None)
         }
         SceneCategory::Anime => {
             log::info!("Auto-routing: anime (Phase Correlation)");
-            stitch_anime::stitch_anime(images)
+            stitch_anime::stitch_anime(images, None)
         }
     }
 }
@@ -292,7 +292,7 @@ fn stitch_routed(
 #[cfg(not(feature = "opencv"))]
 fn stitch_routed(_class: &scene_classifier::SceneClass, images: &[DynamicImage]) -> anyhow::Result<DynamicImage> {
     log::info!("Auto-routing: Phase Correlation (opencv unavailable)");
-    stitch_anime::stitch_anime(images)
+    stitch_anime::stitch_anime(images, None)
 }
 
 fn cmd_animate(args: &[String]) -> anyhow::Result<()> {
@@ -371,8 +371,8 @@ fn cmd_stitch_opencv(args: &[String], mode: &str) -> anyhow::Result<()> {
         let images = load_images(&input)?;
         log::info!("Stitching {} frames with {mode} algorithm...", images.len());
         let result = match mode {
-            "liveaction" => stitch_liveaction::stitch_liveaction(&images, None)?,
-            _ => stitch_landscape::stitch_landscape(&images, None)?,
+            "liveaction" => stitch_liveaction::stitch_liveaction(&images, None, None)?,
+            _ => stitch_landscape::stitch_landscape(&images, None, None)?,
         };
         result.save(output)?;
         log::info!("Saved: {output} ({}x{})", result.width(), result.height());

@@ -31,6 +31,7 @@ export const suite = {
     cancel:       (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Cancel/${encodeURIComponent(taskId)}`,
     result:       (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Result/${encodeURIComponent(taskId)}`,
     generationLog: (taskId: string) => `${base()}/JellyfinSuite/FrameExport/Result/${encodeURIComponent(taskId)}/generation-log.json`,
+    hwDecodeSettings: () => `${base()}/JellyfinSuite/FrameExport/HwDecodeSettings`,
   },
 
   playerEnhancer: {

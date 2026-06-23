@@ -90,6 +90,7 @@ public sealed class DeviceEnumerationService
                 continue;
 
             string? vendor = ReadSysfs(Path.Combine(deviceDir, "vendor"));
+            string? deviceIdRaw = ReadSysfs(Path.Combine(deviceDir, "device"));
             string? vramPath = Path.Combine(deviceDir, "mem_info_vram_total");
             long? vramBytes = ReadSysfsLong(vramPath);
 
@@ -144,7 +145,7 @@ public sealed class DeviceEnumerationService
                 DeviceType = "GPU",
                 Vendor = vendorName,
                 VramMb = vramBytes.HasValue ? vramBytes.Value / (1024 * 1024) : null,
-                IsIntegrated = false,
+                IsIntegrated = IsIntegratedGpu(vendorName, deviceIdRaw),
                 IsDefault = false,
                 ComputeCapability = computeCapability,
                 ModelName = modelName,
@@ -250,5 +251,47 @@ public sealed class DeviceEnumerationService
         "0x1002" => "AMD",
         "0x8086" => "Intel",
         _ => "Unknown",
+    };
+
+    /// <summary>Known integrated-GPU PCI device IDs for AMD APU graphics (Raphael/Phoenix/Rembrandt/
+    /// Cezanne/Renoir/Picasso/Raven generations) — GPU drivers don't expose an "integrated vs
+    /// discrete" flag directly, so this is the same PCI-device-ID-table approach industry tools like
+    /// switcheroo-control use (research.md §5). Treated as an allowlist (not a denylist) because
+    /// AMD's *discrete* Radeon lineup spans far more device IDs across generations than its much
+    /// smaller set of APU iGPU chips — enumerating the small side is more maintainable.</summary>
+    private static readonly HashSet<string> KnownAmdIntegratedDeviceIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "0x15d8", // Picasso (Ryzen 3000 APU)
+        "0x15dd", // Raven/Raven2 (Ryzen 2000/3000 APU)
+        "0x1636", // Renoir (Ryzen 4000 APU)
+        "0x1638", // Cezanne/Barcelo (Ryzen 5000 APU)
+        "0x1681", // Rembrandt (Ryzen 6000 mobile APU)
+        "0x15bf", // Phoenix (Ryzen 7040/8040 mobile APU)
+        "0x164e", // Raphael (Ryzen 7000 desktop APU iGPU — this project's own dev hardware)
+        "0x13c0", "0x13c1", // Phoenix2/Hawk Point variants
+    };
+
+    /// <summary>Intel discrete (Arc) GPU PCI device IDs fall in known generation-specific ranges;
+    /// every other Intel GPU device ID is an integrated GPU (Intel ships one on nearly every CPU
+    /// generation, so the integrated side is the far larger, less enumerable set here — the inverse
+    /// of the AMD case above).</summary>
+    private static bool IsIntelDiscrete(string? deviceId)
+    {
+        if (deviceId is null) return false;
+        var id = deviceId.Trim().ToLowerInvariant();
+        // DG2/Alchemist (Arc A-series, e.g. A380/A580/A770): 0x56xx.
+        // DG1: 0x4905/0x4906. Battlemage (Arc B-series): 0xe2xx.
+        return id.StartsWith("0x56", StringComparison.Ordinal)
+            || id is "0x4905" or "0x4906"
+            || id.StartsWith("0xe2", StringComparison.Ordinal);
+    }
+
+    private static bool IsIntegratedGpu(string vendorName, string? deviceIdRaw) => vendorName switch
+    {
+        // NVIDIA has no desktop/workstation integrated GPU product line — always discrete.
+        "NVIDIA" => false,
+        "AMD" => KnownAmdIntegratedDeviceIds.Contains(deviceIdRaw?.Trim() ?? ""),
+        "Intel" => !IsIntelDiscrete(deviceIdRaw),
+        _ => false,
     };
 }

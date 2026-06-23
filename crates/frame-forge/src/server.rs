@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
 
 use jfs_common::DiskCache;
 use jfs_common::FrameIndexEntry;
-use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, read_upscale_req, write_ack, write_jpeg_response};
+use crate::protocol::{read_msg_type, read_single_frame_req, read_prefetch_range_req, read_index_frames_stream_req, read_prefetch_range_stream_req, read_upscale_req, write_ack, write_jpeg_response, write_hw_decode_caps};
 use crate::quality::detect_quality;
 
 
@@ -30,6 +30,7 @@ const MSG_DEBUG_DUMP:           u8 = 0x1A;
 // this uses 0x1B instead to avoid colliding with that existing, functioning handler.
 const MSG_UPSCALE:             u8 = 0x1B;
 const MSG_CANCEL_UPSCALE:      u8 = 0x1C;
+const MSG_HW_DECODE_CAPS:      u8 = 0x1D;
 
 /// Real-ESRGAN tile size / overlap (px, in input-tile coordinates) for `upscale::upscale_image`.
 /// Not user-configurable (FR-024: scale/style are model-version choices, not runtime params).
@@ -83,6 +84,7 @@ struct PrefetchJob {
     path: PathBuf,
     pos_ms: i64,
     width: u32,
+    hw: crate::protocol::HwDecodeFlags,
 }
 
 /// Cached frame index per video path: (pts_ms, is_keyframe)[], fps_num, fps_den
@@ -159,10 +161,39 @@ impl FrameIndexManager {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+/// Default of 4 balances real wall-clock speedup against CPU oversubscription — each permit can
+/// cover one `decode_and_encode`/`decode_range` call, and each of those gives ffmpeg up to 2
+/// threads (see jfs_common::decoder), so 4 permits tops out around 8 decode threads.
+fn frame_decode_concurrency() -> usize {
+    std::env::var("FRAME_FORGE_DECODE_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &usize| n > 0)
+        .unwrap_or(4)
+}
+
 pub struct State {
     pub ram: Mutex<LruCache<RamKey, Vec<u8>>>,
     pub disk: Arc<DiskCache>,
+    /// Gates `handle_prefetch_range_stream` sessions to exactly one at a time — held for the
+    /// *whole* function, not just the decode step, because `cancel_flag`/`current_session_id`
+    /// below are single process-wide fields that assume only one such session can be mutating
+    /// them at once (a new session sets `cancel_flag` to interrupt whichever session currently
+    /// holds this permit, then waits for it to free up). Raising this past 1 would let multiple
+    /// sessions race on those shared fields — see `frame_decode_sem` below for the throttle that
+    /// actually governs how many frames decode in parallel.
     decode_sem: Arc<Semaphore>,
+    /// Bounds how many actual frame decodes run concurrently across the whole daemon — shared by
+    /// `handle_single_frame`, `handle_prefetch_stream`, and the per-chunk workers spawned inside
+    /// a single `handle_prefetch_range_stream` session's Pass 2 (decode_range's own internal walk
+    /// is single-threaded by design — see its doc comment — so splitting one session's misses
+    /// into `frame_decode_concurrency` independent decode_range chunks, each pulling a permit
+    /// here, is what actually makes one bulk "+5s" prefetch render multiple frames at once
+    /// instead of crawling out one at a time; 2026-06-23 production report). Deliberately a
+    /// separate semaphore from `decode_sem` above: this one is a pure CPU throttle with no
+    /// correctness coupling, safe to raise independently.
+    frame_decode_sem: Arc<Semaphore>,
+    frame_decode_concurrency: usize,
     cancel_flag: Arc<AtomicBool>,
     current_session_id: std::sync::Mutex<Option<String>>,
     prefetch_tx: mpsc::Sender<PrefetchJob>,
@@ -174,22 +205,29 @@ pub struct State {
     /// from being in flight at once. handle_upscale inserts on start and removes on exit (via
     /// CancelFlagGuard); MSG_CANCEL_UPSCALE just flips the flag if the entry is still present.
     upscale_cancel_flags: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Probed once at startup (FR-010, data-model.md §2's `Unknown → Detected` transition) and
+    /// never re-probed for the lifetime of this process — `MSG_HW_DECODE_CAPS` just reads this.
+    hw_caps: jfs_common::HwDecodeCapabilities,
 }
 
 impl State {
     pub fn new() -> Arc<Self> {
         let disk = DiskCache::new("jellyfin-suite-frame-forge");
         let (tx, rx) = mpsc::channel(PREFETCH_QUEUE_CAP);
+        let frame_decode_concurrency = frame_decode_concurrency();
         let state = Arc::new(Self {
             ram: Mutex::new(LruCache::new(NonZeroUsize::new(RAM_CACHE_CAP).unwrap())),
             disk,
             decode_sem: Arc::new(Semaphore::new(1)),
+            frame_decode_sem: Arc::new(Semaphore::new(frame_decode_concurrency)),
+            frame_decode_concurrency,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             current_session_id: std::sync::Mutex::new(None),
             prefetch_tx: tx,
             in_progress: Mutex::new(HashSet::new()),
             fi: FrameIndexManager::new(),
             upscale_cancel_flags: std::sync::Mutex::new(HashMap::new()),
+            hw_caps: jfs_common::detect_capabilities(),
         });
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..PREFETCH_WORKERS {
@@ -197,6 +235,76 @@ impl State {
         }
         state
     }
+}
+
+/// `Performance` strategy's static priority order (FR-012): NVIDIA dGPU > AMD > Intel. Real
+/// discrete/integrated PCI classification (`DeviceEnumerationService.cs`'s `IsIntegrated`) backs
+/// the modal's device list and `multiDeviceAvailable` flag on the C# side — this daemon-local
+/// fallback only ever sees one render node per vendor in practice (current dev/test hardware: one
+/// NVIDIA dGPU + one AMD iGPU; the eventual A380 target has just one Intel device), so vendor
+/// granularity is what's actually exercised, not per-render-node discrete/integrated nuance.
+fn pick_performance_vendor(supported: &[&jfs_common::VendorCapability]) -> Option<jfs_common::DecodeVendor> {
+    use jfs_common::DecodeVendor;
+    [DecodeVendor::Nvidia, DecodeVendor::Amd, DecodeVendor::Intel]
+        .into_iter()
+        .find(|v| supported.iter().any(|c| c.vendor == *v))
+}
+
+/// `IdleResource` strategy (FR-012): picks whichever supported vendor currently reports the
+/// lowest real-time utilization; `None` if none of the supported vendors could report a load
+/// value at all (always true when only Intel is supported, since `query_load_percent` has no
+/// signal for it) — the caller then degrades to `pick_performance_vendor`.
+fn pick_idle_resource_vendor(supported: &[&jfs_common::VendorCapability]) -> Option<jfs_common::DecodeVendor> {
+    use jfs_common::DecodeVendor;
+    [DecodeVendor::Nvidia, DecodeVendor::Amd, DecodeVendor::Intel]
+        .into_iter()
+        .filter(|v| supported.iter().any(|c| c.vendor == *v))
+        .filter_map(|v| jfs_common::query_load_percent(v).map(|load| (v, load)))
+        .min_by_key(|(_, load)| *load)
+        .map(|(v, _)| v)
+}
+
+fn decode_vendor_to_hw_vendor(v: jfs_common::DecodeVendor) -> jfs_common::HwVendor {
+    match v {
+        jfs_common::DecodeVendor::Nvidia => jfs_common::HwVendor::Cuda,
+        jfs_common::DecodeVendor::Amd | jfs_common::DecodeVendor::Intel => jfs_common::HwVendor::Vaapi,
+    }
+}
+
+/// Resolves the wire-level `{ hw_decode_enabled, device_strategy }` pair into an actual
+/// `HwDecodeRequest` for this one decode call, or `None` if hw decode should not be attempted at
+/// all (disabled, or no vendor in `state.hw_caps` came back supported at startup — FR-008: off
+/// means zero hw path attempts). Picking the concrete device happens here, in the daemon that
+/// actually executes the decode, rather than over the wire — `contracts/socket-protocol.md` §1
+/// intentionally only carries the *policy* (which of the two strategies), not a resolved device
+/// id.
+fn resolve_hw_decode_request(
+    state: &State,
+    hw: &crate::protocol::HwDecodeFlags,
+) -> Option<jfs_common::HwDecodeRequest> {
+    use crate::protocol::DeviceStrategy;
+
+    if !hw.hw_decode_enabled || !state.hw_caps.supported {
+        return None;
+    }
+    let supported: Vec<&jfs_common::VendorCapability> =
+        state.hw_caps.vendors.iter().filter(|v| v.supported).collect();
+    if supported.is_empty() {
+        return None;
+    }
+    let vendor = match hw.device_strategy {
+        DeviceStrategy::Performance => pick_performance_vendor(&supported),
+        DeviceStrategy::IdleResource => {
+            pick_idle_resource_vendor(&supported).or_else(|| pick_performance_vendor(&supported))
+        }
+    }?;
+    let device = match vendor {
+        jfs_common::DecodeVendor::Amd | jfs_common::DecodeVendor::Intel => {
+            jfs_common::first_render_node_for(vendor)
+        }
+        jfs_common::DecodeVendor::Nvidia => None,
+    };
+    Some(jfs_common::HwDecodeRequest { vendor: decode_vendor_to_hw_vendor(vendor), device })
 }
 
 fn compute_frame_idx(actual_pts_ms: i64, fps_num: i64, fps_den: i64) -> i64 {
@@ -264,8 +372,16 @@ async fn prefetch_worker(rx: Arc<Mutex<mpsc::Receiver<PrefetchJob>>>, state: Arc
         let width = job.width;
         let disk = state.disk.clone();
         let item_id = job.item_id.clone();
+        let hw_req = resolve_hw_decode_request(&state, &job.hw);
 
-        match tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&path, pos_ms, width)).await {
+        match tokio::task::spawn_blocking(move || {
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path, pos_ms, width, hw_req, Some(&mut sink))
+        })
+        .await
+        {
             Ok(Ok(r)) => {
                 let frame_idx = compute_frame_idx(r.pts_ms, r.fps_num, r.fps_den);
                 if !r.webp_orig.is_empty() {
@@ -373,6 +489,12 @@ pub async fn handle_conn(mut stream: UnixStream, state: Arc<State>) {
                     let _ = send_progress(&mut stream, "error", &e.to_string(), 0, 1, 0.0).await;
                 }
             }
+            MSG_HW_DECODE_CAPS => {
+                if let Err(e) = write_hw_decode_caps(&mut stream, &state.hw_caps).await {
+                    log::warn!("[jellyfin-suite-frame-forge] hw_decode_caps error: {e}");
+                    break;
+                }
+            }
             MSG_CANCEL_UPSCALE => {
                 // Fire-and-forget on this connection too: no response, and any read error here
                 // just ends this short-lived connection without affecting the job's own one.
@@ -423,9 +545,13 @@ async fn handle_single_frame(stream: &mut UnixStream, state: &Arc<State>) -> any
     let state_clone = state.clone();
     let ck = ram_key.clone();
 
-    let _permit = state.decode_sem.clone().acquire_owned().await?;
+    let hw_req = resolve_hw_decode_request(state, &req.hw);
+    let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
     let result = tokio::task::spawn_blocking(move || {
-        jfs_common::decode_and_encode(&path, pos_ms, width)
+        let mut sink = |event_type: &str, reason: &str| {
+            crate::generation_log::log_hw_fallback(event_type, reason);
+        };
+        jfs_common::decode_and_encode_hw(&path, pos_ms, width, hw_req, Some(&mut sink))
     })
     .await;
 
@@ -487,6 +613,7 @@ async fn handle_prefetch_frame(stream: &mut UnixStream, state: &Arc<State>) -> a
         path: req.path,
         pos_ms,
         width: req.width,
+        hw: req.hw,
     });
 
     Ok(())
@@ -566,7 +693,13 @@ async fn handle_animate(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::
         } else {
             log::warn!("[jellyfin-suite-frame-forge] ANIMATE frame {} → decode", i);
             let p = path.clone();
-            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            let hw_req = resolve_hw_decode_request(state, &req.hw);
+            let r = tokio::task::spawn_blocking(move || {
+                let mut sink = |event_type: &str, reason: &str| {
+                    crate::generation_log::log_hw_fallback(event_type, reason);
+                };
+                jfs_common::decode_and_encode_hw(&p, pos_ms, 0, hw_req, Some(&mut sink))
+            }).await??;
             (image::load_from_memory(&r.webp)?, r.pts_ms)
         };
 
@@ -846,7 +979,13 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         } else {
             log::warn!("[jellyfin-suite-frame-forge] STITCH frame {} → decode", i);
             let p = path.clone();
-            let r = tokio::task::spawn_blocking(move || jfs_common::decode_and_encode(&p, pos_ms, 0)).await??;
+            let hw_req = resolve_hw_decode_request(state, &req.hw);
+            let r = tokio::task::spawn_blocking(move || {
+                let mut sink = |event_type: &str, reason: &str| {
+                    crate::generation_log::log_hw_fallback(event_type, reason);
+                };
+                jfs_common::decode_and_encode_hw(&p, pos_ms, 0, hw_req, Some(&mut sink))
+            }).await??;
             image::load_from_memory(&r.webp)?
         };
 
@@ -982,15 +1121,18 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
     #[cfg(feature = "opencv")]
     crate::dl_match::reset_match_stats();
 
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(image::DynamicImage, u32, u64)> {
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+
+    let mut handle = tokio::task::spawn_blocking(move || -> anyhow::Result<(image::DynamicImage, u32, u64)> {
+        let report = |done: usize, total: usize| { let _ = progress_tx.send((done, total)); };
         let image = match class.category {
-            crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images),
+            crate::scene_classifier::SceneCategory::Anime => crate::stitch_anime::stitch_anime(&images, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher),
+            crate::scene_classifier::SceneCategory::Landscape => crate::stitch_landscape::stitch_landscape(&images, per_req_matcher, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(feature = "opencv")]
-            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher),
+            crate::scene_classifier::SceneCategory::LiveAction => crate::stitch_liveaction::stitch_liveaction(&images, per_req_matcher, Some(&report as &dyn Fn(usize, usize))),
             #[cfg(not(feature = "opencv"))]
-            _ => crate::stitch_anime::stitch_anime(&images),
+            _ => crate::stitch_anime::stitch_anime(&images, Some(&report as &dyn Fn(usize, usize))),
         }?;
         // Must read the thread-local stats here, on the same blocking-pool thread that
         // just ran the stitch — see dl_match::take_match_stats doc comment.
@@ -999,7 +1141,27 @@ async fn handle_stitch(stream: &mut UnixStream, state: &Arc<State>) -> anyhow::R
         #[cfg(not(feature = "opencv"))]
         let (match_count, inference_ms) = (0u32, 0u64);
         Ok((image, match_count, inference_ms))
-    }).await??;
+    });
+
+    // The blocking closure above reports per-frame-pair progress through `progress_tx` as the
+    // matching/stitching algorithm runs — previously this whole step reported a single static
+    // 40% at the start and jumped straight to 85% on completion no matter how long the actual
+    // (often multi-second) matching work took, making the modal's progress bar crawl through
+    // decode/dedup/classify (all sub-second, but each step still ticks the bar) then appear to
+    // freeze at 40% before snapping straight to done (2026-06-23 production report). Relay each
+    // increment to the client, scaled into the 40-85% band reserved for this phase, while still
+    // waiting for the blocking task itself to finish.
+    let result = loop {
+        tokio::select! {
+            Some((done, total)) = progress_rx.recv() => {
+                let frac = if total > 0 { done as f64 / total as f64 } else { 1.0 };
+                send_progress(stream, "running", "matching", done as u32, total as u32, 40.0 + frac * 45.0).await?;
+            }
+            res = &mut handle => {
+                break res??;
+            }
+        }
+    };
     let (result, dl_match_count, dl_inference_ms) = result;
 
     let total_ms = stitch_start.elapsed().as_millis() as u64;
@@ -1394,7 +1556,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
             if pts < center_ms - before_ms { break; }
             let job = PrefetchJob {
                 item_id: req.item_id.clone(), path: req.path.clone(),
-                pos_ms: pts, width: req.width,
+                pos_ms: pts, width: req.width, hw: req.hw,
             };
             state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
             if state.prefetch_tx.try_send(job).is_err() {
@@ -1416,7 +1578,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
             if pts > upper { break; }
             let job = PrefetchJob {
                 item_id: req.item_id.clone(), path: req.path.clone(),
-                pos_ms: pts, width: req.width,
+                pos_ms: pts, width: req.width, hw: req.hw,
             };
             state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
             if state.prefetch_tx.try_send(job).is_err() {
@@ -1432,7 +1594,7 @@ async fn handle_prefetch_range(stream: &mut UnixStream, state: &Arc<State>) -> a
         let pts = frames[si].0;
         let job = PrefetchJob {
             item_id: req.item_id.clone(), path: req.path.clone(),
-            pos_ms: pts, width: req.width,
+            pos_ms: pts, width: req.width, hw: req.hw,
         };
         state.in_progress.lock().await.insert((req.item_id.clone(), pts, req.width));
         if state.prefetch_tx.try_send(job).is_err() {
@@ -1848,6 +2010,13 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
     stream.read_exact(&mut w_buf).await?;
     let width = read_u32(&w_buf);
 
+    let mut hw_buf = [0u8; 2];
+    stream.read_exact(&mut hw_buf).await?;
+    let hw = crate::protocol::HwDecodeFlags {
+        hw_decode_enabled: hw_buf[0] != 0,
+        device_strategy: crate::protocol::DeviceStrategy::from_u8(hw_buf[1]),
+    };
+
     let mut c_buf = [0u8; 4];
     stream.read_exact(&mut c_buf).await?;
     let count = read_u32(&c_buf) as usize;
@@ -1886,9 +2055,13 @@ async fn handle_prefetch_stream(stream: &mut UnixStream, state: &Arc<State>) -> 
         let item_id_c = item_id.clone();
         let ram_state = state.clone();
 
-        let _permit = state.decode_sem.clone().acquire_owned().await?;
+        let hw_req = resolve_hw_decode_request(state, &hw);
+        let _permit = state.frame_decode_sem.clone().acquire_owned().await?;
         let result = tokio::task::spawn_blocking(move || {
-            jfs_common::decode_and_encode(&path_c, pos_ms, width)
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path_c, pos_ms, width, hw_req, Some(&mut sink))
         }).await;
 
         match result {
@@ -1929,6 +2102,10 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     let current_time_ms = req.current_time_ms;
     let include_current = req.include_current;
     let session_id = req.session_id;
+    // Resolved once for the whole session (not per-frame) — avoids one nvidia-smi/sysfs
+    // round-trip per frame when the "优先使用闲置资源" strategy is active; the chosen device
+    // stays fixed for every frame this single prefetch-range-stream call decodes.
+    let hw_req = resolve_hw_decode_request(state, &req.hw);
 
     let t0 = bench_now_ms();
     log::debug!("[bench][prefetch] recv current_time_ms={current_time_ms} current_frame_idx={} include_current={include_current} session={session_id} abs={t0}", req.current_frame_idx);
@@ -2091,8 +2268,12 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
     if let Some(anchor_pos) = anchor_miss_pos {
         let (anchor_fi_idx, anchor_pos_ms) = misses.remove(anchor_pos);
         let path_c = path.clone();
+        let hw_req_c = hw_req.clone();
         let anchor_result = tokio::task::spawn_blocking(move || {
-            jfs_common::decode_and_encode(&path_c, anchor_pos_ms, width)
+            let mut sink = |event_type: &str, reason: &str| {
+                crate::generation_log::log_hw_fallback(event_type, reason);
+            };
+            jfs_common::decode_and_encode_hw(&path_c, anchor_pos_ms, width, hw_req_c, Some(&mut sink))
         }).await;
         match anchor_result {
             Ok(Ok(r)) => {
@@ -2130,52 +2311,97 @@ async fn handle_prefetch_range_stream(stream: &mut UnixStream, state: &Arc<State
         }
     }
 
-    // Pass 2: sequential decode for remaining misses — one file open, progressive via channel.
-    // T012: channel carries write-success bool so receiver can accurately count failed frames.
-    if !misses.is_empty() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(bool, i64, i64, Vec<u8>, Vec<u8>)>(misses.len().max(1));
-        let path_c    = path.clone();
-        let item_id_c = item_id.clone();
-        let disk_c    = state.disk.clone();
-        let cancel_c  = Arc::clone(&state.cancel_flag);
+    // Pass 2: decode remaining misses in fixed-size batches (size = frame_decode_concurrency),
+    // processed strictly in batch order — batch 2 never starts until every frame in batch 1 has
+    // been decoded and reported. Within a batch, frames decode concurrently (independent
+    // decode_and_encode calls, each its own ffmpeg session/seek — trading away decode_range's
+    // single-seek efficiency on purpose). An earlier version split `misses` into N contiguous
+    // chunks running for the whole duration instead: visually that looked like the *last* chunk
+    // (the tail of the range) raced ahead of the others whenever it happened to land a smaller or
+    // cheaper-to-seek share of frames, reading as "loading back-to-front" — not what was wanted
+    // (2026-06-23: "我要的是1234,5678,9101112" — concurrent within a batch, but batches and the
+    // frames inside them still resolve in original front-to-back order). Awaiting each batch's
+    // handles in spawn order (not via a result channel raced across the whole set) is what makes
+    // this deterministic: frame_decode_sem still caps how many decode_and_encode calls run at
+    // once daemon-wide, independent of this batch's own size.
+    for batch in misses.chunks(state.frame_decode_concurrency.max(1)) {
+        let mut handles = Vec::with_capacity(batch.len());
+        for &(fi_idx, pos_ms) in batch {
+            let path_c   = path.clone();
+            let sem_c    = Arc::clone(&state.frame_decode_sem);
+            let cancel_c = Arc::clone(&state.cancel_flag);
+            let hw_req_c = hw_req.clone();
+            handles.push((fi_idx, pos_ms, tokio::spawn(async move {
+                let _permit = sem_c.acquire_owned().await.map_err(|e| anyhow::anyhow!("semaphore closed: {e}"))?;
+                tokio::task::spawn_blocking(move || -> anyhow::Result<jfs_common::DecodeResult> {
+                    // decode_range (not decode_and_encode) on purpose, even for a single target:
+                    // its ±2-frame PTS-proximity matching (BTreeMap range lookup, see its doc
+                    // comment) tolerates B-frame DTS/PTS reordering near the *end* of a decode
+                    // window — decode_and_encode's "best frame at-or-before target_pts" search has
+                    // no such tolerance, and intermittently missed exactly the last frame of a
+                    // batch when this loop briefly used it directly (2026-06-23 report: the final
+                    // grid cell stayed blank, reproducing only sometimes — consistent with a
+                    // tolerance/timing-dependent miss, not a hard out-of-range position).
+                    let mut found: Option<(Vec<u8>, Vec<u8>)> = None;
+                    let mut sink = |event_type: &str, reason: &str| {
+                        crate::generation_log::log_hw_fallback(event_type, reason);
+                    };
+                    jfs_common::decode_range_hw(&path_c, &[(fi_idx, pos_ms)], width, cancel_c, hw_req_c, Some(&mut sink), |_fi, _pos, webp_thumb, webp_orig| {
+                        found = Some((webp_thumb, webp_orig));
+                        Ok(())
+                    })?;
+                    let (webp, webp_orig) = found.ok_or_else(|| anyhow::anyhow!("no frame matched pos_ms={pos_ms}"))?;
+                    Ok(jfs_common::DecodeResult { webp, webp_orig, pts_ms: pos_ms, fps_num: 0, fps_den: 0 })
+                })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("decode task panicked: {e}"))?
+            })));
+        }
 
-        tokio::task::spawn_blocking(move || {
-            let result = jfs_common::decode_range(&path_c, &misses, width, cancel_c, |fi_idx, pos_ms, webp_thumb, webp_orig| {
-                if !webp_orig.is_empty() {
-                    disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, 0, &webp_orig);
+        for (fi_idx, pos_ms, handle) in handles {
+            let result = match handle.await {
+                Ok(joined) => joined,
+                Err(e) => Err(anyhow::anyhow!("decode task panicked: {e}")),
+            };
+            match result {
+                Ok(r) => {
+                    if !r.webp_orig.is_empty() {
+                        state.disk.write(&item_id, &path, fi_idx, pos_ms, 0, &r.webp_orig);
+                    }
+                    let wrote_thumb = state.disk.write(&item_id, &path, fi_idx, pos_ms, width, &r.webp);
+                    if wrote_thumb {
+                        decoded += 1;
+                        if !first_decode_logged {
+                            first_decode_logged = true;
+                            log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
+                        }
+                        {
+                            let mut ram = state.ram.lock().await;
+                            ram.put((path.clone(), pos_ms, 0), r.webp_orig);
+                            ram.put((path.clone(), pos_ms, width), r.webp);
+                        }
+                        let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
+                        let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
+                        let line = format!(
+                            "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
+                            thumb.to_string_lossy(), orig.to_string_lossy()
+                        );
+                        write_chunk(stream, line.as_bytes()).await?;
+                    } else {
+                        failed += 1;
+                        let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
+                        write_chunk(stream, line.as_bytes()).await?;
+                    }
                 }
-                let wrote_thumb = disk_c.write(&item_id_c, &path_c, fi_idx, pos_ms, width, &webp_thumb);
-                tx.blocking_send((wrote_thumb, fi_idx, pos_ms, webp_thumb, webp_orig))
-                    .map_err(|e| anyhow::anyhow!("channel closed: {e}"))
-            });
-            if let Err(e) = result {
-                log::warn!("[jellyfin-suite-frame-forge] sequential prefetch error: {e}");
+                Err(e) => {
+                    log::warn!("[jellyfin-suite-frame-forge] batch prefetch decode error fi={fi_idx}: {e}");
+                    failed += 1;
+                    let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
+                    write_chunk(stream, line.as_bytes()).await?;
+                }
             }
-        });
-
-        while let Some((wrote, fi_idx, pos_ms, webp_thumb, webp_orig)) = rx.recv().await {
-            if wrote {
-                decoded += 1;
-                if !first_decode_logged {
-                    first_decode_logged = true;
-                    log::debug!("[bench][prefetch] +{}ms FIRST_DECODE_READY fi={fi_idx} abs={}", bench_now_ms() - t0, bench_now_ms());
-                }
-                {
-                    let mut ram = state.ram.lock().await;
-                    ram.put((path.clone(), pos_ms, 0), webp_orig);
-                    ram.put((path.clone(), pos_ms, width), webp_thumb);
-                }
-                let thumb = state.disk.make_path(&item_id, fi_idx, pos_ms, width);
-                let orig  = state.disk.make_path(&item_id, fi_idx, pos_ms, 0);
-                let line = format!(
-                    "data: {{\"frameReady\":{fi_idx},\"thumbPath\":\"{}\",\"origPath\":\"{}\"}}\n\n",
-                    thumb.to_string_lossy(), orig.to_string_lossy()
-                );
-                write_chunk(stream, line.as_bytes()).await?;
-            } else {
-                failed += 1;
-                let line = format!("data: {{\"frameFailed\":{fi_idx}}}\n\n");
-                write_chunk(stream, line.as_bytes()).await?;
+            if state.cancel_flag.load(Ordering::SeqCst) {
+                return Ok(());
             }
         }
     }

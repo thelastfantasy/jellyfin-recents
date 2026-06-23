@@ -206,9 +206,11 @@ demo-stitch:
 test-rust:
 	cd crates/poster-gen && cargo test
 	@if [ "$$(uname -s 2>/dev/null)" = "Linux" ]; then \
+		(cd crates/jfs-common && cargo test) && \
 		(cd crates/seek-preview && cargo test) && \
 		(cd crates/frame-forge && cargo test); \
 	else \
+		echo "[jfs-common] Skipping tests (Linux-only)"; \
 		echo "[seek-preview] Skipping tests (Linux-only)"; \
 		echo "[frame-forge] Skipping tests (Linux-only)"; \
 	fi

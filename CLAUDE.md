@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/012-ort-gpu-model-ui/plan.md
+at specs/013-frame-decode-hw-accel/plan.md
 <!-- SPECKIT END -->
 
 ## 沟通语言（必须遵守）

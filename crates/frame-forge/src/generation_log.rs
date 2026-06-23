@@ -9,6 +9,34 @@ pub struct FallbackEvent {
     pub timestamp: String,
 }
 
+/// `event_type` values used for hardware-decode fallback events (FR-011, see
+/// data-model.md §4). Recorded both as structured `FallbackEvent`s (for tasks that
+/// already write a `generation-log.json`, e.g. stitch/upscale) and via `log::warn!`
+/// (for the plain decode paths — single-frame/prefetch — which have no per-task JSON
+/// log file today).
+pub const HWDECODE_INIT_FAILED: &str = "hwdecode_init_failed";
+pub const HWDECODE_RUNTIME_FALLBACK: &str = "hwdecode_runtime_fallback";
+
+impl FallbackEvent {
+    /// Builds a hw-decode fallback event with the current timestamp. `event_type`
+    /// should be one of `HWDECODE_INIT_FAILED`/`HWDECODE_RUNTIME_FALLBACK`.
+    pub fn hwdecode(event_type: &str, reason: &str) -> Self {
+        Self {
+            event_type: event_type.to_string(),
+            reason: reason.to_string(),
+            timestamp: now_timestamp(),
+        }
+    }
+}
+
+/// Logs a hw-decode fallback event via the daemon's normal logging (`log::warn!`) —
+/// used by decode paths (single-frame/prefetch family) that have no per-task
+/// `generation-log.json` to append a structured `FallbackEvent` to. Suitable as the
+/// `on_fallback` sink passed to `jfs_common::decode_range_hw`/`decode_and_encode_hw`.
+pub fn log_hw_fallback(event_type: &str, reason: &str) {
+    log::warn!("[hwdecode] {event_type}: {reason}");
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationLog {

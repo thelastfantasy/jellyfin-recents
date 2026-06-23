@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Channels;
 using Jellyfin.Plugin.JellyfinSuite.Models;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,22 @@ public sealed class FrameExportService : IDisposable
     private const byte MsgDebugDump          = 0x1A;
     private const byte MsgUpscale             = 0x1B;
     private const byte MsgCancelUpscale      = 0x1C;
+    private const byte MsgHwDecodeCaps        = 0x1D;
+
+    /// <summary>
+    /// Reads the persisted hw-decode toggle/strategy (FR-005/FR-012) for the 2 trailing wire
+    /// bytes every modified request type appends — see contracts/socket-protocol.md §1.
+    /// `deviceStrategy`: 0 = performance, 1 = idle-resource; unknown config values degrade to 0
+    /// (data-model.md §1's validation rule), matching frame-forge's own degrade-don't-reject
+    /// philosophy for this field.
+    /// </summary>
+    private static (bool Enabled, byte DeviceStrategy) GetHwDecodeFlags()
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config == null) return (true, 0);
+        byte strategy = config.HwDecodeDeviceStrategy == "idle-resource" ? (byte)1 : (byte)0;
+        return (config.HwDecodeEnabled, strategy);
+    }
 
     private readonly ILogger<FrameExportService> _logger;
     private readonly string _socketPath;
@@ -36,10 +53,20 @@ public sealed class FrameExportService : IDisposable
     private Process? _process;
     private readonly SemaphoreSlim _startLock = new(1, 1);
 
-    private Socket? _socket;
-    private readonly SemaphoreSlim _socketLock = new(1, 1);
-    // Serialises per-request send+receive so concurrent HTTP requests don't interleave on the socket.
-    private readonly SemaphoreSlim _requestLock = new(1, 1);
+    // A single shared socket + one global semaphore used to serialize every frame-forge request
+    // (thumbnails, prefetch, stitch, upscale, ...) onto it one at a time — correct (a Unix-socket
+    // byte stream can't have two requests' send+receive interleaved on it) but meant hundreds of
+    // thumbnail requests fired by expanding the frame grid by a few seconds queued up completely
+    // serially, even on cache hits, taking minutes (2026-06-22 production report). frame-forge's
+    // own accept loop (main.rs) already spawns one task per incoming Unix-socket connection, so
+    // it was never the daemon limiting concurrency — only this single-connection client design.
+    // Fix: a small pool of independent connections, each exclusively "checked out" via the
+    // channel for the duration of one request — channel ownership is itself the mutual exclusion,
+    // no per-connection lock needed on top of it.
+    private sealed class PooledConnection { public Socket? Socket; }
+    private const int DefaultPoolSize = 30;
+    private readonly PooledConnection[] _connections;
+    private readonly Channel<PooledConnection> _pool;
 
     private uint _nextRequestId;
     private bool _disposed;
@@ -60,6 +87,19 @@ public sealed class FrameExportService : IDisposable
         _socketPath = Path.Combine(appPaths.DataPath, "jfs-frame-forge.sock");
         var dir = Path.GetDirectoryName(typeof(FrameExportService).Assembly.Location)!;
         _binaryPath = Path.Combine(dir, BinaryName);
+
+        // JFS_FRAME_FORGE_POOL_SIZE: escape hatch to tune concurrency without a rebuild — e.g.
+        // turn it down on weaker hardware if a burst of cache-miss decodes ever saturates CPU.
+        var poolSize = int.TryParse(Environment.GetEnvironmentVariable("JFS_FRAME_FORGE_POOL_SIZE"), out var n) && n > 0
+            ? n : DefaultPoolSize;
+        _connections = new PooledConnection[poolSize];
+        _pool = Channel.CreateBounded<PooledConnection>(poolSize);
+        for (var i = 0; i < poolSize; i++)
+        {
+            var conn = new PooledConnection();
+            _connections[i] = conn;
+            _pool.Writer.TryWrite(conn);
+        }
     }
 
     /// <summary>
@@ -89,7 +129,7 @@ public sealed class FrameExportService : IDisposable
             if (_process is { HasExited: false })
                 return;
 
-            InvalidateSocket();
+            foreach (var conn in _connections) InvalidateSocket(conn);
             if (File.Exists(_socketPath)) File.Delete(_socketPath);
 
             try { File.SetUnixFileMode(_binaryPath, UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute); }
@@ -111,7 +151,7 @@ public sealed class FrameExportService : IDisposable
             if (_cudaRuntime?.ActiveLibDir is { Length: > 0 } cudaLibDir)
                 ldLibraryPath = $"{cudaLibDir}:{ldLibraryPath}";
             psi.Environment["LD_LIBRARY_PATH"] = ldLibraryPath;
-            psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug";
+            psi.Environment["RUST_LOG"] = Environment.GetEnvironmentVariable("RUST_LOG") ?? "frame_forge=debug,jfs_common=debug";
             // ORT_DYLIB_PATH tells the `load-dynamic` ort build which ORT shared library to load.
             // OrtVersionService sets this after scanning/downloading the active ORT version.
             var ortLibPath = _ortVersion?.ActiveOrtLibPath;
@@ -153,27 +193,21 @@ public sealed class FrameExportService : IDisposable
         }
     }
 
-    private async Task<Socket> GetSocketAsync(CancellationToken ct)
+    // No lock needed: the caller already holds exclusive use of `conn` (checked out of `_pool`),
+    // so only one caller at a time can ever be inside this method for a given connection.
+    private async Task<Socket> GetSocketAsync(PooledConnection conn, CancellationToken ct)
     {
-        await _socketLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (_socket?.Connected == true)
-                return _socket;
+        if (conn.Socket?.Connected == true)
+            return conn.Socket;
 
-            _socket?.Dispose();
-            _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            await _socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), ct).ConfigureAwait(false);
-            return _socket;
-        }
-        finally
-        {
-            _socketLock.Release();
-        }
+        conn.Socket?.Dispose();
+        conn.Socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        await conn.Socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), ct).ConfigureAwait(false);
+        return conn.Socket;
     }
 
     // Fast path: serve from the frame path index populated during PrefetchReady SSE.
-    // Bypasses _requestLock entirely — no glob, no socket, no lock contention.
+    // Bypasses the connection pool entirely — no glob, no socket, no lock contention.
     public static byte[]? TryGetCachedWebP(Guid itemId, long frameIdx, int width)
     {
         if (frameIdx < 0) return null;
@@ -225,10 +259,10 @@ public sealed class FrameExportService : IDisposable
 
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
 
             var requestId = Interlocked.Increment(ref _nextRequestId);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
@@ -241,7 +275,9 @@ public sealed class FrameExportService : IDisposable
             // [4] path_len (u32 LE)
             // [N] file path (UTF-8)
             // [32] item_id (ASCII hex, no dashes)
-            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            // [1] hw_decode_enabled [1] device_strategy
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32 + 2];
             buf[0] = MsgSingleFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
@@ -249,6 +285,8 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
             itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
+            buf[21 + pathBytes.Length + 32] = hwEnabled ? (byte)1 : (byte)0;
+            buf[21 + pathBytes.Length + 32 + 1] = hwStrategy;
 
             try
             {
@@ -279,26 +317,26 @@ public sealed class FrameExportService : IDisposable
             }
             catch (OperationCanceledException)
             {
-                InvalidateSocket();
+                InvalidateSocket(conn);
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning("[FrameExport] socket error — resetting: {Ex}", ex.Message);
-                InvalidateSocket();
+                InvalidateSocket(conn);
                 return (null, 0, 0);
             }
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
-    private void InvalidateSocket()
+    private static void InvalidateSocket(PooledConnection conn)
     {
-        try { _socket?.Dispose(); } catch { }
-        _socket = null;
+        try { conn.Socket?.Dispose(); } catch { }
+        conn.Socket = null;
     }
 
     /// <summary>Recovers a stitch task's diagnostics (model/EP used, GPU fallback events) when
@@ -342,15 +380,16 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var requestId = Interlocked.Increment(ref _nextRequestId);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
 
-            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32];
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 4 + 8 + 4 + 4 + pathBytes.Length + 32 + 2];
             buf[0] = MsgPrefetchFrame;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(1, 4), requestId);
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(5, 8), frameIdx);
@@ -358,6 +397,8 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(17, 4), (uint)pathBytes.Length);
             pathBytes.CopyTo(buf.AsSpan(21));
             itemIdBytes.CopyTo(buf.AsSpan(21 + pathBytes.Length));
+            buf[21 + pathBytes.Length + 32] = hwEnabled ? (byte)1 : (byte)0;
+            buf[21 + pathBytes.Length + 32 + 1] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -367,17 +408,17 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] prefetch socket error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -394,15 +435,16 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N"));
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before(8)] [after(8)] [include(1)] [width(4)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [start_idx(8)] [before(8)] [after(8)] [include(1)] [width(4)] [hw_decode_enabled(1)] [device_strategy(1)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 1 + 4 + 2];
             var pos = 0;
             buf[pos++] = MsgPrefetchRange;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
@@ -412,7 +454,9 @@ public sealed class FrameExportService : IDisposable
             BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), beforeSeconds); pos += 8;
             BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(pos, 8), afterSeconds); pos += 8;
             buf[pos++] = includeStart ? (byte)1 : (byte)0;
-            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -422,17 +466,17 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] prefetch_range socket error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -444,10 +488,10 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return Array.Empty<long>();
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var requestId = Interlocked.Increment(ref _nextRequestId);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
 
@@ -479,18 +523,18 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] list_cached socket error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
             return Array.Empty<long>();
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -504,10 +548,10 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return null;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
 
             // Wire: [msg_type(1)] [path_len(4)][path(N)]
@@ -547,18 +591,18 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] FrameIndexAsync error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
             return null;
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -575,7 +619,10 @@ public sealed class FrameExportService : IDisposable
     {
         if (!IsAvailable) return null;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
-        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+        var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
 
         var taskIdBytes = Encoding.UTF8.GetBytes(task.TaskId);
         var frameCount = filePaths.Count;
@@ -612,6 +659,11 @@ public sealed class FrameExportService : IDisposable
         var presetBytes = Encoding.UTF8.GetBytes(resolutionPreset);
         ms.Write(BitConverter.GetBytes((uint)presetBytes.Length), 0, 4);
         ms.Write(presetBytes, 0, presetBytes.Length);
+
+        // [hw_decode_enabled(1)] [device_strategy(1)] — trailing, see contracts/socket-protocol.md §1
+        var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+        ms.WriteByte(hwEnabled ? (byte)1 : (byte)0);
+        ms.WriteByte(hwStrategy);
 
         var reqBuf = ms.ToArray();
         try
@@ -676,10 +728,15 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         return null;
+        }
+        finally
+        {
+            _pool.Writer.TryWrite(conn);
+        }
     }
 
     public async Task<byte[]?> SubmitStitchTaskAsync(
@@ -699,7 +756,10 @@ public sealed class FrameExportService : IDisposable
     {
         if (!IsAvailable) return null;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
-        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+        var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
 
         // T014: an empty device_id is interpreted by the Rust daemon as "cpu:0" (see
         // dl_match::parse_device_id), not "best available GPU" — so the US1 MVP goal
@@ -749,6 +809,13 @@ public sealed class FrameExportService : IDisposable
         ms.Write(BitConverter.GetBytes(0f), 0, 4);              // crop_h = 0
         ms.Write(BitConverter.GetBytes(quality), 0, 4);         // quality
         ms.Write(BitConverter.GetBytes((uint)0), 0, 4);         // preset_len = 0 (stitch always uses original resolution)
+
+        // [hw_decode_enabled(1)] [device_strategy(1)] — animate-base trailing fields (read_stitch_req
+        // reads these as part of its `read_animate_req` base call, BEFORE the MSG_STITCH-specific
+        // trailing fields below), see contracts/socket-protocol.md §1.
+        var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+        ms.WriteByte(hwEnabled ? (byte)1 : (byte)0);
+        ms.WriteByte(hwStrategy);
 
         // MSG_STITCH trailing extension fields (spec 012):
         // [device_id_len(4 LE)][device_id(UTF-8)]  -- empty string = use default EP chain
@@ -873,10 +940,15 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         return null;
+        }
+        finally
+        {
+            _pool.Writer.TryWrite(conn);
+        }
     }
 
     /// <summary>
@@ -903,7 +975,10 @@ public sealed class FrameExportService : IDisposable
     {
         if (!IsAvailable) return null;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
-        var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+        var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
 
         if (string.IsNullOrEmpty(deviceId) && _deviceEnum != null)
         {
@@ -1003,16 +1078,22 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         return null;
+        }
+        finally
+        {
+            _pool.Writer.TryWrite(conn);
+        }
     }
 
     /// <summary>Tells frame-forge to cooperatively abandon a still-running upscale job (checked
     /// between tiles/faces — see server.rs CancelFlagGuard). Fire-and-forget on a brand-new
     /// connection: the connection actually running the job is busy inside SubmitUpscaleTaskAsync
-    /// and won't read another message until that call returns, so this can't reuse <see cref="_socket"/>.
+    /// and won't read another message until that call returns, so this can't reuse one of the
+    /// pooled connections — it must dial a fresh ad-hoc socket instead.
     /// Best-effort only — UpscaleService.Cancel already marks the job Cancelled independently of
     /// whether this succeeds; this just lets the daemon reclaim CPU/GPU sooner instead of running
     /// to completion or waiting for the EnsureStartedAsync timeout watchdog.</summary>
@@ -1051,10 +1132,10 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var requestId = Interlocked.Increment(ref _nextRequestId);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
@@ -1094,17 +1175,17 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] FrameIndexStreamAsync error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -1121,18 +1202,19 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
             var beforeMs = (long)Math.Round(beforeSeconds * 1000);
             var afterMs  = (long)Math.Round(afterSeconds  * 1000);
             var sessionIdBytes = Encoding.UTF8.GetBytes(prefetchSessionId ?? "");
 
-            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)] [session_id_len(4)][session_id(N)]
-            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4 + 4 + sessionIdBytes.Length];
+            // Wire: [msg(1)] [item_id(32)] [path_len(4)][path(N)] [current_time_ms(8)] [current_frame_idx(8)] [before_ms(8)] [after_ms(8)] [include_current(1)] [width(4)] [session_id_len(4)][session_id(N)] [hw_decode_enabled(1)] [device_strategy(1)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
+            var buf = new byte[1 + 32 + 4 + pathBytes.Length + 8 + 8 + 8 + 8 + 1 + 4 + 4 + sessionIdBytes.Length + 2];
             var pos = 0;
             buf[pos++] = MsgPrefetchRangeStream;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
@@ -1145,7 +1227,9 @@ public sealed class FrameExportService : IDisposable
             buf[pos++] = (byte)(includeCurrentFrame ? 1 : 0);
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)sessionIdBytes.Length); pos += 4;
-            sessionIdBytes.CopyTo(buf.AsSpan(pos));
+            sessionIdBytes.CopyTo(buf.AsSpan(pos)); pos += sessionIdBytes.Length;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
 
             await sock.SendAsync(buf, SocketFlags.None, ct).ConfigureAwait(false);
 
@@ -1166,17 +1250,17 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] PrefetchRangeStreamAsync error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -1191,22 +1275,25 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return;
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             var pathBytes = Encoding.UTF8.GetBytes(filePath);
             var itemIdBytes = Encoding.ASCII.GetBytes(itemId.ToString("N")); // 32 bytes
 
-            // Wire: [msg(1)] [path_len(4)][path(N)] [item_id(32)] [width(4)] [count(4)] [count × fi_idx(8)]
+            // Wire: [msg(1)] [path_len(4)][path(N)] [item_id(32)] [width(4)] [hw_decode_enabled(1)] [device_strategy(1)] [count(4)] [count × fi_idx(8)]
+            var (hwEnabled, hwStrategy) = GetHwDecodeFlags();
             var count = fiIndices.Length;
-            var buf = new byte[1 + 4 + pathBytes.Length + 32 + 4 + 4 + count * 8];
+            var buf = new byte[1 + 4 + pathBytes.Length + 32 + 4 + 2 + 4 + count * 8];
             var pos = 0;
             buf[pos++] = MsgPrefetchStream; // 0x18
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)pathBytes.Length); pos += 4;
             pathBytes.CopyTo(buf.AsSpan(pos)); pos += pathBytes.Length;
             itemIdBytes.CopyTo(buf.AsSpan(pos, 32)); pos += 32;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)width); pos += 4;
+            buf[pos++] = hwEnabled ? (byte)1 : (byte)0;
+            buf[pos++] = hwStrategy;
             BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), (uint)count); pos += 4;
             foreach (var fi in fiIndices)
             {
@@ -1228,17 +1315,17 @@ public sealed class FrameExportService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            InvalidateSocket();
+            InvalidateSocket(conn);
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[FrameExport] PrefetchStreamAsync error: {Ex}", ex.Message);
-            InvalidateSocket();
+            InvalidateSocket(conn);
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -1251,10 +1338,10 @@ public sealed class FrameExportService : IDisposable
         if (!IsAvailable) return "{}";
         await EnsureStartedAsync(ct).ConfigureAwait(false);
 
-        await _requestLock.WaitAsync(ct).ConfigureAwait(false);
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
         try
         {
-            var sock = await GetSocketAsync(ct).ConfigureAwait(false);
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
             try
             {
                 await sock.SendAsync(new byte[] { MsgDebugDump }, SocketFlags.None, ct).ConfigureAwait(false);
@@ -1269,19 +1356,91 @@ public sealed class FrameExportService : IDisposable
             }
             catch (OperationCanceledException)
             {
-                InvalidateSocket();
+                InvalidateSocket(conn);
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning("[FrameExport] debug dump socket error: {Ex}", ex.Message);
-                InvalidateSocket();
+                InvalidateSocket(conn);
                 return "{}";
             }
         }
         finally
         {
-            _requestLock.Release();
+            _pool.Writer.TryWrite(conn);
+        }
+    }
+
+    /// <summary>
+    /// Queries the daemon's once-at-startup hw-decode capability probe (FR-010,
+    /// MSG_HW_DECODE_CAPS — see contracts/socket-protocol.md §2). Daemon-side this is a cache
+    /// read, not a fresh probe, so calling it on every modal open is cheap. Returns
+    /// `(supported: false, reason: "frame-forge daemon unavailable")` if the daemon itself can't
+    /// be reached — consistent with this whole feature's "never let hw-decode plumbing block the
+    /// UI" philosophy.
+    /// </summary>
+    public async Task<HwDecodeCapsResult> GetHwDecodeCapsAsync(CancellationToken ct = default)
+    {
+        if (!IsAvailable) return new HwDecodeCapsResult(false, null);
+        await EnsureStartedAsync(ct).ConfigureAwait(false);
+
+        var conn = await _pool.Reader.ReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sock = await GetSocketAsync(conn, ct).ConfigureAwait(false);
+            try
+            {
+                await sock.SendAsync(new byte[] { MsgHwDecodeCaps }, SocketFlags.None, ct).ConfigureAwait(false);
+
+                // [supported(1)] [vendor_count(1)] × vendor_count: [vendor(1)] [supported(1)] [reason_len(4)][reason(N)]
+                var head = new byte[2];
+                await ReceiveExactAsync(sock, head, 2, ct).ConfigureAwait(false);
+                var supported = head[0] != 0;
+                var vendorCount = head[1];
+
+                string? firstUnsupportedReason = null;
+                var supportedVendorCount = 0;
+                for (var i = 0; i < vendorCount; i++)
+                {
+                    var entry = new byte[6];
+                    await ReceiveExactAsync(sock, entry, 6, ct).ConfigureAwait(false);
+                    var vendorSupported = entry[1] != 0;
+                    var reasonLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(entry.AsSpan(2, 4));
+                    string reason = "";
+                    if (reasonLen > 0)
+                    {
+                        var reasonBuf = new byte[reasonLen];
+                        await ReceiveExactAsync(sock, reasonBuf, reasonLen, ct).ConfigureAwait(false);
+                        reason = Encoding.UTF8.GetString(reasonBuf);
+                    }
+                    if (vendorSupported)
+                    {
+                        supportedVendorCount++;
+                    }
+                    else if (firstUnsupportedReason == null && reason.Length > 0)
+                    {
+                        firstUnsupportedReason = reason;
+                    }
+                }
+
+                return new HwDecodeCapsResult(supported, supported ? null : firstUnsupportedReason, supportedVendorCount);
+            }
+            catch (OperationCanceledException)
+            {
+                InvalidateSocket(conn);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[FrameExport] hw_decode_caps socket error: {Ex}", ex.Message);
+                InvalidateSocket(conn);
+                return new HwDecodeCapsResult(false, "frame-forge daemon unavailable");
+            }
+        }
+        finally
+        {
+            _pool.Writer.TryWrite(conn);
         }
     }
 
@@ -1298,7 +1457,7 @@ public sealed class FrameExportService : IDisposable
             _process.Kill();
             _process.WaitForExit(3000);
         }
-        InvalidateSocket();
+        foreach (var conn in _connections) InvalidateSocket(conn);
     }
 
     public void Dispose()
@@ -1306,10 +1465,8 @@ public sealed class FrameExportService : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _socket?.Dispose();
+        foreach (var conn in _connections) { try { conn.Socket?.Dispose(); } catch { } }
         _startLock.Dispose();
-        _socketLock.Dispose();
-        _requestLock.Dispose();
 
         if (_process is { HasExited: false })
         {

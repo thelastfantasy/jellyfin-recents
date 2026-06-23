@@ -791,34 +791,28 @@ pub fn build_ep_session(
                 }
             }
         }
-        // Intel CPU/GPU/NPU (e.g. Arc A-series). UNTESTED against real Intel GPU hardware —
-        // written symmetrically to the cuda/directml branches above, but only verified to
-        // compile; no Arc/NPU device was available to confirm `OpenVINOExecutionProvider`
-        // actually engages the GPU rather than its own internal CPU fallback. Before this
-        // arm existed, device_id="openvino:*" silently fell through to the `_` branch below
-        // (CPU, with an *empty* fallback_events — no warning at all, worse than this arm's
-        // explicit FallbackEvent on failure).
+        // Intel CPU/GPU/NPU (e.g. Arc A-series). CONFIRMED BROKEN on real hardware (Arc A380,
+        // 2026-06-22 production incident): `OpenVINOExecutionProvider::default().with_device_type
+        // ("GPU")` + `commit_from_file` *succeeds* — session construction returns Ok, so the
+        // `run_with_ep_timeout` wrapped around just the GPU arm never sees a problem — but the
+        // first actual `session.run()` afterward never completes (zero inference progress for
+        // 5+ minutes, only stopped by the separate UPSCALE stall-watchdog in server.rs aborting
+        // the whole daemon process). A hang during `.run()`, not EP init, so no amount of
+        // wrapping the construction call in a tighter timeout would have caught it. Until a real
+        // Arc/NPU device confirms the GPU EP actually completes inference (not just initializes),
+        // skip straight to CPU — same as the AMD/ROCm catch-all below already does.
         "openvino" => {
+            log::warn!(
+                "[dl_match] OpenVINO GPU EP for {device_id} skipped (confirmed to hang during \
+                 inference on real hardware, not just untested) — using CPU"
+            );
             let path_buf = path.to_path_buf();
-            let gpu = run_with_ep_timeout(timeout_secs, "openvino", move || -> Option<Session> {
-                use ort::execution_providers::OpenVINOExecutionProvider;
-                Session::builder().ok()
-                    .and_then(|b| b.with_execution_providers([OpenVINOExecutionProvider::default().with_device_type("GPU").build()]).ok())
-                    .and_then(|mut b| b.commit_from_file(&path_buf).ok())
-            });
-            match gpu {
-                Some(s) => Ok((s, vec![])),
-                None => {
-                    log::warn!("[dl_match] OpenVINO EP unavailable for {device_id}, falling back to CPU");
-                    let path_buf = path.to_path_buf();
-                    let cpu = run_with_ep_timeout(timeout_secs, "cpu-fallback", move || make_cpu_session(&path_buf));
-                    Ok((cpu?, vec![crate::generation_log::FallbackEvent {
-                        event_type: "GPU→CPU".to_string(),
-                        reason: "OpenVINO EP init failed".to_string(),
-                        timestamp: crate::generation_log::now_timestamp(),
-                    }]))
-                }
-            }
+            let cpu = run_with_ep_timeout(timeout_secs, "cpu-fallback", move || make_cpu_session(&path_buf));
+            Ok((cpu?, vec![crate::generation_log::FallbackEvent {
+                event_type: "GPU→CPU".to_string(),
+                reason: "OpenVINO GPU EP confirmed to hang during inference on real hardware".to_string(),
+                timestamp: crate::generation_log::now_timestamp(),
+            }]))
         }
         _ => {
             let path_buf = path.to_path_buf();
